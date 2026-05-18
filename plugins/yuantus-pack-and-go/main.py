@@ -256,6 +256,18 @@ class PackAndGoRequest(BaseModel):
         default=None, description="Flat BOM column ordering/selection for CSV"
     )
     async_flag: bool = Field(default=False, alias="async")
+    require_locked_versions: bool = Field(
+        default=False,
+        description=(
+            "When True, the plugin enforces source-item version-lock via "
+            "the merged version-lock contracts; HTTP 409 if any source "
+            "item is unlocked or mismatched. `stale` (owned + non-current) "
+            "does NOT block. When False (default), no enforcement is "
+            "performed; the manifest still carries `version_lock_summary` "
+            "for report-only inspection (one indexed `ItemVersion` lookup "
+            "per export). Default-OFF never raises."
+        ),
+    )
 
 
 class PackAndGoJobResponse(BaseModel):
@@ -293,6 +305,37 @@ class PackAndGoResult:
     manifest: Dict[str, Any]
     file_count: int
     total_bytes: int
+
+
+class BundleVersionLockError(Exception):
+    """Raised inside ``build_pack_and_go_package`` when
+    ``require_locked_versions=True`` and the bundle is NOT fully
+    version-locked.
+
+    Intentionally **not** a ``ValueError`` subclass — the existing sync
+    route maps ``ValueError`` to HTTP 404, and we must surface this as
+    HTTP 409 with machine-readable id lists. The route catches this
+    class before the generic ``except ValueError`` block.
+
+    ``stale`` items are never carried here — per the merged
+    ``evaluate_bundle_version_locks`` semantics they count as locked
+    and never fail the gate.
+    """
+
+    def __init__(
+        self,
+        *,
+        unlocked: Sequence[str],
+        mismatched: Sequence[str],
+    ) -> None:
+        self.unlocked: List[str] = list(unlocked)
+        self.mismatched: List[str] = list(mismatched)
+        message = (
+            "bundle has version-lock violations: "
+            f"{len(self.unlocked)} unlocked (ids={self.unlocked}) + "
+            f"{len(self.mismatched)} mismatched (ids={self.mismatched})"
+        )
+        super().__init__(message)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -932,6 +975,7 @@ def _build_cache_payload(
     blocked_states: Optional[Sequence[str]],
     allowed_extensions: Optional[Sequence[str]],
     blocked_extensions: Optional[Sequence[str]],
+    require_locked_versions: bool = False,
 ) -> Dict[str, Any]:
     return {
         "item_id": item_id,
@@ -965,6 +1009,7 @@ def _build_cache_payload(
         "blocked_states": _sorted_values(blocked_states),
         "allowed_extensions": _sorted_values(allowed_extensions),
         "blocked_extensions": _sorted_values(blocked_extensions),
+        "require_locked_versions": bool(require_locked_versions),
     }
 
 
@@ -975,6 +1020,109 @@ def _load_cached_manifest(zip_path: Path) -> Optional[Dict[str, Any]]:
                 return json.loads(handle.read().decode("utf-8"))
     except Exception:
         return None
+
+
+def _evaluate_bundle_version_lock(
+    session: Any,
+    *,
+    file_links: Sequence[Dict[str, Any]],
+    require_locked_versions: bool = False,
+) -> Any:
+    """Evaluate this bundle's source-item version-lock state — pure
+    composition over the merged 3a resolver and the merged
+    `evaluate_bundle_version_locks` (#570 / #588).
+
+    Dedupes by source ``item_id`` (one descriptor per source item,
+    even if multiple files come from it). Always returns a
+    ``BundleLockReport`` so the caller can write
+    ``version_lock_summary`` to the manifest. Raises
+    ``BundleVersionLockError`` ONLY when
+    ``require_locked_versions=True`` and the report is not ``ok`` —
+    stale items count as locked and never fail the gate (matches the
+    merged contract).
+    """
+
+    from yuantus.meta_engine.services.pack_and_go_db_resolver_contract import (
+        ItemVersionRow,
+        WorkorderDocLinkRow,
+        resolve_bundle_document_descriptors,
+    )
+    from yuantus.meta_engine.services.pack_and_go_version_lock_contract import (
+        evaluate_bundle_version_locks,
+    )
+    from yuantus.meta_engine.version.models import ItemVersion
+
+    version_lock_pairs: List[
+        Tuple[WorkorderDocLinkRow, Optional[ItemVersionRow]]
+    ] = []
+    seen_source_item_ids: set[str] = set()
+    version_ids_needed = {
+        str(link["source_version_id"])
+        for link in file_links
+        if link.get("source_version_id")
+    }
+    version_row_lookup: Dict[str, Any] = {}
+    if version_ids_needed:
+        loaded_versions = (
+            session.query(ItemVersion)
+            .filter(ItemVersion.id.in_(version_ids_needed))
+            .all()
+        )
+        version_row_lookup = {str(v.id): v for v in loaded_versions}
+    for link in file_links:
+        link_item_id = link.get("item_id")
+        if not link_item_id or link_item_id in seen_source_item_ids:
+            continue
+        seen_source_item_ids.add(link_item_id)
+        source_version_id = link.get("source_version_id")
+        link_row = WorkorderDocLinkRow(
+            document_item_id=str(link_item_id),
+            document_version_id=(
+                str(source_version_id) if source_version_id else None
+            ),
+        )
+        version_row: Optional[ItemVersionRow] = None
+        if source_version_id:
+            loaded = version_row_lookup.get(str(source_version_id))
+            if loaded is not None:
+                version_row = ItemVersionRow(
+                    id=str(loaded.id),
+                    item_id=str(loaded.item_id),
+                    is_current=loaded.is_current,
+                )
+        version_lock_pairs.append((link_row, version_row))
+    descriptors = resolve_bundle_document_descriptors(version_lock_pairs)
+    report = evaluate_bundle_version_locks(descriptors)
+    if require_locked_versions and not report.ok:
+        raise BundleVersionLockError(
+            unlocked=report.unlocked,
+            mismatched=report.mismatched,
+        )
+    return report
+
+
+def _version_lock_link_for_included_file(
+    link: Dict[str, Any],
+    source_item: Any,
+) -> Dict[str, Any]:
+    """Build the version-lock input for a file that will enter the bundle.
+
+    Item-scope pack-and-go links do not carry a version id from the
+    ItemFile row, but the final manifest backfills the source item's
+    current version. Use the same effective version here so
+    ``version_lock_summary`` reflects the actual bundle content rather
+    than the raw candidate link shape.
+    """
+
+    source_item_id = str(getattr(source_item, "id", None) or link.get("item_id") or "")
+    source_version_id = (
+        link.get("source_version_id")
+        or getattr(source_item, "current_version_id", None)
+    )
+    return {
+        "item_id": source_item_id,
+        "source_version_id": str(source_version_id) if source_version_id else None,
+    }
 
 
 def _resolve_source_path(
@@ -1054,6 +1202,7 @@ def build_pack_and_go_package(
     ] = None,
     output_dir: Path,
     file_service: Optional[FileService] = None,
+    require_locked_versions: bool = False,
 ) -> PackAndGoResult:
     from sqlalchemy.orm import joinedload
     from yuantus.meta_engine.models.file import ItemFile
@@ -1273,7 +1422,11 @@ def build_pack_and_go_package(
                     "file": item_file.file,
                     "file_role": item_file.file_role,
                     "item_id": item_file.item_id,
-                    "source_version_id": None,
+                    "source_version_id": getattr(
+                        item_by_id.get(item_file.item_id),
+                        "current_version_id",
+                        None,
+                    ),
                 }
             )
 
@@ -1297,6 +1450,7 @@ def build_pack_and_go_package(
     seen_files: set[str] = set()
     used_paths: set[str] = set()
     processed_links = 0
+    version_lock_file_links: List[Dict[str, Any]] = []
 
     for link in file_links:
         processed_links += 1
@@ -1342,6 +1496,14 @@ def build_pack_and_go_package(
                     }
                 )
                 continue
+
+            effective_source_version_id = (
+                link.get("source_version_id")
+                or getattr(source_item, "current_version_id", None)
+            )
+            version_lock_file_links.append(
+                _version_lock_link_for_included_file(link, source_item)
+            )
 
             source_item_number = _resolve_item_number(source_item)
             internal_ref = _resolve_internal_ref(source_item)
@@ -1405,8 +1567,7 @@ def build_pack_and_go_package(
                     source_item_state=source_item.state,
                     item_revision=revision,
                     internal_ref=internal_ref,
-                    source_version_id=link.get("source_version_id")
-                    or source_item.current_version_id,
+                    source_version_id=effective_source_version_id,
                     source_path=source_path,
                 )
             )
@@ -1429,6 +1590,31 @@ def build_pack_and_go_package(
                     None,
                     {"included_files": len(pack_files)},
                 )
+
+    # Bundle version-lock evaluation (#590 scope-gate / Tier-B runtime
+    # wiring). Reuses the merged 3a row→descriptor resolver and the
+    # merged `evaluate_bundle_version_locks` arithmetic — the plugin
+    # never re-implements lock semantics. Evaluate against the same
+    # file set that will enter the zip (after item/file-role/type/
+    # extension/missing-file filters) so the manifest summary and
+    # enforcement describe the actual bundle, not raw candidates.
+    try:
+        version_lock_report = _evaluate_bundle_version_lock(
+            session,
+            file_links=version_lock_file_links,
+            require_locked_versions=require_locked_versions,
+        )
+    except Exception:
+        for temp_path in temp_paths:
+            try:
+                temp_path.unlink()
+            except OSError:
+                continue
+        try:
+            temp_dir.rmdir()
+        except OSError:
+            pass
+        raise
 
     total_bytes = sum(entry.size for entry in pack_files)
     if max_bytes > 0 and total_bytes > max_bytes:
@@ -1519,6 +1705,15 @@ def build_pack_and_go_package(
             for entry in pack_files
         ],
         "missing_files": missing_files,
+    }
+    manifest["version_lock_summary"] = {
+        "total": version_lock_report.total,
+        "locked": version_lock_report.locked,
+        "unlocked": list(version_lock_report.unlocked),
+        "mismatched": list(version_lock_report.mismatched),
+        "stale": list(version_lock_report.stale),
+        "ok": version_lock_report.ok,
+        "requires_lock": bool(require_locked_versions),
     }
     if context:
         manifest["context"] = context
@@ -1749,6 +1944,7 @@ def pack_and_go(
                 blocked_states=req.blocked_states,
                 allowed_extensions=req.allowed_extensions,
                 blocked_extensions=req.blocked_extensions,
+                require_locked_versions=req.require_locked_versions,
             )
         )
 
@@ -1834,7 +2030,21 @@ def pack_and_go(
             cache_ttl_minutes=cache_ttl_minutes,
             context=context,
             output_dir=output_dir,
+            require_locked_versions=req.require_locked_versions,
         )
+    except BundleVersionLockError as exc:
+        # Must catch BEFORE the generic ``ValueError`` below: this is a
+        # version-lock enforcement failure (HTTP 409), not the existing
+        # ValueError → 404 path (which is for missing items / inputs).
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "bundle_version_lock_violation",
+                "message": str(exc),
+                "unlocked": exc.unlocked,
+                "mismatched": exc.mismatched,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -2029,6 +2239,9 @@ def handle_pack_and_go_job(
                 blocked_states=payload.get("blocked_states"),
                 allowed_extensions=payload.get("allowed_extensions"),
                 blocked_extensions=payload.get("blocked_extensions"),
+                require_locked_versions=bool(
+                    payload.get("require_locked_versions", False)
+                ),
             )
         )
 
@@ -2103,6 +2316,7 @@ def handle_pack_and_go_job(
         context=context,
         progress_callback=progress_callback,
         output_dir=output_dir,
+        require_locked_versions=bool(payload.get("require_locked_versions", False)),
     )
 
     return {
