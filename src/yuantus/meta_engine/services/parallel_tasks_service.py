@@ -2212,14 +2212,6 @@ class WorkflowCustomActionService:
 
         return normalized
 
-    def _rule_match_predicates(self, rule: WorkflowCustomActionRule) -> Dict[str, Any]:
-        params = rule.action_params if isinstance(rule.action_params, dict) else {}
-        predicates = params.get("match_predicates")
-        try:
-            return self._normalize_match_predicates(predicates)
-        except ValueError:
-            return {}
-
     def _normalize_runtime_context(self, context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         normalized = dict(context or {})
         normalized["workflow_map_id"] = self._normalize_optional_string(

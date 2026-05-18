@@ -191,7 +191,9 @@ def test_workflow_map_id_and_predicates_are_anded():
 
 
 # --------------------------------------------------------------------------
-# Fail-open pin (mirrors _rule_match_predicates line 2169)
+# Fail-open pin (mirrors the contract's normalize_workflow_rule_predicate
+# fail-open — historically lived inside the service's
+# _rule_match_predicates helper, now deleted as dead code post-#599)
 # --------------------------------------------------------------------------
 
 
@@ -207,10 +209,12 @@ def test_workflow_map_id_and_predicates_are_anded():
 )
 def test_fail_open_drops_predicates_but_keeps_workflow_map_id(bad_mp):
     # An illegal stored match_predicates degrades to the empty predicate
-    # (match-all) -- this is the CURRENT behavior pinned by R1 (see
-    # WorkflowCustomActionService._rule_match_predicates line 2169). It
-    # must NOT be hardened in this PR. workflow_map_id (a rule column
-    # read before the fail-open path) is preserved.
+    # (match-all) -- this is the CURRENT behavior, originally implemented
+    # by WorkflowCustomActionService._rule_match_predicates (deleted as
+    # dead code post-#599; the fail-open now lives solely in the
+    # contract's normalize_workflow_rule_predicate). It must NOT be
+    # hardened in this PR. workflow_map_id (a rule column read before
+    # the fail-open path) is preserved.
     with_wf = normalize_workflow_rule_predicate("wfX", bad_mp)
     assert with_wf.workflow_map_id == "wfX"
     assert with_wf.stage_id is None and with_wf.eco_priority is None
@@ -419,6 +423,34 @@ def test_runtime_scope_delegates_to_contract():
                 "_rule_match_predicates; if matcher arithmetic is needed, "
                 "delegate to the contract via evaluate_rule_predicate."
             )
+
+
+def test_rule_match_predicates_helper_is_deleted():
+    """Drift guard for the mechanical cleanup after #599: the
+    `_rule_match_predicates` helper was dead code post-substitution
+    (its only caller, `_rule_matches_runtime_scope`, now delegates
+    to the contract) and was removed in the cleanup PR. A future
+    re-introduction — for example, an accidental revert of the
+    substitution that brings back local matcher arithmetic and
+    needs this helper again — must fail loudly here so it is
+    caught before landing.
+
+    Companion to `test_runtime_scope_delegates_to_contract` which
+    pins **no call from inside the substituted body**; this test
+    pins the helper's **complete removal from the class**.
+    """
+
+    from yuantus.meta_engine.services import parallel_tasks_service as svc_mod
+
+    assert not hasattr(
+        svc_mod.WorkflowCustomActionService, "_rule_match_predicates"
+    ), (
+        "_rule_match_predicates was deleted as dead code in the "
+        "mechanical cleanup after #599; re-introducing it suggests "
+        "the substitution to the merged contract has been reverted "
+        "or that local matcher arithmetic is creeping back in. "
+        "Delegate via evaluate_rule_predicate instead."
+    )
 
 
 # --------------------------------------------------------------------------
