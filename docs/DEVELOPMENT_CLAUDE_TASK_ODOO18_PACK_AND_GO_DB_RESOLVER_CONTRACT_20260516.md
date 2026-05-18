@@ -71,14 +71,26 @@ and the `ItemVersion` does not exist") — this is exactly the
 | version pinned, row found | `version_row` provided (and `version_row.id == link_row.document_version_id`) | `version_belongs_to_item = (str(version_row.item_id) == str(link_row.document_item_id))`, `version_is_current = bool(version_row.is_current)` |
 | version pinned, row missing | `link_row.document_version_id` set **and** `version_row is None` | `version_belongs_to_item=False`, `version_is_current=None` |
 
-**Input-shape validation (decision — ratify):** if a `version_row` is
-supplied, its `id` MUST equal `link_row.document_version_id`; a mismatch
-is a caller bug and the resolver raises `ValueError`. This is
+**Input-shape validation — RATIFIED (2026-05-16):** if a `version_row`
+is supplied, its `id` MUST equal `link_row.document_version_id`; a
+mismatch is a caller bug and the resolver **raises `ValueError`**
+(binding, not an open question). Rationale (ratified): silently
+treating a mismatched row as "missing" would mask the caller's bug and
+wrap the wrong row as the "version-pinned-but-missing" branch — a
+diagnostic loss; raising surfaces the bug at its source. This is
 *input-contract validation* (like the consumption/ECR contracts
 rejecting malformed input), **not** version-lock enforcement (which
-remains the merged `assert_bundle_version_locks`, untouched). Reviewer:
-confirm raise-on-mismatch vs. silently treating a mismatched row as
-"missing".
+remains the merged `assert_bundle_version_locks`, untouched).
+
+**`is_current` is `Optional[bool]` (mirrors the real column):** the
+`ItemVersion.is_current` column is **nullable** (verified). The
+shipped `serialize_link` coerces it with `bool(version.is_current)`, so
+a real `NULL` row maps to `version_is_current = False`. The resolver
+must reproduce this exactly: `ItemVersionRow.is_current` is
+`Optional[bool] = None`, and the output computes
+`version_is_current = bool(version_row.is_current)` so `None → False`.
+Anything else — e.g. typing `is_current: bool` — would make a legal DB
+state unrepresentable and break bit-for-bit parity.
 
 ## 4. R1 Target Output (for the later, separately opted-in impl PR)
 
@@ -92,8 +104,11 @@ New pure module
   (drift-guarded).
 - `ItemVersionRow` — frozen Pydantic v2, `extra="forbid"`. The subset
   of `meta_item_versions` columns needed: `id: str` (non-empty),
-  `item_id: str`, `is_current: bool`. Field names mirror the column
-  names (drift-guarded).
+  `item_id: str`, **`is_current: Optional[bool] = None`** (mirrors the
+  real nullable column — see §3). The resolver outputs
+  `version_is_current = bool(version_row.is_current)` so `None →
+  False`, matching `serialize_link` bit-for-bit. Field names mirror
+  the column names (drift-guarded).
 - `resolve_bundle_document_descriptor(link_row, version_row=None)
   -> BundleDocumentDescriptor` — **pure**; reproduces the three
   serialize_link branches in §3; raises `ValueError` on the
@@ -119,6 +134,12 @@ New `test_pack_and_go_db_resolver_contract.py`:
 - **`test_resolver_rejects_mismatched_version_row` (MANDATORY, exactly
   named)** — `version_row.id != link_row.document_version_id` →
   `ValueError`; pins the §3 input-shape decision.
+- **`test_resolver_maps_null_is_current_to_false` (MANDATORY, exactly
+  named)** — `ItemVersionRow(is_current=None)` (the legal nullable
+  `ItemVersion.is_current` value) → `version_is_current = False`,
+  matching `serialize_link`'s `bool(version.is_current)` bit-for-bit;
+  pins the §3 nullable-is_current decision and prevents `is_current:
+  bool` regression.
 - **`test_resolver_output_is_the_merged_bundle_descriptor` (MANDATORY,
   exactly named)** — the return value is an instance of the merged
   `pack_and_go_version_lock_contract.BundleDocumentDescriptor` and the
@@ -206,7 +227,11 @@ Follow-ups, each its own separate opt-in (explicitly NOT in R1):
 ## 10. Reviewer Focus
 
 - Does the resolver reproduce `serialize_link`'s **three** branches
-  bit-for-bit (especially version-pinned-but-missing → `False`/`None`)?
+  bit-for-bit (especially version-pinned-but-missing → `False`/`None`
+  and nullable `is_current=None` → `False`)?
+- Is `ItemVersionRow.is_current` typed `Optional[bool] = None` so the
+  legal nullable DB value is representable, with the output computing
+  `bool(version_row.is_current)`?
 - Is the raise-on-mismatch rule correctly framed as **input-shape
   validation**, not version-lock enforcement?
 - Is the contract pure (no DB/session/`parallel_tasks_service` import;
