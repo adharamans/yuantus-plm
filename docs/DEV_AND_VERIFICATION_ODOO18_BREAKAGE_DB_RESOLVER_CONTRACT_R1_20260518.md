@@ -206,11 +206,12 @@ git diff --check
 
 No alembic / tenant-baseline — the contract adds no schema.
 
-Observed as of 2026-05-18: 20 resolver-contract tests passed;
+Observed as of 2026-05-18: 14 resolver-contract tests passed
+(combined resolver + closeout + ECR-intake set = 53 passed);
 merged closeout-contract regression passed (unchanged); merged
 ECR-intake-contract regression passed (unchanged); doc-index
-trio + R2 portfolio drift guard passed; `py_compile` clean;
-`git diff --check` clean.
+trio + R2 portfolio drift guard passed (14 tests); `py_compile`
+clean; `git diff --check` clean.
 
 ## 6. Non-Goals (reaffirmed from taskbook §8)
 
