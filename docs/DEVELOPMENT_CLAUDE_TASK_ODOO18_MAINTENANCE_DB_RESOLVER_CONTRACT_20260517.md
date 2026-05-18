@@ -72,8 +72,7 @@ in pack-and-go DB-resolver R1.
   input-only in the merged bridge. There is no service method
   today that picks a single "active request state" for one
   equipment. The R1 resolver must therefore *define* the selection
-  rule. Three in-tree precedents must be reconciled (§3 Policy A
-  surfaces this for reviewer ratification):
+  rule. In-tree precedents, verified by direct file reads:
   - `MaintenanceService.list_requests`
     (`src/yuantus/meta_engine/maintenance/service.py:241`):
     `q.order_by(MaintenanceRequest.created_at.desc()).all()` —
@@ -85,17 +84,25 @@ in pack-and-go DB-resolver R1.
     *"is there queued work?"*, **includes `DRAFT`**.
   - `MaintenanceService.get_preventive_schedule`
     (`src/yuantus/meta_engine/maintenance/service.py:313–317`):
-    `active_states = {SUBMITTED, IN_PROGRESS}` — answers
-    *"what's already in-flight?"*, **excludes `DRAFT`**.
+    `active_states = {DRAFT, SUBMITTED, IN_PROGRESS}` — answers
+    *"what overdue/upcoming preventive work is in the queue?"*;
+    **also includes `DRAFT`**, identical to the queue-summary
+    active set.
   - The merged bridge contract's `_BLOCKING_REQUEST_STATES =
     {SUBMITTED, IN_PROGRESS}` (lines 55–60) — answers *"is the
-    workcenter blocked right now?"*, also excludes `DRAFT`.
-  In-tree code therefore has **two distinct active-state
-  definitions** (queue-visibility vs. blocking/in-flight). The
-  resolver's `active_request_state` feeds the bridge contract's
-  blocking logic — so its selection rule directly shapes whether
-  `DRAFT` is even *representable* in the descriptor stream the
-  bridge consumes.
+    workcenter *blocked* right now?"*, **excludes `DRAFT`** as an
+    explicit, in-doc divergence (bridge contract lines 50–54):
+    "draft request is not yet active … this deliberately differs
+    from `MaintenanceService.get_maintenance_queue_summary`".
+  In-tree code therefore has a **uniform *active* definition** in
+  `MaintenanceService` (`{DRAFT, SUBMITTED, IN_PROGRESS}` in both
+  queue-summary and preventive-schedule); the bridge contract
+  intentionally narrows this to `{SUBMITTED, IN_PROGRESS}` for its
+  *blocking* decision only. "Active" and "blocking" are NOT the
+  same concept in this codebase. The resolver's
+  `active_request_state` feeds the bridge — so its selection rule
+  shapes whether `DRAFT` is representable in the descriptor
+  stream.
 - **Equipment.workcenter_id FK hardening** is one of the bridge
   contract's three documented follow-ups (memory:
   maintenance-bridge `ca6755f`) — explicitly **NOT** in this R1's
@@ -114,64 +121,57 @@ and passes typed row views; one descriptor is produced per
 | `equipment_row` + request rows with **any** non-terminal state | `active_request_state = ` the **first non-terminal state in input order** (caller orders, see §3 Policy A) |
 | `equipment_row` + request rows where every state is terminal (`done`/`cancelled`) | `active_request_state = None` |
 
-### Policies (some open for reviewer ratification)
+### Policies
 
-**Policy A — Active-request selection (OPEN for reviewer
-ratification, mirroring #587 §3 raise-on-mismatch pattern).**
+**Policy A — Active-request selection: RATIFIED A1 (2026-05-17
+re-review of PR #589).** The resolver produces
+`active_request_state: Optional[str]` by picking the **first
+non-terminal state in input order** from `request_rows`, where
+non-terminal = `{DRAFT, SUBMITTED, IN_PROGRESS}` — every
+`MaintenanceRequestState` value **except** the terminal
+`{DONE, CANCELLED}`. If no non-terminal request exists,
+`active_request_state = None`. The caller is responsible for
+ordering (typically `created_at DESC` to match
+`MaintenanceService.list_requests`); the resolver does not re-sort
+internally.
 
-The resolver must produce `active_request_state: Optional[str]` for
-each equipment. There are three coherent options; in-tree code
-contains precedents for the first two (see §2). The taskbook author
-recommends **Option A2** but flags this as the reviewer's call:
+**Rationale (ratified):**
 
-- **Option A1 — surface non-terminal (DRAFT included).**
-  Active states = `{DRAFT, SUBMITTED, IN_PROGRESS}` (mirrors
-  `get_maintenance_queue_summary`). Resolver picks the **first
-  non-terminal in input order**; terminal-only inputs → `None`.
-  Pro: honestly surfaces "draft request exists" — distinct from
-  "no request at all"; the bridge's blocking rule
-  (`{SUBMITTED, IN_PROGRESS}`) correctly treats `DRAFT` as
-  non-blocking, so it is safe to feed. Con: the resolver and the
-  bridge use **different** definitions of "active", which the
-  reviewer must verify is intentional.
-- **Option A2 — surface blocking-relevant only (DRAFT excluded).**
-  Active states = `{SUBMITTED, IN_PROGRESS}` (mirrors
-  `get_preventive_schedule` and the bridge's
-  `_BLOCKING_REQUEST_STATES`). Resolver picks the **first
-  submitted/in_progress in input order**; everything else
-  (including `DRAFT`) → `None`. Pro: resolver and bridge agree on
-  the active-state definition; **no draft state is ever fed into
-  `active_request_state` so the descriptor stream is internally
-  consistent with the bridge's blocking semantics**. Con: loses the
-  diagnostic "draft exists" signal — a downstream consumer cannot
-  distinguish "no request" from "only-a-draft" from the descriptor
-  alone.
-- **Option A3 — return ALL states (no filter).** Pick the newest
-  request in input order regardless of state; surface `done` /
-  `cancelled` too. Pro: zero policy embedded in the resolver. Con:
-  the bridge would receive `active_request_state=DONE` for
-  long-completed work, which the bridge's validator rejects today
-  (only `MaintenanceRequestState` *values* are accepted — `done`
-  is valid by value-domain, but semantically the bridge expects
-  "active") and which makes `active_request_state` non-discriminating
-  for the bridge's blocking rule. **Not recommended.**
+- Both in-tree `MaintenanceService` active-state surfaces
+  (`get_maintenance_queue_summary` and `get_preventive_schedule`)
+  use exactly `{DRAFT, SUBMITTED, IN_PROGRESS}` — verified by
+  direct file read (§2). The resolver's "active" set matches that
+  uniform in-tree definition.
+- "Active" and "blocking" are **deliberately different concepts**
+  in this codebase. The merged bridge contract narrows blocking to
+  `{SUBMITTED, IN_PROGRESS}` and *already documents* (bridge lines
+  50–54) that the divergence is intentional. The bridge already
+  has tests pinning that `DRAFT` is safe and non-blocking; feeding
+  `active_request_state=DRAFT` is correctly classified as
+  non-blocking by `evaluate_workcenter_readiness`, with `ready=True`.
+- A1 preserves the diagnostic *"draft exists"* signal — a
+  downstream consumer (or future logging surface) can distinguish
+  "no request at all" from "draft-only" from the descriptor alone,
+  without adding a separate descriptor field.
 
-**Author recommendation: Option A2** — the resolver's purpose is to
-build descriptors that feed `evaluate_workcenter_readiness`, whose
-blocking logic ignores `DRAFT`. Aligning the resolver's active-set
-with the bridge's `_BLOCKING_REQUEST_STATES` keeps the contract
-internally consistent and prevents a future reader from wondering
-why one side excludes `DRAFT` and the other includes it. The
-"draft-exists" diagnostic, if needed later, belongs on a separate
-descriptor field (a separate opt-in) — not on
-`active_request_state`.
+**Options considered but NOT ratified (audit trail):**
 
-**Reviewer: confirm A1 vs A2 (vs A3 if you disagree with both)
-before this taskbook is merged.** Whichever is chosen, the
-selection key is the **first match in input order**; the caller is
-responsible for ordering (typically `created_at DESC` to match
-`MaintenanceService.list_requests`), and the resolver does not
-re-sort internally.
+- **A2** — surface only `{SUBMITTED, IN_PROGRESS}` (collapse `DRAFT`
+  to `None`). Rejected: it would make the resolver and the
+  `MaintenanceService` active-set definitions diverge, while
+  conflating "blocking-relevant" with "active" (two different
+  concepts the codebase deliberately keeps apart). A2 was the
+  taskbook author's initial recommendation; the recommendation
+  rested on a mis-citation of `get_preventive_schedule` as
+  excluding `DRAFT` — fixed in §2.
+- **A3** — return ALL states (no filter). Rejected for **semantic
+  uselessness**, not for any validation issue: the bridge's
+  `WorkcenterMaintenanceDescriptor` validator accepts every
+  `MaintenanceRequestState` value, including `DONE`/`CANCELLED`,
+  so A3 would not raise. But surfacing terminal states on
+  `active_request_state` is semantically inconsistent with the
+  field's name and would make the descriptor non-discriminating
+  for the bridge's blocking rule.
 
 **Policy B — Equipment-request id-mismatch raises (PRE-RATIFIED,
 strict reading; deliberate carry-over from #588 case (b)).** If ANY
@@ -230,16 +230,16 @@ New pure module
   Field names mirror the column names (drift-guarded). `state` is
   NOT typed as the enum — keeping it `str` mirrors the SQLAlchemy
   storage type and the merged descriptor's storage convention.
-- Module-level `_ACTIVE_REQUEST_STATES` — the frozenset whose
-  contents are decided by the §3 Policy A reviewer ratification:
-  - Option A1 ratified → `{DRAFT.value, SUBMITTED.value, IN_PROGRESS.value}`;
-  - Option A2 ratified (author recommendation) →
-    `{SUBMITTED.value, IN_PROGRESS.value}` (matches the bridge's
-    `_BLOCKING_REQUEST_STATES` exactly — and the impl-PR test must
-    `assert _ACTIVE_REQUEST_STATES == _BLOCKING_REQUEST_STATES`).
-  A drift-guard test pins the chosen set against the live
-  `MaintenanceRequestState` enum so an enum addition triggers an
-  explicit policy review rather than silently mis-classifying.
+- Module-level `_ACTIVE_REQUEST_STATES`:
+  `frozenset({DRAFT.value, SUBMITTED.value, IN_PROGRESS.value})` —
+  exactly the §3 Policy A RATIFIED A1 set. A drift-guard test pins
+  this against the live `MaintenanceRequestState` enum as
+  `{m.value for m in MaintenanceRequestState} - {DONE.value, CANCELLED.value}`,
+  so an enum addition triggers an explicit policy review rather
+  than silently mis-classifying. Note: this set is intentionally
+  **wider** than the merged bridge's `_BLOCKING_REQUEST_STATES =
+  {SUBMITTED, IN_PROGRESS}` — "active" and "blocking" are
+  different concepts (§3 Policy A rationale).
 - `resolve_workcenter_maintenance_descriptor(equipment_row, request_rows=()) -> WorkcenterMaintenanceDescriptor`
   — pure; applies §3 Policy A (first non-terminal in input order)
   and Policy B (raise on id mismatch); returns the **merged**
@@ -264,20 +264,25 @@ New `test_maintenance_db_resolver_contract.py`:
 - **`test_resolver_picks_first_active_request_state_in_input_order`
   (MANDATORY, exactly named)** — single equipment with mixed
   requests; the **first active state in input order** is returned
-  for `active_request_state`; non-active and terminal-only inputs
-  yield `None`; empty `request_rows` yields `None`. Parametrized
-  to cover each member of the §3 Policy A ratified
-  `_ACTIVE_REQUEST_STATES` winning when it is the first active in
-  input order; and the complementary states being skipped. The
-  *exact* set asserted is whichever the reviewer ratifies (A1 vs.
-  A2 vs. A3) — the impl PR materialises this once the taskbook
-  merges.
-- **`test_resolver_active_set_aligns_with_ratified_policy_a`
-  (MANDATORY, exactly named)** — pins the §3 Policy A ratification
-  in code: `_ACTIVE_REQUEST_STATES` equals the ratified set, and
-  (for Option A2 if chosen) `_ACTIVE_REQUEST_STATES ==
-  _BLOCKING_REQUEST_STATES` from the merged bridge contract. An
-  enum addition or a policy drift fails this test loudly.
+  for `active_request_state`; terminal-only and empty inputs yield
+  `None`. Parametrized to cover each of `DRAFT`/`SUBMITTED`/
+  `IN_PROGRESS` winning when it is the first active in input
+  order; and `DONE`/`CANCELLED` being skipped.
+- **`test_resolver_active_set_pins_ratified_policy_a`
+  (MANDATORY, exactly named)** — pins the §3 Policy A A1
+  ratification in code: `_ACTIVE_REQUEST_STATES == frozenset(
+  {DRAFT.value, SUBMITTED.value, IN_PROGRESS.value})`; equivalently
+  `_ACTIVE_REQUEST_STATES == {m.value for m in MaintenanceRequestState}
+  - {DONE.value, CANCELLED.value}`. The test also asserts
+  `_ACTIVE_REQUEST_STATES != _BLOCKING_REQUEST_STATES` (active is
+  strictly wider than blocking) so a future drift-toward-blocking
+  fails loudly.
+- **`test_resolver_pins_draft_as_active_and_non_blocking`
+  (MANDATORY, exactly named)** — compose proof: a descriptor with
+  `active_request_state=DRAFT.value` produced by the resolver
+  feeds `evaluate_workcenter_readiness` and yields `ready=True`,
+  `blocked=[]`, `degraded=[]`. Pins the §3 Policy A "draft surfaced
+  AND non-blocking" semantic at the resolver↔bridge seam.
 - **`test_resolver_rejects_mismatched_equipment_request_pair`
   (MANDATORY, exactly named)** — any
   `request_row.equipment_id != equipment_row.id` → `ValueError`;
@@ -296,7 +301,7 @@ New `test_maintenance_db_resolver_contract.py`:
   `Equipment.__table__.columns`; `MaintenanceRequestRow` fields ⊆
   `MaintenanceRequest.__table__.columns`; `_ACTIVE_REQUEST_STATES`
   pinned against the ratified §3 Policy A set (see the
-  `test_resolver_active_set_aligns_with_ratified_policy_a`
+  `test_resolver_active_set_pins_ratified_policy_a`
   MANDATORY test above); the produced descriptor's field set
   equals `WorkcenterMaintenanceDescriptor.model_fields` (reuse,
   not reimplement);
@@ -395,19 +400,13 @@ Follow-ups, each its own separate opt-in (explicitly NOT in R1):
 
 ## 10. Reviewer Focus
 
-- §3 Policy A is **open for reviewer ratification** — please
-  choose one of:
-  - **A1** — surface non-terminal incl. `DRAFT`
-    (matches `get_maintenance_queue_summary`);
-  - **A2** (author recommendation) — surface only
-    `{SUBMITTED, IN_PROGRESS}` (matches both
-    `get_preventive_schedule` and the bridge's
-    `_BLOCKING_REQUEST_STATES`);
-  - **A3** — no filter (NOT recommended).
-
-  The impl PR materialises `_ACTIVE_REQUEST_STATES` and the
-  MANDATORY `test_resolver_picks_first_active_request_state_in_input_order`
-  parametrisation from the ratified choice.
+- §3 Policy A is **RATIFIED A1** (2026-05-17 re-review of #589):
+  resolver surfaces non-terminal incl. `DRAFT`. Active set =
+  `{DRAFT, SUBMITTED, IN_PROGRESS}` — uniform with both
+  `MaintenanceService.get_maintenance_queue_summary` and
+  `get_preventive_schedule`. Confirm the rationale (active ≠
+  blocking; bridge already classifies `DRAFT` as non-blocking,
+  pinned by the compose-proof test).
 - Is the id-mismatch rule (§3 Policy B) read strictly —
   unconditional on whether the mismatching row would have been
   selected?
