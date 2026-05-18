@@ -42,9 +42,11 @@ from yuantus.meta_engine.services.breakage_db_resolver_contract import (
 )
 from yuantus.meta_engine.services.breakage_eco_closeout_contract import (
     BreakageEcoClosureDescriptor,
+    derive_breakage_change_reference,
     is_breakage_eligible_for_design_loopback,
     map_breakage_to_change_request_intake,
 )
+from yuantus.meta_engine.services.eco_service import ECOService
 from yuantus.meta_engine.services.ecr_intake_contract import (
     ChangeRequestIntake,
     EcoDraftInputs,
@@ -139,6 +141,17 @@ class BreakageDesignLoopbackPreparation:
     intake: Optional[ChangeRequestIntake] = None
     eco_draft_inputs: Optional[EcoDraftInputs] = None
     ineligible_reason: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class BreakageDesignLoopbackEcoCreation:
+    """Explicit breakage design-loopback ECO creation result."""
+
+    incident_id: str
+    preparation: BreakageDesignLoopbackPreparation
+    reference: str
+    eco: ECO
+    created: bool
 
 
 class DocumentMultiSiteService:
@@ -4246,6 +4259,76 @@ class BreakageIncidentService:
             eligible=True,
             intake=intake,
             eco_draft_inputs=eco_draft_inputs,
+        )
+
+    def _find_breakage_design_loopback_eco_by_reference(
+        self,
+        reference: str,
+    ) -> Optional[ECO]:
+        normalized = str(reference or "").strip()
+        if not normalized:
+            return None
+
+        marker = f"reference={normalized}"
+        candidates = (
+            self.session.query(ECO)
+            .filter(ECO.description.contains(marker))
+            .order_by(ECO.created_at.asc(), ECO.id.asc())
+            .all()
+        )
+        for eco in candidates:
+            description = str(getattr(eco, "description", None) or "")
+            if "breakage-eco-closeout" in description and marker in description:
+                return eco
+        return None
+
+    def create_breakage_design_loopback_eco(
+        self,
+        incident_id: str,
+        *,
+        user_id: int,
+        allow_duplicate: bool = False,
+    ) -> BreakageDesignLoopbackEcoCreation:
+        """Explicitly create an ECO for an eligible breakage design loopback.
+
+        The caller owns the transaction boundary. This method delegates
+        permission/event behavior to ECOService.create_eco and only performs
+        best-effort query-before-create dedupe via the existing breakage
+        reference envelope in ECO.description.
+        """
+
+        preparation = self.prepare_breakage_design_loopback_intake(incident_id)
+        if (
+            not preparation.eligible
+            or preparation.intake is None
+            or preparation.eco_draft_inputs is None
+        ):
+            raise ValueError(
+                preparation.ineligible_reason
+                or "breakage is not eligible for design loopback"
+            )
+
+        reference = derive_breakage_change_reference(preparation.descriptor)
+        if not allow_duplicate:
+            existing = self._find_breakage_design_loopback_eco_by_reference(reference)
+            if existing is not None:
+                return BreakageDesignLoopbackEcoCreation(
+                    incident_id=incident_id,
+                    preparation=preparation,
+                    reference=reference,
+                    eco=existing,
+                    created=False,
+                )
+
+        kwargs = preparation.eco_draft_inputs.as_kwargs()
+        kwargs["user_id"] = user_id
+        eco = ECOService(self.session).create_eco(**kwargs)
+        return BreakageDesignLoopbackEcoCreation(
+            incident_id=incident_id,
+            preparation=preparation,
+            reference=reference,
+            eco=eco,
+            created=True,
         )
 
     def metrics(

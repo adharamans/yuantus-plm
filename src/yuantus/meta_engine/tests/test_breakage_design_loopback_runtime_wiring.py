@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import ast
-import inspect
 from unittest.mock import patch
 
 import pytest
@@ -223,25 +221,22 @@ def test_preparation_does_not_mutate_incident():
         session.close()
 
 
-def test_runtime_wiring_does_not_import_or_call_eco_creation():
-    tree = ast.parse(inspect.getsource(service_module))
-    imported: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            imported.append(node.module or "")
-    joined = " ".join(imported)
-    assert "yuantus.meta_engine.services.eco_service" not in joined
-    assert "ECOService" not in joined
+def test_preparation_path_does_not_call_eco_creation():
+    session = _session()
+    try:
+        service = BreakageIncidentService(session)
+        incident = service.create_incident(
+            description="read-only preparation still has no side effect",
+            status="resolved",
+            severity="critical",
+            product_item_id="product-4",
+        )
+        session.commit()
 
-    called = {
-        node.func.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    } | {
-        node.func.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    }
-    assert "create_eco" not in called
+        with patch.object(service_module.ECOService, "create_eco") as create_spy:
+            prepared = service.prepare_breakage_design_loopback_intake(incident.id)
+
+        assert prepared.eligible is True
+        create_spy.assert_not_called()
+    finally:
+        session.close()
