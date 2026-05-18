@@ -137,12 +137,18 @@ be addressed by the impl PR (see §5).
 
 ### What is NOT being changed
 
-The contract module itself, `_normalize_match_predicates` (the
-strict normalizer), `_normalize_runtime_context`, the rule
-column schema, the ECO model enums, the router, the eco_service
-call site, and the contract's existing 46 tests are all
-**unchanged**. The substitution is an internal swap inside one
-service method.
+The contract runtime module
+(`automation_rule_predicate_contract.py`) itself,
+`_normalize_match_predicates` (the strict normalizer),
+`_normalize_runtime_context`, the rule column schema, the ECO
+model enums, the router, and the eco_service call site are all
+**unchanged**. The contract's existing 46 tests are preserved
+with **one mechanical rename** (`test_service_parity` →
+`test_service_delegates_to_contract`, see §5) and **three
+additions** (`_AUTOMATION_PARITY_SNAPSHOT` const + two new
+MANDATORY tests); the other 45 tests stay verbatim. The
+substitution itself is an internal swap inside one service
+method.
 
 ## 3. Substitution Boundary
 
@@ -193,9 +199,17 @@ already verified bit-for-bit by the contract's own 46 tests, and
    schema is untouched.
 5. **No deletion of `_rule_match_predicates`** in this PR. R1 is
    substitution; cleanup deletion is its own future PR.
-6. **No edit to the contract module** or its 46 tests. The
-   contract is the source of truth; the impl PR only edits the
-   service.
+6. **No edit to the contract runtime module**
+   (`automation_rule_predicate_contract.py`) — the contract is
+   the source of truth; the impl PR only edits the service.
+   **Contract test file edits are scoped exclusively to the §5
+   additions**: adding `_AUTOMATION_PARITY_SNAPSHOT`, adding the
+   MANDATORY `test_contract_matches_spec_derived_parity_snapshot`,
+   adding `test_runtime_scope_delegates_to_contract`, and
+   renaming `test_service_parity` →
+   `test_service_delegates_to_contract`. No other edits to the
+   test file are permitted — the contract's other 45 existing
+   tests stay verbatim and green.
 7. **No edit to `_normalize_match_predicates` /
    `_normalize_runtime_context`** in this PR (they have other
    callers).
@@ -418,7 +432,14 @@ the contract.
 - No fail-open → fail-closed hardening (separate later opt-in).
 - No `_ALLOWED_TYPES` widening (separate later opt-in).
 - No deletion of `_rule_match_predicates` (separate later opt-in).
-- No edit to the contract or its 46 tests.
+- No edit to the contract **runtime** module
+  (`automation_rule_predicate_contract.py`); contract test file
+  edits are scoped exclusively to the §5 additions
+  (`_AUTOMATION_PARITY_SNAPSHOT`,
+  `test_contract_matches_spec_derived_parity_snapshot`,
+  `test_runtime_scope_delegates_to_contract`,
+  `test_service_parity` → `test_service_delegates_to_contract`
+  rename). The contract's other 45 existing tests stay verbatim.
 - No edit to `_normalize_match_predicates` /
   `_normalize_runtime_context` (other callers exist).
 - No edit to `eco_service.py` or any router.
