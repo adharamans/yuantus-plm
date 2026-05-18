@@ -9,6 +9,7 @@ import math
 import time
 import uuid
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from types import SimpleNamespace
@@ -35,6 +36,20 @@ from yuantus.meta_engine.models.parallel_tasks import (
 )
 from yuantus.meta_engine.report_locale.service import ReportLocaleService
 from yuantus.meta_engine.services.job_service import JobService
+from yuantus.meta_engine.services.breakage_db_resolver_contract import (
+    BreakageIncidentRow,
+    resolve_breakage_eco_closure_descriptor,
+)
+from yuantus.meta_engine.services.breakage_eco_closeout_contract import (
+    BreakageEcoClosureDescriptor,
+    is_breakage_eligible_for_design_loopback,
+    map_breakage_to_change_request_intake,
+)
+from yuantus.meta_engine.services.ecr_intake_contract import (
+    ChangeRequestIntake,
+    EcoDraftInputs,
+    map_change_request_to_eco_draft_inputs,
+)
 from yuantus.meta_engine.version.models import ItemVersion
 
 
@@ -106,6 +121,24 @@ def _stable_hash(values: Iterable[str]) -> str:
         h.update(str(value).encode("utf-8"))
         h.update(b"\x00")
     return h.hexdigest()[:20]
+
+
+@dataclass(frozen=True)
+class BreakageDesignLoopbackPreparation:
+    """Read-only runtime preparation for a breakage design loopback.
+
+    This is intentionally not an ECO creation result. It gives callers
+    the resolved descriptor, eligibility decision, and pure ECR intake
+    draft inputs so a later, explicit side-effecting slice can decide
+    whether/how to create an ECO.
+    """
+
+    incident_id: str
+    descriptor: BreakageEcoClosureDescriptor
+    eligible: bool
+    intake: Optional[ChangeRequestIntake] = None
+    eco_draft_inputs: Optional[EcoDraftInputs] = None
+    ineligible_reason: Optional[str] = None
 
 
 class DocumentMultiSiteService:
@@ -4162,6 +4195,58 @@ class BreakageIncidentService:
         incident.updated_at = _utcnow()
         self.session.flush()
         return incident
+
+    def _breakage_design_loopback_row(
+        self,
+        incident: BreakageIncident,
+    ) -> BreakageIncidentRow:
+        return BreakageIncidentRow(
+            description=incident.description,
+            status=incident.status,
+            severity=incident.severity,
+            incident_code=incident.incident_code,
+            product_item_id=incident.product_item_id,
+            bom_id=incident.bom_id,
+            version_id=incident.version_id,
+        )
+
+    def resolve_breakage_design_loopback_descriptor(
+        self,
+        incident_id: str,
+    ) -> BreakageEcoClosureDescriptor:
+        incident = self.session.get(BreakageIncident, incident_id)
+        if not incident:
+            raise ValueError(f"Breakage incident not found: {incident_id}")
+        return resolve_breakage_eco_closure_descriptor(
+            self._breakage_design_loopback_row(incident)
+        )
+
+    def prepare_breakage_design_loopback_intake(
+        self,
+        incident_id: str,
+    ) -> BreakageDesignLoopbackPreparation:
+        descriptor = self.resolve_breakage_design_loopback_descriptor(incident_id)
+        eligible = is_breakage_eligible_for_design_loopback(descriptor)
+        if not eligible:
+            return BreakageDesignLoopbackPreparation(
+                incident_id=incident_id,
+                descriptor=descriptor,
+                eligible=False,
+                ineligible_reason=(
+                    f"breakage status {descriptor.status!r} is not eligible "
+                    "for design loopback"
+                ),
+            )
+
+        intake = map_breakage_to_change_request_intake(descriptor)
+        eco_draft_inputs = map_change_request_to_eco_draft_inputs(intake)
+        return BreakageDesignLoopbackPreparation(
+            incident_id=incident_id,
+            descriptor=descriptor,
+            eligible=True,
+            intake=intake,
+            eco_draft_inputs=eco_draft_inputs,
+        )
 
     def metrics(
         self,
