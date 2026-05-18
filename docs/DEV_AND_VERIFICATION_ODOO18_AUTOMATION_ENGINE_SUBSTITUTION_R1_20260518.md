@@ -206,11 +206,11 @@ git diff --check
 
 No alembic / tenant-baseline — the substitution adds no schema.
 
-Observed as of 2026-05-18: contract test file 68/68 passed;
+Observed as of 2026-05-18: contract test file 67/67 passed;
 `parallel_tasks_services` regression unchanged (broader matcher
 & runtime tests); `parallel_tasks_router` + `eco_parallel_flow_hooks`
-regression unchanged (303 tests across all matcher-touching
-files); doc-index trio + R2 portfolio drift guard green;
+regression unchanged (288 tests passed across all matcher-touching
+files combined); doc-index trio + R2 portfolio drift guard green;
 `py_compile` clean; `git diff --check` clean.
 
 ## 6. Non-Goals (reaffirmed from taskbook §8)
