@@ -11,7 +11,11 @@ from sqlalchemy.orm import Session
 
 from yuantus.api.dependencies.auth import CurrentUser, get_current_user
 from yuantus.database import get_db
-from yuantus.meta_engine.services.parallel_tasks_service import BreakageIncidentService
+from yuantus.exceptions.handlers import PLMException
+from yuantus.meta_engine.services.parallel_tasks_service import (
+    BreakageDesignLoopbackLinkRace,
+    BreakageIncidentService,
+)
 
 
 parallel_tasks_breakage_router = APIRouter(tags=["ParallelTasks"])
@@ -87,6 +91,16 @@ class BreakageCreateRequest(BaseModel):
 
 class BreakageStatusUpdateRequest(BaseModel):
     status: str
+    auto_loopback: bool = Field(
+        default=False,
+        description=(
+            "Tier-B #3 §3.3 opt-in. When True and the NEW status is "
+            "loopback-eligible (resolved/closed), auto-spawn (or reuse, "
+            "via §3.2 durable idempotency) the design-loopback ECO in the "
+            "same transaction. Default False preserves byte-identical "
+            "pre-§3.3 behavior."
+        ),
+    )
 
 
 class BreakageDesignLoopbackEcoCreateRequest(BaseModel):
@@ -840,8 +854,26 @@ async def update_breakage_status(
 ):
     service = BreakageIncidentService(db)
     try:
-        incident = service.update_status(incident_id, status=payload.status)
+        incident = service.update_status(
+            incident_id,
+            status=payload.status,
+            auto_loopback=payload.auto_loopback,
+            loopback_user_id=int(user.id),
+        )
         db.commit()
+    except BreakageDesignLoopbackLinkRace as exc:
+        # Tier-B #3 §3.3 §3.C unrecoverable arm: the §3.2 CAS-loser
+        # rollback left no determinable linked ECO. Retryable —
+        # NOT the pre-existing 400 breakage_status_invalid (the
+        # normal CAS race is self-healed in the service and never
+        # reaches here).
+        db.rollback()
+        _raise_api_error(
+            status_code=409,
+            code="breakage_loopback_link_race",
+            message=str(exc),
+            context={"incident_id": incident_id},
+        )
     except ValueError as exc:
         db.rollback()
         _raise_api_error(
@@ -850,6 +882,15 @@ async def update_breakage_status(
             message=str(exc),
             context={"incident_id": incident_id},
         )
+    except (HTTPException, PLMException):
+        # §3.3 §3.E atomic coupling: an ECOService.create_eco
+        # permission failure (PLMException, status 403) — and any
+        # HTTPException — must propagate verbatim (mirroring §3.1),
+        # NOT be remapped into the legacy 400. The session is rolled
+        # back first so the partially-flushed status change is
+        # discarded. Inert for default-OFF (no create_…eco call).
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         _raise_api_error(

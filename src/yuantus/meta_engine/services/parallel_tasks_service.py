@@ -157,6 +157,26 @@ class BreakageDesignLoopbackEcoCreation:
     created: bool
 
 
+class BreakageDesignLoopbackLinkRace(RuntimeError):
+    """Unrecoverable concurrent-link race in ``update_status``'s
+    auto-loopback path (Tier-B #3 §3.3, taskbook `fb9d0b5` §3.C
+    step 2).
+
+    Raised ONLY when, after §3.2's CAS-loser
+    ``self.session.rollback()``, the re-read finds **no incident**
+    (deleted concurrently) or **no winner ECO** (``eco_id`` is
+    NULL/dangling) — i.e. the linked ECO cannot be determined and
+    the status change cannot be safely re-applied. The normal
+    CAS-loser race is self-healed and returns an ordinary success;
+    this exception is the unrecoverable boundary only. The route
+    maps it to a retryable 409 ``breakage_loopback_link_race``.
+
+    Deliberately a ``RuntimeError`` (NOT a ``ValueError``) so the
+    status route's ``except ValueError -> 404`` clause does not
+    swallow it.
+    """
+
+
 class DocumentMultiSiteService:
     TASK_PREFIX = "document_sync_"
     _ALLOWED_DIRECTIONS = {"push", "pull"}
@@ -4193,11 +4213,79 @@ class BreakageIncidentService:
 
         raise ValueError("export_format must be json, csv or md")
 
-    def update_status(self, incident_id: str, *, status: str) -> BreakageIncident:
+    def update_status(
+        self,
+        incident_id: str,
+        *,
+        status: str,
+        auto_loopback: bool = False,
+        loopback_user_id: Optional[int] = None,
+    ) -> BreakageIncident:
         incident = self.session.get(BreakageIncident, incident_id)
         if not incident:
             raise ValueError(f"Breakage incident not found: {incident_id}")
-        incident.status = status.strip().lower()
+        target_status = status.strip().lower()
+        incident.status = target_status
+        incident.updated_at = _utcnow()
+        self.session.flush()
+
+        if not auto_loopback:
+            # Default-OFF: byte-identical pre-§3.3 behavior — no
+            # eligibility check, no create call, no extra query, no
+            # eco_id write. Pinned by
+            # test_update_status_default_off_is_byte_identical.
+            return incident
+
+        # Tier-B #3 §3.3 auto-trigger (taskbook `fb9d0b5`).
+        # §3.A: gate on the POST-update descriptor — fire iff the
+        # NEW status is eligible (product policy A1, no delta
+        # gating). §3.E: an ineligible new status is a valid no-op
+        # — gate BEFORE calling create_…eco; do NOT call it and
+        # swallow its ValueError.
+        descriptor = resolve_breakage_eco_closure_descriptor(
+            self._breakage_design_loopback_row(incident)
+        )
+        if not is_breakage_eligible_for_design_loopback(descriptor):
+            return incident
+
+        if loopback_user_id is None:
+            raise ValueError(
+                "loopback_user_id is required when auto_loopback=True and "
+                f"the new status is loopback-eligible: {incident_id}"
+            )
+
+        # §3.C: same session/transaction — the route owns the
+        # single db.commit(), which commits the status change and
+        # the loopback link atomically. §3.D: §3.2's durable CAS
+        # makes a repeat/concurrent fire idempotent (created=False),
+        # not duplicate-producing.
+        creation = self.create_breakage_design_loopback_eco(
+            incident_id,
+            user_id=loopback_user_id,
+            allow_duplicate=False,
+        )
+        if creation.created:
+            # CAS winner — no rollback occurred; the status flush
+            # above is intact.
+            return incident
+
+        # created=False — either §3.2's durable-dedupe early return
+        # (no rollback; status flush intact) OR the CAS-loser path,
+        # which did a full self.session.rollback() that ALSO unwound
+        # our status flush (it shares this transaction). §3.C
+        # ratified behavior: re-read and self-heal by re-applying
+        # the target status (idempotent in the no-rollback
+        # sub-case; the real repair in the CAS-loser sub-case) and
+        # return an ordinary success — no client-visible retry.
+        # Raise the dedicated unrecoverable-state exception ONLY
+        # when the re-read finds no incident or no winner ECO.
+        incident = self.session.get(BreakageIncident, incident_id)
+        if incident is None or creation.eco is None:
+            raise BreakageDesignLoopbackLinkRace(
+                "breakage design loopback link race — cannot determine the "
+                f"linked ECO for incident {incident_id}"
+            )
+        incident.status = target_status
         incident.updated_at = _utcnow()
         self.session.flush()
         return incident
