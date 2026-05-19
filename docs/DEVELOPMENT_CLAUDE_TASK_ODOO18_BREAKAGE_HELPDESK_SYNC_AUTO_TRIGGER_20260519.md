@@ -18,12 +18,13 @@ auto-trigger + self-heal + unrecoverable semantics, NOT
 duplicating a second race handler**.
 
 §3.4's entrypoint differs from §3.3's and so do its risk points.
-This taskbook must pin: the trigger point, the switch, the
+This taskbook pins: the trigger point, the switch, the
 **double gate** (sync outcome AND status eligibility), the
 **composition problem** (§3.4's entrypoint mutates far more than
-§3.3's — the central question), the helper-extraction approach,
-the atomic-coupling / batch adjudication, idempotent-replay
-interaction, and the route refinement.
+§3.3's — RATIFIED as §3.C-β status-first reorder), the
+helper-extraction approach, the atomic-coupling / batch
+adjudication, idempotent-replay interaction, and the route
+refinement.
 
 Prerequisites (merged): §3.2 durable idempotency (`2609bba` /
 PR #604) and §3.3 `update_status` auto-trigger (`757c411` /
@@ -166,7 +167,7 @@ real status mutation (so the idempotent-replay short-circuit at
   (no eligibility check, no sync-outcome read for loopback, no
   create call, no `eco_id` write). Pinned by a MANDATORY test.
 
-### 3.C THE COMPOSITION PROBLEM — *the central question* (RATIFY ONE)
+### 3.C THE COMPOSITION PROBLEM — RATIFIED: β (status-first reorder)
 
 §3.3's `update_status` mutates exactly `status` + `updated_at`
 before the trigger, so §3.3's self-heal (re-read, re-apply
@@ -186,14 +187,24 @@ event-id dedupe accumulator would be **silently lost on the
 rare race**. That is a correctness gap, not cosmetic, and it is
 exactly the rare race this taskbook must make deterministic.
 
-Three options — the impl PR cannot ship until ONE is ratified:
+**RATIFIED behavior: β (status-first reorder).** Ratified by
+the reviewer 2026-05-19 (PR #607): β is the smaller,
+more-testable choice — the event-replay short-circuit stays
+before the mutation, the status-only flush enters the unchanged
+§3.3 helper, and the heavy helpdesk mutations are applied after
+the trigger converges, so a §3.2 CAS-loser rollback can never
+silently drop the job payload / responsibility / event-id
+accumulator. α and γ are recorded rejected (below). The impl PR
+implements β only.
+
+The three options considered:
 
 - **(α) Trigger AFTER all helpdesk mutations; accept the gap.**
   Simplest, but a CAS-loser race silently drops helpdesk-sync
-  state. **Author-rejected** (silent state loss on the very
-  race we are hardening).
+  state. **REJECTED** (silent state loss on the very race we
+  are hardening).
 - **(β) Reorder: trigger on status FIRST, helpdesk mutations
-  AFTER.** After the replay short-circuit: set
+  AFTER — RATIFIED.** After the replay short-circuit: set
   `incident.status = normalized_incident_status` +
   `incident.updated_at` and flush *only that*; run the reused
   §3.3 helper (eligibility/sync gate → create → self-heal /
@@ -207,9 +218,9 @@ Three options — the impl PR cannot ship until ONE is ratified:
   The §3.3 helper stays **pure and unchanged**. Grounded safe:
   `create_…eco`'s ECO draft does not read `responsibility` or
   the job (see §2), so doing them after the trigger does not
-  degrade the ECO. **Author-ratified.** Cost: a deliberate
-  re-ordering of `apply_helpdesk_ticket_update` and a second
-  flush.
+  degrade the ECO. Cost: a deliberate re-ordering of
+  `apply_helpdesk_ticket_update` and a second flush — accepted
+  as the smaller, more-testable price.
 - **(γ) Enhance the helper with a caller-mutation replay
   callback.** `_auto_trigger_design_loopback(self, incident, *,
   target_status, loopback_user_id, replay)`: after the
@@ -219,12 +230,15 @@ Three options — the impl PR cannot ship until ONE is ratified:
   `ConversionJob`) atop the self-healed status. Genuinely
   one race handler, no flow reorder, but materially more
   intricate (the replay must re-resolve the rolled-back job).
-  **Author-viable-alternative**; ratify only if the §3.C-β
-  reorder is rejected.
+  **REJECTED** in favor of β — β achieves the same no-loss
+  guarantee with a smaller, more-testable change and keeps the
+  §3.3 helper pure/unchanged; γ's extra intricacy (a
+  job-re-resolving replay closure) is not warranted for the
+  single grounded entrypoint.
 
-Reviewer must confirm **β** (or pick **γ**); **α** is recorded
-rejected. This subsection is the gate — everything else is
-satellite.
+§3.C is now a single ratified decision (β); the impl PR has
+exactly one composition to land. This subsection is the gate —
+everything else is satellite.
 
 ### 3.D The double gate — non-redundant (RATIFIED)
 
@@ -469,8 +483,8 @@ verifies and lists the exact set). No alembic / tenant-baseline
 ## 7. DEV/verification MD requirements (impl PR)
 
 `docs/DEV_AND_VERIFICATION_ODOO18_BREAKAGE_HELPDESK_SYNC_AUTO_TRIGGER_R1_20260519.md`
-+ index line. Must document: the ratified §3.C composition
-choice (β vs γ) **as implemented**, with the §3.2-rollback
++ index line. Must document: the RATIFIED §3.C-β status-first
+reorder **as implemented**, with the §3.2-rollback
 mutation-scope analysis that forces it; the §3.D double-gate
 with BOTH trap vectors (canceled-mapping; incident_status
 override); the §3.E helper-extraction behavior-preservation
@@ -513,14 +527,18 @@ auto-trigger (only if such an entrypoint is ever introduced).
 
 ## 10. Reviewer Focus
 
-- **§3.C is the central question — ratify ONE.** Confirm **β**
-  (status-first reorder; §3.3 helper stays pure; helpdesk
-  mutations applied after the trigger converges, never in a
-  rolled-back window) vs. **γ** (replay-callback helper). **α**
-  is recorded rejected (silent helpdesk-state loss on the
-  CAS-loser race). Push back if β's reorder of
-  `apply_helpdesk_ticket_update` is unacceptable, or if γ's
-  single-handler purity is judged worth the extra intricacy.
+- **§3.C is RATIFIED as β (status-first reorder)** — confirm
+  the impl matches it, not which option wins. β: after the
+  replay short-circuit, flush status + `updated_at` only → the
+  unchanged §3.3 helper (eligibility/sync gate → create →
+  self-heal / unrecoverable) → then apply `responsibility` +
+  the `target_job` mutations on the helper's returned incident
+  and flush again. The §3.2 CAS-loser rollback can only ever
+  unwind the status-only flush; the helper self-heals it; the
+  heavy helpdesk mutations land after convergence, never in a
+  rolled-back window; the §3.3 helper stays pure/unchanged. α
+  and γ are recorded rejected. Push back only if the impl
+  deviates from β, or if a concrete defect in β is found.
 - **§3.D double gate — both vectors.** Confirm gate #1
   (`derived_sync_status == "completed"`) is NOT redundant:
   Vector A (`canceled`/`cancelled` → incident `closed`/sync
