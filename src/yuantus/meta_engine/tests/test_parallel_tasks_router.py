@@ -426,6 +426,10 @@ def test_breakage_helpdesk_ticket_update_endpoint_returns_payload():
         incident_status=None,
         incident_responsibility=None,
         user_id=3,
+        # Tier-B #3 §3.4: the route now also forwards the
+        # default-OFF auto-loopback opt-in + the loopback actor.
+        auto_loopback=False,
+        loopback_user_id=3,
     )
 
 

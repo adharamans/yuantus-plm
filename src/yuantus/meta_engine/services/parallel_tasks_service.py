@@ -4236,12 +4236,52 @@ class BreakageIncidentService:
             # test_update_status_default_off_is_byte_identical.
             return incident
 
-        # Tier-B #3 §3.3 auto-trigger (taskbook `fb9d0b5`).
-        # §3.A: gate on the POST-update descriptor — fire iff the
-        # NEW status is eligible (product policy A1, no delta
-        # gating). §3.E: an ineligible new status is a valid no-op
-        # — gate BEFORE calling create_…eco; do NOT call it and
-        # swallow its ValueError.
+        # Tier-B #3 §3.3/§3.4 shared auto-trigger. The caller has
+        # already flushed the target status; the post-flush
+        # eligibility gate + create + §3.C self-heal / unrecoverable
+        # logic lives in ONE shared helper (Tier-B #3 §3.4 §3.E,
+        # taskbook `cab1162`) — §3.4 reuses it, adding NO second
+        # race handler.
+        return self._auto_trigger_design_loopback(
+            incident_id,
+            target_status=target_status,
+            loopback_user_id=loopback_user_id,
+        )
+
+    def _auto_trigger_design_loopback(
+        self,
+        incident_id: str,
+        *,
+        target_status: str,
+        loopback_user_id: Optional[int],
+    ) -> BreakageIncident:
+        """Shared §3.3/§3.4 auto-loopback (Tier-B #3 §3.4 §3.E,
+        taskbook `cab1162`). The caller MUST have already flushed
+        the ``target_status`` onto the incident; this helper then:
+
+        - §3.A / §3.D gate #2: build the post-update descriptor and
+          fire iff the new status is loopback-eligible (product
+          policy A1, no delta gating). An ineligible status is a
+          valid no-op — return the incident; do NOT call
+          create_…eco and swallow its ValueError.
+        - require ``loopback_user_id`` (the routes always supply
+          ``int(user.id)``; this guards a direct-caller misuse).
+        - §3.C ratified single behavior: on ``created`` return the
+          incident (CAS winner — the caller's status flush is
+          intact); on ``created=False`` re-read and self-heal by
+          re-applying ``target_status`` (idempotent in the
+          no-rollback dedupe sub-case; the real repair in the §3.2
+          CAS-loser ``self.session.rollback()`` sub-case) and
+          return an ordinary success — no client-visible retry;
+          raise ``BreakageDesignLoopbackLinkRace`` ONLY when the
+          re-read finds no incident or no winner ECO.
+
+        Behavior-preserving extraction of §3.3's inline block;
+        ``test_breakage_update_status_auto_trigger.py`` stays green
+        UNCHANGED as the regression proof.
+        """
+
+        incident = self.session.get(BreakageIncident, incident_id)
         descriptor = resolve_breakage_eco_closure_descriptor(
             self._breakage_design_loopback_row(incident)
         )
@@ -4254,31 +4294,29 @@ class BreakageIncidentService:
                 f"the new status is loopback-eligible: {incident_id}"
             )
 
-        # §3.C: same session/transaction — the route owns the
-        # single db.commit(), which commits the status change and
-        # the loopback link atomically. §3.D: §3.2's durable CAS
-        # makes a repeat/concurrent fire idempotent (created=False),
-        # not duplicate-producing.
+        # §3.C: same session/transaction — the route owns the single
+        # db.commit(). §3.D: §3.2's durable CAS makes a repeat /
+        # concurrent fire idempotent (created=False), not duplicate-
+        # producing.
         creation = self.create_breakage_design_loopback_eco(
             incident_id,
             user_id=loopback_user_id,
             allow_duplicate=False,
         )
         if creation.created:
-            # CAS winner — no rollback occurred; the status flush
-            # above is intact.
+            # CAS winner — no rollback occurred; the caller's status
+            # flush is intact.
             return incident
 
         # created=False — either §3.2's durable-dedupe early return
         # (no rollback; status flush intact) OR the CAS-loser path,
         # which did a full self.session.rollback() that ALSO unwound
-        # our status flush (it shares this transaction). §3.C
+        # the caller's status flush (shared transaction). §3.C
         # ratified behavior: re-read and self-heal by re-applying
-        # the target status (idempotent in the no-rollback
-        # sub-case; the real repair in the CAS-loser sub-case) and
-        # return an ordinary success — no client-visible retry.
-        # Raise the dedicated unrecoverable-state exception ONLY
-        # when the re-read finds no incident or no winner ECO.
+        # the target status (idempotent in the no-rollback sub-case;
+        # the real repair in the CAS-loser sub-case). Raise the
+        # dedicated unrecoverable-state exception ONLY when the
+        # re-read finds no incident or no winner ECO.
         incident = self.session.get(BreakageIncident, incident_id)
         if incident is None or creation.eco is None:
             raise BreakageDesignLoopbackLinkRace(
@@ -6280,6 +6318,8 @@ class BreakageIncidentService:
         incident_status: Optional[str] = None,
         incident_responsibility: Optional[str] = None,
         user_id: Optional[int] = None,
+        auto_loopback: bool = False,
+        loopback_user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         incident = self.session.get(BreakageIncident, incident_id)
         if not incident:
@@ -6377,42 +6417,27 @@ class BreakageIncidentService:
             fallback=sync_info.get("sync_status"),
         )
 
-        incident.status = normalized_incident_status
-        if incident_responsibility is not None:
-            incident.responsibility = str(incident_responsibility or "").strip() or None
-        elif provider_assignee:
-            incident.responsibility = str(provider_assignee).strip()
-        incident.updated_at = now
+        # Tier-B #3 §3.4 helpdesk-sync auto-trigger (taskbook
+        # `cab1162`). The "heavy" helpdesk mutations
+        # (responsibility + the job payload/status envelope) are
+        # factored into one closure so the default-OFF single-flush
+        # path and the §3.C-β path share one implementation.
+        def _apply_helpdesk_mutations(target_incident, job):
+            if incident_responsibility is not None:
+                target_incident.responsibility = (
+                    str(incident_responsibility or "").strip() or None
+                )
+            elif provider_assignee:
+                target_incident.responsibility = str(provider_assignee).strip()
 
-        updated_payload = dict(payload)
-        integration_payload = (
-            dict(integration) if isinstance(integration, dict) else {}
-        )
-        integration_payload["provider"] = normalized_provider
-        integration_payload["idempotency_key"] = idempotency_key
-        updated_payload["integration"] = integration_payload
-        updated_payload["helpdesk_sync"] = {
-            "sync_status": derived_sync_status,
-            "provider": normalized_provider,
-            "idempotency_key": idempotency_key,
-            "external_ticket_id": resolved_external_ticket_id,
-            "provider_ticket_status": normalized_provider_status,
-            "provider_ticket_updated_at": provider_updated.isoformat(),
-            "provider_assignee": provider_assignee,
-            "provider_payload": provider_payload or {},
-            "provider_last_event_id": provider_last_event_id,
-            "provider_event_ids": existing_event_ids,
-            "updated_at": now.isoformat(),
-            "updated_by_id": user_id,
-        }
-        if resolved_external_ticket_id:
-            updated_payload["external_ticket_id"] = resolved_external_ticket_id
-
-        result = updated_payload.get("result")
-        if not isinstance(result, dict):
-            result = {}
-        result.update(
-            {
+            updated_payload = dict(payload)
+            integration_payload = (
+                dict(integration) if isinstance(integration, dict) else {}
+            )
+            integration_payload["provider"] = normalized_provider
+            integration_payload["idempotency_key"] = idempotency_key
+            updated_payload["integration"] = integration_payload
+            updated_payload["helpdesk_sync"] = {
                 "sync_status": derived_sync_status,
                 "provider": normalized_provider,
                 "idempotency_key": idempotency_key,
@@ -6420,35 +6445,104 @@ class BreakageIncidentService:
                 "provider_ticket_status": normalized_provider_status,
                 "provider_ticket_updated_at": provider_updated.isoformat(),
                 "provider_assignee": provider_assignee,
+                "provider_payload": provider_payload or {},
                 "provider_last_event_id": provider_last_event_id,
                 "provider_event_ids": existing_event_ids,
                 "updated_at": now.isoformat(),
+                "updated_by_id": user_id,
             }
-        )
-        updated_payload["result"] = result
-        updated_payload["provider_last_event_id"] = provider_last_event_id
-        updated_payload["provider_event_ids"] = existing_event_ids
+            if resolved_external_ticket_id:
+                updated_payload["external_ticket_id"] = resolved_external_ticket_id
 
-        target_job.payload = updated_payload
-        if derived_sync_status == "completed":
-            target_job.status = JobStatus.COMPLETED.value
-            target_job.completed_at = now
-            target_job.last_error = None
-        elif derived_sync_status == "failed":
-            target_job.status = JobStatus.FAILED.value
-            target_job.completed_at = now
-            target_job.last_error = (
-                f"provider_ticket_status={normalized_provider_status}"
+            result = updated_payload.get("result")
+            if not isinstance(result, dict):
+                result = {}
+            result.update(
+                {
+                    "sync_status": derived_sync_status,
+                    "provider": normalized_provider,
+                    "idempotency_key": idempotency_key,
+                    "external_ticket_id": resolved_external_ticket_id,
+                    "provider_ticket_status": normalized_provider_status,
+                    "provider_ticket_updated_at": provider_updated.isoformat(),
+                    "provider_assignee": provider_assignee,
+                    "provider_last_event_id": provider_last_event_id,
+                    "provider_event_ids": existing_event_ids,
+                    "updated_at": now.isoformat(),
+                }
             )
+            updated_payload["result"] = result
+            updated_payload["provider_last_event_id"] = provider_last_event_id
+            updated_payload["provider_event_ids"] = existing_event_ids
+
+            job.payload = updated_payload
+            if derived_sync_status == "completed":
+                job.status = JobStatus.COMPLETED.value
+                job.completed_at = now
+                job.last_error = None
+            elif derived_sync_status == "failed":
+                job.status = JobStatus.FAILED.value
+                job.completed_at = now
+                job.last_error = (
+                    f"provider_ticket_status={normalized_provider_status}"
+                )
+            else:
+                if str(job.status or "") == JobStatus.PENDING.value:
+                    job.status = JobStatus.PROCESSING.value
+                if job.started_at is None:
+                    job.started_at = now
+                job.completed_at = None
+            self.session.add(job)
+            self.session.add(target_incident)
+            self.session.flush()
+
+        if not auto_loopback:
+            # Default-OFF: byte-identical pre-§3.4 single-flush
+            # flow on the originally-resolved job — no
+            # eligibility/sync gate, no create_…eco. (updated_at is
+            # set before responsibility instead of after — a
+            # behaviorally-inert intra-transaction reorder for the
+            # shared closure; final committed state is identical.)
+            incident.status = normalized_incident_status
+            incident.updated_at = now
+            _apply_helpdesk_mutations(incident, target_job)
         else:
-            if str(target_job.status or "") == JobStatus.PENDING.value:
-                target_job.status = JobStatus.PROCESSING.value
-            if target_job.started_at is None:
-                target_job.started_at = now
-            target_job.completed_at = None
-        self.session.add(target_job)
-        self.session.add(incident)
-        self.session.flush()
+            # §3.C-β (RATIFIED): flush ONLY status + updated_at, run
+            # the shared §3.3 helper (double-gated below), THEN
+            # apply the heavy helpdesk mutations on the helper's
+            # returned incident + a PK-refetched job. A §3.2
+            # CAS-loser self.session.rollback() can therefore only
+            # ever unwind the status-only flush (the helper
+            # self-heals it); the responsibility / job-payload /
+            # event-id-accumulator mutations land AFTER the trigger
+            # converges and are never inside a rolled-back window.
+            resolved_job_id = target_job.id
+            incident.status = normalized_incident_status
+            incident.updated_at = now
+            self.session.add(incident)
+            self.session.flush()
+            # §3.D double gate: gate #1 here (sync outcome must be
+            # "completed" — this closes the canceled→closed/failed
+            # vector and the incident_status-override-with-failed-
+            # sync vector); gate #2 (status eligibility) + the
+            # loopback_user_id guard + the §3.C self-heal /
+            # unrecoverable behavior are all inside the shared
+            # helper (no second race handler — §3.4 §3.E).
+            if derived_sync_status == "completed":
+                incident = self._auto_trigger_design_loopback(
+                    incident_id,
+                    target_status=normalized_incident_status,
+                    loopback_user_id=loopback_user_id,
+                )
+            # PK re-fetch: a §3.2 CAS-loser rollback expires the
+            # job; a PK get is deterministic and invariant under
+            # that ECO-only rollback. updated_at is left as set in
+            # the status-only flush (the helper re-applies it on
+            # the CAS-loser self-heal); responsibility does NOT
+            # re-bump it, matching pre-§3.4's single bump.
+            job_after = self.session.get(ConversionJob, resolved_job_id)
+            _apply_helpdesk_mutations(incident, job_after)
+
         response = self.get_helpdesk_sync_status(incident_id)
         if normalized_event_id:
             response["event_id"] = normalized_event_id

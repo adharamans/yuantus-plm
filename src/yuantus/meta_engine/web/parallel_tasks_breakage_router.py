@@ -153,6 +153,17 @@ class BreakageHelpdeskTicketUpdateRequest(BaseModel):
     provider_payload: Optional[Dict[str, Any]] = None
     incident_status: Optional[str] = None
     incident_responsibility: Optional[str] = None
+    auto_loopback: bool = Field(
+        default=False,
+        description=(
+            "Tier-B #3 §3.4 opt-in. When True and the sync outcome "
+            "is 'completed' AND the resulting incident status is "
+            "loopback-eligible (resolved/closed), auto-spawn (or "
+            "reuse, via §3.2 durable idempotency) the design-loopback "
+            "ECO in the same transaction. Default False preserves "
+            "byte-identical pre-§3.4 behavior."
+        ),
+    )
 
 
 class BreakageExportJobCreateRequest(BaseModel):
@@ -1173,8 +1184,22 @@ async def apply_breakage_helpdesk_ticket_update(
             incident_status=payload.incident_status,
             incident_responsibility=payload.incident_responsibility,
             user_id=int(user.id),
+            auto_loopback=payload.auto_loopback,
+            loopback_user_id=int(user.id),
         )
         db.commit()
+    except BreakageDesignLoopbackLinkRace as exc:
+        # Tier-B #3 §3.4 §3.I unrecoverable arm: the §3.2 CAS-loser
+        # rollback left no determinable linked ECO. Retryable —
+        # the normal CAS race is self-healed in the service and
+        # never reaches here.
+        db.rollback()
+        _raise_api_error(
+            status_code=409,
+            code="breakage_loopback_link_race",
+            message=str(exc),
+            context={"incident_id": incident_id},
+        )
     except ValueError as exc:
         db.rollback()
         if "Breakage incident not found" in str(exc):
@@ -1194,5 +1219,20 @@ async def apply_breakage_helpdesk_ticket_update(
                 "job_id": payload.job_id,
             },
         )
+    except (HTTPException, PLMException):
+        # §3.4 §3.I atomic coupling: an ECOService.create_eco
+        # permission failure (PLMException) — and any HTTPException
+        # — propagates verbatim (mirroring §3.3 / §3.1), NOT
+        # collapsed into the legacy 400 breakage_helpdesk_sync_invalid.
+        db.rollback()
+        raise
+    except Exception:
+        # Unlike §3.3's status route there is no legacy
+        # `Exception → 400` behavior to preserve here (this route
+        # only ever had `except ValueError`). Roll back so a
+        # partially-flushed loopback/helpdesk state never leaks,
+        # then re-raise verbatim. Inert for default-OFF.
+        db.rollback()
+        raise
     result["operator_id"] = int(user.id)
     return result
