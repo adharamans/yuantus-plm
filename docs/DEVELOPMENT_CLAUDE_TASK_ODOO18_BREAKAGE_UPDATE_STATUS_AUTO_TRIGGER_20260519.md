@@ -91,24 +91,32 @@ in_progress / unknown are NOT eligible.
 
 ## 3. Design decisions
 
-### 3.A Trigger point — PRE-RATIFIED: fire on eligible new status (no delta detection)
+### 3.A Trigger point — PRE-RATIFIED: fire on eligible new status (no delta gating)
 
-`update_status` has no prior-status read. Two readings:
+`update_status` already reads the incident
+(`session.get(BreakageIncident, incident_id)`,
+`parallel_tasks_service.py:4196`) before mutating it, so the
+**prior status IS available** — A1 is a deliberate product-policy
+choice to *not* gate on the delta, not a consequence of any
+technical limitation. Two readings:
 
-- **A1 (recommended, pre-ratified):** when `auto_loopback=True`,
-  after the status flush, fire the loopback iff the **new**
-  status is eligible (`is_breakage_eligible_for_design_loopback`
-  on the post-update descriptor). No old-vs-new delta. §3.2's
+- **A1 (recommended, pre-ratified — product policy):** when
+  `auto_loopback=True`, after the status flush, fire the
+  loopback iff the **new** status is eligible
+  (`is_breakage_eligible_for_design_loopback` on the
+  post-update descriptor). No old-vs-new delta gating. §3.2's
   durable idempotency makes a redundant fire safe (a
   `resolved → resolved` no-op update just returns
   `created=False`).
-- **A2:** add prior-status read and fire only on an actual
-  transition into an eligible status.
+- **A2:** use the readable prior status to fire only on an
+  actual transition into an eligible status.
 
-Author pre-ratifies **A1**: A2 adds a prior-status read +
-delta logic for zero behavioral benefit (the eligibility
-predicate already restricts to `{resolved, closed}` and §3.2
-de-dupes redundant fires). Reviewer can flag A2 if an
+Author pre-ratifies **A1** as the product policy: A2's
+delta-gating adds branching for zero behavioral benefit (the
+eligibility predicate already restricts to `{resolved, closed}`
+and §3.2 de-dupes redundant fires — a non-transition redundant
+fire is a fast `created=False`, not a duplicate). Reviewer can
+flag A2 if an
 explicit "only on transition" audit signal is wanted — but
 that belongs to §3.6 (event emission), not the trigger
 mechanism.
@@ -136,7 +144,7 @@ def update_status(
 - `BreakageStatusUpdateRequest` gains
   `auto_loopback: bool = False`.
 
-### 3.C Transaction boundary + the §3.2-rollback composition — OPEN, reviewer ratify
+### 3.C Transaction boundary + the §3.2-rollback composition — RATIFIED (single deterministic behavior)
 
 The route owns the single `db.commit()`. With
 `auto_loopback=True`, `update_status` flushes the status change
@@ -150,40 +158,60 @@ transaction rollback. Composed into `update_status`, a CAS loss
 (genuine concurrency: two callers simultaneously do
 `update_status(resolved, auto_loopback=True)` on the SAME
 incident) would roll back the **status change too**, because it
-shares the transaction. The caller would get `created=False`
-with the winner ECO but the status update silently lost.
+shares the transaction.
 
-Options:
+**RATIFIED behavior (single, deterministic — not a
+choose-one-of):**
 
-- **C1 (author recommendation):** Accept and *document* the
-  rare-race retry semantic. The CAS-loss only happens under two
-  simultaneous resolve-with-auto-loopback calls on the *same*
-  incident. The implementation detects the lost status change
-  (the service re-applies the status after the §3.2 method
-  returns `created=False`, OR the route surfaces a retryable
-  **409 `breakage_loopback_link_race`**). On retry the incident
-  is already linked, so `create_…eco` returns `created=False`
-  fast and the status re-applies cleanly. Transient,
-  self-healing, no change to merged §3.2. The taskbook pins
-  the route mapping + a MANDATORY test simulating the race.
-- **C2:** Wrap the auto-triggered `create_…eco` in a SAVEPOINT
-  (`session.begin_nested()`) so a CAS-loss only unwinds the
-  loopback attempt, not the status flush. **Blocked:** §3.2's
-  loser path calls `self.session.rollback()` (full rollback),
+1. **Normal CAS-loser race → the service self-heals; the
+   caller never retries.** When the auto-triggered
+   `create_breakage_design_loopback_eco` returns
+   `created=False` having internally done its full
+   `self.session.rollback()`, `update_status` detects the
+   status change was unwound (the post-call session no longer
+   carries the flushed status), then **re-reads the incident,
+   re-applies the target status + `updated_at`, flushes, and
+   returns the `BreakageIncident` normally**. The winner's ECO
+   link is already committed (the §3.2 winner committed it);
+   the loopback is satisfied (`created=False`), the status is
+   re-applied, and the route's single `db.commit()` commits
+   the re-applied status. The default caller sees an ordinary
+   success — **no client-visible retry for normal
+   concurrency.**
+2. **Unrecoverable state only → dedicated exception → route
+   409.** If after the §3.2 rollback the re-read finds **no
+   incident** (deleted concurrently) or **no winner ECO**
+   (`incident.eco_id` is NULL/dangling — should not happen
+   post-§3.2 but is the genuine "cannot determine the linked
+   ECO" case), `update_status` raises a dedicated exception
+   that the route maps to a retryable **409
+   `breakage_loopback_link_race`**. This is the exception
+   recovery boundary, not the normal path.
+
+This converges what an earlier draft left as "service re-apply
+**OR** 409" into one behavior: **service re-apply is the
+normal path; 409 is only the unrecoverable-state boundary.**
+The impl PR has exactly one API semantic to land; the §5
+MANDATORY tests pin both arms (normal race → ordinary success
+with status applied + `created=False`; forced-unrecoverable →
+409).
+
+**Rejected alternatives (recorded):**
+
+- **C2 — SAVEPOINT** (`session.begin_nested()`) so a CAS-loss
+  only unwinds the loopback attempt. **Blocked:** §3.2's loser
+  path calls bare `self.session.rollback()` (full rollback),
   which unwinds the whole transaction *including* the
-  savepoint — so a savepoint wrapper does NOT contain it
-  without changing merged §3.2. Out of §3.3 scope.
-- **C3:** Two-phase — commit the status change first, then a
-  second transaction for the loopback. Breaks the route's
-  single-commit shape and "caller owns the boundary"; rejected.
+  savepoint — a savepoint wrapper cannot contain it without
+  changing merged §3.2 (a separate later opt-in, out of §3.3
+  scope).
+- **C3 — two-phase** (commit status first, then a second
+  transaction for the loopback). Breaks the route's
+  single-commit shape and "caller owns the boundary".
 
-**Author recommends C1**, with the §3.3 service method
-re-applying the status write after a `created=False`-with-prior-
-rollback (detected because the post-call session no longer has
-the flushed status), and the route mapping an unrecoverable race
-to a retryable 409. Reviewer must ratify C1 vs. mandating a
-§3.2 refactor (a separate opt-in) to make C2 viable. **This is
-the central open question of this taskbook.**
+Reviewer focus is now confirmation of this single ratified
+behavior (and that the §3.2 refactor for a true-savepoint C2
+remains a separate later opt-in), not a choose-one.
 
 ### 3.D Repeat-trigger semantics — PRE-RATIFIED (via §3.2)
 
@@ -213,7 +241,11 @@ is a *trigger*, §3.2 is the *idempotent effect*.
   an ECO-create failure blocks the status change. The route
   surfaces the ECO error verbatim (consistent with §3.1's
   pattern — no breakage-route-local re-mapping).
-- **CAS race loss** → §3.C C1.
+- **CAS race loss** → §3.C ratified behavior: normal race →
+  service re-applies status + returns ordinary success
+  (`created=False`, status applied), no client retry;
+  unrecoverable (no incident / no winner ECO) → dedicated
+  exception → route 409 `breakage_loopback_link_race`.
 
 ### 3.F Relationship to §3.2 `created=False`
 
@@ -232,12 +264,17 @@ concern, explicitly out of §3.3 scope.
   `auto_loopback` and the post-flush incident is eligible, call
   `create_breakage_design_loopback_eco(incident_id,
   user_id=loopback_user_id, allow_duplicate=False)`; implement
-  the §3.C-C1 status-re-apply on the rare CAS-loss path.
+  the §3.C ratified path — on a `created=False`-with-prior-
+  rollback, re-read the incident, re-apply the target status +
+  `updated_at`, flush, return normally (no client retry);
+  raise the dedicated exception ONLY when the re-read finds no
+  incident or no winner ECO.
 - `parallel_tasks_breakage_router.py`:
   `BreakageStatusUpdateRequest` gains `auto_loopback: bool =
   False`; the route passes `auto_loopback=payload.auto_loopback,
-  loopback_user_id=int(user.id)`; maps an unrecoverable
-  CAS-race to **409 `breakage_loopback_link_race`** (retryable);
+  loopback_user_id=int(user.id)`; maps the §3.C dedicated
+  unrecoverable-state exception to **409
+  `breakage_loopback_link_race`** (retryable);
   ECO permission failure propagates verbatim (rollback +
   re-raise, mirroring §3.1).
 - No new route; `len(app.routes)` stays 677.
@@ -262,14 +299,22 @@ MANDATORY exactly-named:
   two sequential `update_status(resolved, auto_loopback=True)`:
   second returns the same ECO via §3.2 durable dedupe; exactly
   one ECO; status stable.
-- **`test_update_status_auto_loopback_cas_race_is_retryable`** —
-  simulate the §3.C-C1 concurrent-link race (two sessions on a
-  shared engine, mirroring §3.2's CAS test): the loser's
-  status change is recoverable (re-applied by the service OR
-  surfaced as 409 `breakage_loopback_link_race`), and a retry
-  succeeds with the incident already linked (`created=False`)
-  and the status applied. Pins whichever §3.C resolution the
-  reviewer ratifies.
+- **`test_update_status_auto_loopback_cas_race_self_heals_status`** —
+  the §3.C **normal-race arm**. Two sessions on a shared engine
+  (mirroring §3.2's CAS test): the loser's auto-trigger does
+  §3.2's internal rollback, then `update_status` re-reads,
+  re-applies the target status, flushes, and returns the
+  `BreakageIncident` as an **ordinary success** — incident
+  status == target, `incident.eco_id` == the winner's ECO, no
+  duplicate ECO, **no exception / no 409** (the default caller
+  never retries for normal concurrency).
+- **`test_update_status_auto_loopback_unrecoverable_race_maps_409`** —
+  the §3.C **unrecoverable arm**. Force the post-rollback
+  re-read to find no incident / no winner ECO (e.g. delete the
+  incident concurrently): `update_status` raises the dedicated
+  exception and the route maps it to a retryable **409
+  `breakage_loopback_link_race`**. Pins that 409 is ONLY the
+  exception boundary, never the normal path.
 - **`test_update_status_auto_loopback_eco_permission_failure_rolls_back_status`** —
   eligible + `ECOService.create_eco` permission error:
   whole transaction rolls back (status NOT changed), error
@@ -309,12 +354,15 @@ No alembic / tenant-baseline — §3.3 adds no schema (§3.2's
 ## 7. DEV/verification MD requirements (impl PR)
 
 `docs/DEV_AND_VERIFICATION_ODOO18_BREAKAGE_UPDATE_STATUS_AUTO_TRIGGER_R1_20260519.md`
-+ index line. Must document: ratified §3.A trigger reading;
-§3.C resolution chosen + why (and the §3.2-rollback composition
-analysis); §3.E atomic-coupling decision; default-OFF
-byte-identical proof; the §3.2↔§3.3 idempotency relationship;
-inter-slice status (§3.4 now reuses §3.3's path; §3.6/§3.7
-unchanged).
++ index line. Must document: the ratified §3.A trigger reading
+(product-policy A1, no delta gating); the ratified §3.C
+single deterministic behavior as implemented — normal race →
+service re-applies status → ordinary success (no client retry),
+unrecoverable race only → dedicated exception → 409 — plus the
+§3.2-rollback composition analysis that forces it; the §3.E
+atomic-coupling decision; default-OFF byte-identical proof; the
+§3.2↔§3.3 idempotency relationship; inter-slice status (§3.4
+now reuses §3.3's path; §3.6/§3.7 unchanged).
 
 ## 8. Non-Goals (hard boundaries for the impl PR)
 
@@ -342,16 +390,27 @@ event emission; §3.7 metrics; default-ON flip (if ever).
 
 ## 10. Reviewer Focus
 
-- **§3.C is the central question.** Confirm C1 (document the
-  rare-race retry + 409 mapping, status re-applied) vs.
-  mandating a separate §3.2 refactor to enable C2 (savepoint).
-  C1 keeps §3.3 minimal and doesn't touch merged §3.2; the
-  race is two simultaneous resolve+auto_loopback calls on one
-  incident, transient, self-healing on retry. Push back if the
-  atomic status+loopback guarantee under concurrency must be
-  stronger than "retryable 409".
-- **§3.A** trigger reading: A1 (fire on eligible new status, no
-  delta) vs. A2 (transition delta). Author recommends A1.
+- **§3.C is RATIFIED — confirm the impl matches it, not which
+  option wins.** The single deterministic behavior: normal
+  CAS-loser race → after §3.2's internal rollback, the service
+  re-reads, re-applies the target status, flushes, returns the
+  `BreakageIncident` as an **ordinary success** (no exception,
+  no client-visible retry, `created=False`); ONLY an
+  unrecoverable post-rollback state (re-read finds no incident
+  or no winner ECO) raises the dedicated exception → route 409
+  `breakage_loopback_link_race`. This keeps §3.3 minimal and
+  does not touch merged §3.2. C2 (savepoint) is BLOCKED on a
+  separately-opted-in §3.2 refactor (§3.2's bare
+  `self.session.rollback()` would unwind the savepoint); C3
+  (two-phase) rejected. Push back only if the normal race must
+  NOT be silently self-healed, or if the unrecoverable case
+  should map to something other than a retryable 409.
+- **§3.A is PRE-RATIFIED** as product policy A1 (fire on
+  eligible new status, no delta gating). The prior status IS
+  readable (`session.get`, `parallel_tasks_service.py:4196`) —
+  A1 is a deliberate choice, not a technical limitation.
+  Confirm the product-policy rationale; push back only if
+  delta-gating (A2) is a hard product requirement.
 - **§3.E** atomic coupling: confirm that opting into
   `auto_loopback` correctly means an ECO-create permission
   failure rolls back the status change (intended) vs. a
@@ -362,15 +421,19 @@ event emission; §3.7 metrics; default-ON flip (if ever).
 - **Route exception-handling refinement (cross-callsite
   subtlety).** The existing status route catches generic
   `except Exception` → **400 `breakage_status_invalid`** +
-  rollback. As-is, that block would mask both (a) an
-  `ECOService.create_eco` permission failure and (b) the §3.C
-  retryable race as a generic 400. The impl PR must refine the
-  status route so the §3.E ECO error propagates verbatim
-  (mirroring §3.1's explicit `except Exception: rollback;
-  raise`) and the §3.C race surfaces as the retryable 409
+  rollback. The **normal** §3.C race never reaches this block
+  (the service self-heals and returns an ordinary
+  `BreakageIncident`). But as-is the block would still mask
+  both (a) an `ECOService.create_eco` permission failure and
+  (b) the §3.C **dedicated unrecoverable-state exception** as a
+  generic 400. The impl PR must refine the status route so the
+  §3.E ECO error propagates verbatim (mirroring §3.1's explicit
+  `except Exception: rollback; raise`) and the dedicated
+  unrecoverable-state exception maps to the retryable 409
   `breakage_loopback_link_race` — NOT collapsed into the
   pre-existing 400. Confirm the impl PR pins this with a
-  route-level test; a silent 400 here would make a transient
-  race indistinguishable from a real invalid-status error.
+  route-level test; a silent 400 here would make an
+  unrecoverable loopback-link state indistinguishable from a
+  real invalid-status error.
 - Did anything pre-decide a §3.4+ slice or touch merged §3.2?
   It must not.
