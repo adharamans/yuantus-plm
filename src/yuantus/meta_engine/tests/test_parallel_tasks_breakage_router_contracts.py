@@ -26,6 +26,7 @@ _BREAKAGE_ROUTE_KEYS = {
     ("GET", "/breakages/export/jobs/{job_id}"),
     ("GET", "/breakages/export/jobs/{job_id}/download"),
     ("POST", "/breakages/{incident_id}/status"),
+    ("POST", "/breakages/{incident_id}/design-loopback/eco"),
     ("POST", "/breakages/{incident_id}/helpdesk-sync"),
     ("GET", "/breakages/{incident_id}/helpdesk-sync/status"),
     ("POST", "/breakages/{incident_id}/helpdesk-sync/execute"),

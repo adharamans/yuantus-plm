@@ -89,6 +89,17 @@ class BreakageStatusUpdateRequest(BaseModel):
     status: str
 
 
+class BreakageDesignLoopbackEcoCreateRequest(BaseModel):
+    allow_duplicate: bool = Field(
+        default=False,
+        description=(
+            "When True, bypass the best-effort query-before-create dedupe "
+            "and force a new ECO. Default False — repeated calls return "
+            "the existing ECO when one is already linked to this breakage."
+        ),
+    )
+
+
 class BreakageHelpdeskSyncRequest(BaseModel):
     metadata_json: Optional[Dict[str, Any]] = None
     provider: str = "stub"
@@ -854,6 +865,91 @@ async def update_breakage_status(
         "id": incident.id,
         "status": incident.status,
         "updated_at": incident.updated_at.isoformat() if incident.updated_at else None,
+        "operator_id": int(user.id),
+    }
+
+
+@parallel_tasks_breakage_router.post(
+    "/breakages/{incident_id}/design-loopback/eco"
+)
+async def create_breakage_design_loopback_eco(
+    incident_id: str,
+    payload: BreakageDesignLoopbackEcoCreateRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Spawn (or reuse) the design-loopback ECO for an eligible breakage.
+
+    Delegates entirely to
+    ``BreakageIncidentService.create_breakage_design_loopback_eco`` —
+    this route is the HTTP seam for the service method shipped in
+    PR #596 (`6e4ce54`). Permission to create an ECO comes via the
+    underlying ``ECOService.create_eco`` call; no dedicated capability
+    is gated here (taskbook §3.5 author-recommended reject).
+
+    Dedupe is best-effort post-PR #596 (`description`-envelope
+    substring scan, race-unsafe). A 200 + ``created=False`` response
+    indicates an existing ECO matched the breakage's closeout
+    reference; the caller's intent ("get me the ECO for this
+    breakage") is satisfied either way. Durable race-safe idempotency
+    is the §3.2 follow-up.
+    """
+
+    service = BreakageIncidentService(db)
+    try:
+        result = service.create_breakage_design_loopback_eco(
+            incident_id,
+            user_id=int(user.id),
+            allow_duplicate=payload.allow_duplicate,
+        )
+        db.commit()
+    except ValueError as exc:
+        # The service method raises ValueError in two cases:
+        # 1) "Breakage incident not found: <id>" — true 404.
+        # 2) "breakage status <s> is not eligible for design loopback"
+        #    — caller's request is well-formed but the incident's
+        #    state forbids the action; 409 with a discriminator code.
+        # The merged eligibility predicate
+        # (`is_breakage_eligible_for_design_loopback`) is the
+        # authoritative source for #2's message prefix.
+        db.rollback()
+        message = str(exc)
+        if message.startswith("Breakage incident not found"):
+            _raise_api_error(
+                status_code=404,
+                code="breakage_not_found",
+                message=message,
+                context={"incident_id": incident_id},
+            )
+        _raise_api_error(
+            status_code=409,
+            code="breakage_not_eligible_for_loopback",
+            message=message,
+            context={"incident_id": incident_id},
+        )
+    except Exception:
+        # Defense in depth: any other exception path
+        # (`HTTPException` from `ECOService.create_eco` permission
+        # check, an unrelated runtime error, etc.) must roll back
+        # the session before re-raising. `ECOService.create_eco`
+        # checks permission BEFORE its `session.add` / `flush`
+        # (verified `eco_service.py:520` vs. `534-535`), so today
+        # this only matters for a hypothetical future reorder; we
+        # roll back unconditionally to keep that future safe.
+        # Re-raising preserves the original exception type (and
+        # its status code if it's an `HTTPException`) so FastAPI's
+        # handler surfaces the upstream error verbatim — we do not
+        # invent a breakage-route-local translation that would
+        # diverge from how ECO routes already surface the same
+        # permission errors.
+        db.rollback()
+        raise
+
+    return {
+        "incident_id": result.incident_id,
+        "eco_id": result.eco.id,
+        "reference": result.reference,
+        "created": result.created,
         "operator_id": int(user.id),
     }
 
