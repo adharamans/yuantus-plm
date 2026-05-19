@@ -452,7 +452,14 @@ def test_update_status_auto_loopback_cas_race_self_heals_status():
 # ==========================================================================
 
 
-def _unrecoverable_creation(self, incident_id, *, user_id, allow_duplicate=False):
+def _unrecoverable_creation(
+    self, incident_id, *, user_id, allow_duplicate=False, **_kw
+):
+    # **_kw absorbs the Tier-B #3 §3.6 §3.F additive kwargs
+    # (trigger_source / sync_status / provider_ticket_status) that
+    # the helper now threads to create_…eco; autospec forwards them
+    # to this side_effect. Assertion-preserving signature widening
+    # only — no behavior change.
     """Taskbook-sanctioned forcing (§5): emulate a §3.2 CAS-loser
     that rolled back but left NO determinable winner ECO. Does the
     real `self.session.rollback()` (unwinding the status flush)

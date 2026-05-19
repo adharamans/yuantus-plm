@@ -68,6 +68,25 @@ class EcoDeletedEvent(DomainEvent):
     eco_id: str
 
 
+class BreakageDesignLoopbackEcoEvent(DomainEvent):
+    """Tier-B #3 §3.6 (taskbook ``61ce226``). Emitted when a
+    breakage design-loopback ECO result converges — a CAS-winner
+    creation (``created=True``) or a durable-dedupe reuse
+    (``created=False``). Never emitted on the §3.2 CAS-loser or
+    unrecoverable arms (those roll back; the transactional outbox
+    drops queued events), so ``eco_id`` is always populated.
+    """
+
+    event_type: str = "breakage.design_loopback_eco"
+    incident_id: str
+    eco_id: str
+    created: bool
+    trigger_source: str  # "route" | "update_status" | "helpdesk_sync"
+    incident_status: str
+    sync_status: Optional[str] = None  # helpdesk_sync source only (§3.F)
+    provider_ticket_status: Optional[str] = None  # helpdesk_sync only (§3.F)
+
+
 class FileUploadedEvent(DomainEvent):
     event_type: str = "file.uploaded"
     file_id: str

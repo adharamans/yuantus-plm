@@ -23,6 +23,8 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from yuantus.config import get_settings
+from yuantus.meta_engine.events.domain_events import BreakageDesignLoopbackEcoEvent
+from yuantus.meta_engine.events.transactional import enqueue_event
 from yuantus.meta_engine.models.eco import ECO
 from yuantus.meta_engine.models.job import ConversionJob, JobStatus
 from yuantus.meta_engine.models.parallel_tasks import (
@@ -4246,6 +4248,7 @@ class BreakageIncidentService:
             incident_id,
             target_status=target_status,
             loopback_user_id=loopback_user_id,
+            trigger_source="update_status",  # §3.6 §3.F (no sync ctx)
         )
 
     def _auto_trigger_design_loopback(
@@ -4254,6 +4257,9 @@ class BreakageIncidentService:
         *,
         target_status: str,
         loopback_user_id: Optional[int],
+        trigger_source: str,
+        sync_status: Optional[str] = None,
+        provider_ticket_status: Optional[str] = None,
     ) -> BreakageIncident:
         """Shared §3.3/§3.4 auto-loopback (Tier-B #3 §3.4 §3.E,
         taskbook `cab1162`). The caller MUST have already flushed
@@ -4302,6 +4308,9 @@ class BreakageIncidentService:
             incident_id,
             user_id=loopback_user_id,
             allow_duplicate=False,
+            trigger_source=trigger_source,
+            sync_status=sync_status,
+            provider_ticket_status=provider_ticket_status,
         )
         if creation.created:
             # CAS winner — no rollback occurred; the caller's status
@@ -4417,12 +4426,52 @@ class BreakageIncidentService:
                 return eco
         return None
 
+    def _enqueue_breakage_design_loopback_event(
+        self,
+        *,
+        incident_id: str,
+        eco_id: str,
+        created: bool,
+        trigger_source: str,
+        incident_status: str,
+        sync_status: Optional[str] = None,
+        provider_ticket_status: Optional[str] = None,
+        actor_id: Optional[int] = None,
+    ) -> None:
+        """Tier-B #3 §3.6 (taskbook ``61ce226``). No-op unless the
+        S2 settings flag is enabled (default OFF →
+        byte-identical). Mirrors ``ECOService._enqueue_eco_created``:
+        one transactional ``enqueue_event`` — published only after
+        the route's single commit, dropped by ANY rollback (so the
+        §3.2 CAS-loser de-dups automatically and is never an
+        enqueue site; see §3.B/§3.C).
+        """
+
+        if not get_settings().BREAKAGE_DESIGN_LOOPBACK_EVENTS_ENABLED:
+            return
+        enqueue_event(
+            self.session,
+            BreakageDesignLoopbackEcoEvent(
+                incident_id=incident_id,
+                eco_id=eco_id,
+                created=created,
+                trigger_source=trigger_source,
+                incident_status=incident_status,
+                sync_status=sync_status,
+                provider_ticket_status=provider_ticket_status,
+                actor_id=actor_id,
+            ),
+        )
+
     def create_breakage_design_loopback_eco(
         self,
         incident_id: str,
         *,
         user_id: int,
         allow_duplicate: bool = False,
+        trigger_source: str = "route",
+        sync_status: Optional[str] = None,
+        provider_ticket_status: Optional[str] = None,
     ) -> BreakageDesignLoopbackEcoCreation:
         """Explicitly create an ECO for an eligible breakage design loopback.
 
@@ -4458,6 +4507,20 @@ class BreakageIncidentService:
                 reference, incident_id=incident_id
             )
             if existing is not None:
+                # §3.6 §3.B: durable-dedupe reuse — a legitimate
+                # "reuse" signal (no create_eco, no CAS, no
+                # rollback). incident_status = the post-flush
+                # eligible status from preparation.descriptor.
+                self._enqueue_breakage_design_loopback_event(
+                    incident_id=incident_id,
+                    eco_id=existing.id,
+                    created=False,
+                    trigger_source=trigger_source,
+                    incident_status=preparation.descriptor.status,
+                    sync_status=sync_status,
+                    provider_ticket_status=provider_ticket_status,
+                    actor_id=user_id,
+                )
                 return BreakageDesignLoopbackEcoCreation(
                     incident_id=incident_id,
                     preparation=preparation,
@@ -4516,6 +4579,23 @@ class BreakageIncidentService:
         )
         if result.rowcount == 1:
             self.session.flush()
+            # §3.6 §3.B: CAS winner — enqueue AFTER the post-CAS
+            # flush, before returning, mirroring where
+            # ECOService.create_eco enqueues EcoCreatedEvent. On
+            # the §3.2 CAS-loser this point is never reached
+            # (rowcount==0 → rollback path), so the event de-dups
+            # to exactly the winner. incident_status = the
+            # post-flush eligible status from preparation.descriptor.
+            self._enqueue_breakage_design_loopback_event(
+                incident_id=incident_id,
+                eco_id=eco.id,
+                created=True,
+                trigger_source=trigger_source,
+                incident_status=preparation.descriptor.status,
+                sync_status=sync_status,
+                provider_ticket_status=provider_ticket_status,
+                actor_id=user_id,
+            )
             return BreakageDesignLoopbackEcoCreation(
                 incident_id=incident_id,
                 preparation=preparation,
@@ -6533,6 +6613,11 @@ class BreakageIncidentService:
                     incident_id,
                     target_status=normalized_incident_status,
                     loopback_user_id=loopback_user_id,
+                    # §3.6 §3.F: thread the helpdesk sync context
+                    # the emit point (inside create_…eco) cannot see.
+                    trigger_source="helpdesk_sync",
+                    sync_status=derived_sync_status,
+                    provider_ticket_status=normalized_provider_status,
                 )
             # PK re-fetch: a §3.2 CAS-loser rollback expires the
             # job; a PK get is deterministic and invariant under

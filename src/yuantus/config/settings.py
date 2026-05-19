@@ -54,6 +54,15 @@ class Settings(BaseSettings):
         default=False,
         description="Enable test-only failpoints (used by Playwright/E2E to inject controlled failures)",
     )
+    BREAKAGE_DESIGN_LOOPBACK_EVENTS_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Tier-B #3 §3.6: emit a breakage.design_loopback_eco domain "
+            "event when a design-loopback ECO result converges "
+            "(CAS-winner create or durable-dedupe reuse). Default OFF — "
+            "byte-identical pre-§3.6 behavior; flipping is a separate opt-in."
+        ),
+    )
     QUOTA_MODE: str = Field(
         default="disabled",
         description="disabled|soft|enforce quota checks for tenant limits",
