@@ -887,12 +887,14 @@ async def create_breakage_design_loopback_eco(
     underlying ``ECOService.create_eco`` call; no dedicated capability
     is gated here (taskbook §3.5 author-recommended reject).
 
-    Dedupe is best-effort post-PR #596 (`description`-envelope
-    substring scan, race-unsafe). A 200 + ``created=False`` response
-    indicates an existing ECO matched the breakage's closeout
-    reference; the caller's intent ("get me the ECO for this
-    breakage") is satisfied either way. Durable race-safe idempotency
-    is the §3.2 follow-up.
+    Dedupe is durable via ``BreakageIncident.eco_id`` for linked
+    incidents (Tier-B #3 §3.2, PR #604) — a compare-and-swap UPDATE
+    is the race-safe sync point — with the ``description``-envelope
+    substring scan retained only as a fallback for pre-migration
+    rows whose ``eco_id`` is still NULL. A 200 + ``created=False``
+    response indicates an existing ECO is already linked (or matched
+    via the historical fallback); the caller's intent ("get me the
+    ECO for this breakage") is satisfied either way.
     """
 
     service = BreakageIncidentService(db)

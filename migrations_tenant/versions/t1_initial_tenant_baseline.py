@@ -90,6 +90,7 @@ def upgrade() -> None:
     sa.Column('responsibility', sa.String(length=120), nullable=True),
     sa.Column('status', sa.String(length=30), nullable=False),
     sa.Column('severity', sa.String(length=30), nullable=False),
+    sa.Column('eco_id', sa.String(), nullable=True),
     sa.Column('created_by_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
@@ -1760,6 +1761,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_breakage_incidents_bom_id'), 'meta_breakage_incidents', ['bom_id'], unique=False)
     op.create_index(op.f('ix_meta_breakage_incidents_bom_line_item_id'), 'meta_breakage_incidents', ['bom_line_item_id'], unique=False)
     op.create_index(op.f('ix_meta_breakage_incidents_customer_name'), 'meta_breakage_incidents', ['customer_name'], unique=False)
+    op.create_index(op.f('ix_meta_breakage_incidents_eco_id'), 'meta_breakage_incidents', ['eco_id'], unique=True)
     op.create_index(op.f('ix_meta_breakage_incidents_incident_code'), 'meta_breakage_incidents', ['incident_code'], unique=True)
     op.create_index(op.f('ix_meta_breakage_incidents_mbom_id'), 'meta_breakage_incidents', ['mbom_id'], unique=False)
     op.create_index(op.f('ix_meta_breakage_incidents_product_item_id'), 'meta_breakage_incidents', ['product_item_id'], unique=False)
@@ -2047,6 +2049,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_breakage_incidents_product_item_id'), table_name='meta_breakage_incidents')
     op.drop_index(op.f('ix_meta_breakage_incidents_mbom_id'), table_name='meta_breakage_incidents')
     op.drop_index(op.f('ix_meta_breakage_incidents_incident_code'), table_name='meta_breakage_incidents')
+    op.drop_index(op.f('ix_meta_breakage_incidents_eco_id'), table_name='meta_breakage_incidents')
     op.drop_index(op.f('ix_meta_breakage_incidents_customer_name'), table_name='meta_breakage_incidents')
     op.drop_index(op.f('ix_meta_breakage_incidents_bom_line_item_id'), table_name='meta_breakage_incidents')
     op.drop_index(op.f('ix_meta_breakage_incidents_bom_id'), table_name='meta_breakage_incidents')

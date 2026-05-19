@@ -209,18 +209,47 @@ def test_missing_incident_preserves_existing_error_shape():
         session.close()
 
 
-def test_explicit_creation_does_not_mutate_breakage_incident_status():
+def test_explicit_creation_preserves_content_fields_and_wires_durable_eco_link():
+    """REFINED CONTRACT (Tier-B #3 §3.2, taskbook `3e5104f`).
+
+    Pre-§3.2 (#596 substring-scan era) creation did NOT touch the
+    incident row at all. §3.2 deliberately adds a durable
+    compare-and-swap link: `incident.eco_id` is now set on
+    successful creation, which is the entire point of durable
+    idempotency.
+
+    The refined contract this test now pins:
+    - **content fields unchanged** — `status`, `severity`,
+      `description` are NOT mutated by the link write (the CAS
+      only sets `eco_id`);
+    - **`eco_id` is set** to the created ECO's id (the new
+      durable link);
+    - **`updated_at` bumps** — `BreakageIncident.updated_at` has
+      `onupdate=datetime.utcnow`, and the CAS UPDATE genuinely
+      changes the row, so a fresh `updated_at` is the correct,
+      expected DB behavior for "this incident now has a durable
+      loopback link". This is an intended, reviewer-flagged
+      behavior change vs. the #596 "no timestamp mutation"
+      assertion, which was only valid when dedupe never wrote
+      to the incident.
+    """
+
     session = _session()
     try:
         _add_user(session, 12)
         service = BreakageIncidentService(session)
         incident = service.create_incident(
-            description="creation leaves source incident unchanged",
+            description="creation preserves content, wires durable link",
             status="resolved",
             severity="low",
         )
         session.commit()
-        before = (incident.status, incident.updated_at, incident.description)
+        content_before = (
+            incident.status,
+            incident.severity,
+            incident.description,
+        )
+        updated_at_before = incident.updated_at
 
         with patch("yuantus.meta_engine.services.eco_service.enqueue_event"):
             result = service.create_breakage_design_loopback_eco(
@@ -228,10 +257,19 @@ def test_explicit_creation_does_not_mutate_breakage_incident_status():
                 user_id=12,
             )
 
-        after = (incident.status, incident.updated_at, incident.description)
+        session.refresh(incident)
         assert result.created is True
-        assert after == before
-        assert session.is_modified(incident) is False
+        # Content fields untouched by the link write.
+        assert (
+            incident.status,
+            incident.severity,
+            incident.description,
+        ) == content_before
+        # Durable link wired.
+        assert incident.eco_id == result.eco.id
+        # updated_at bumps — the row genuinely changed (durable
+        # link added). Intended §3.2 behavior change.
+        assert incident.updated_at >= updated_at_before
     finally:
         session.close()
 

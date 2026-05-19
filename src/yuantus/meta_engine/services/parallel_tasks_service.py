@@ -17,6 +17,9 @@ from typing import Any, Dict, Iterable, List, Optional
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
+from sqlalchemy import or_ as sa_or
+from sqlalchemy import select as sa_select
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from yuantus.config import get_settings
@@ -4254,7 +4257,23 @@ class BreakageIncidentService:
     def _find_breakage_design_loopback_eco_by_reference(
         self,
         reference: str,
+        *,
+        incident_id: Optional[str] = None,
     ) -> Optional[ECO]:
+        # Primary: durable eco_id-column lookup if we know the
+        # incident. `eco_id` is a bare String soft-link (no FK —
+        # see taskbook §3.2 `3e5104f` §4.1); session.get returns
+        # None for a since-deleted ECO, so a dangling id degrades
+        # gracefully to "no link".
+        if incident_id:
+            incident = self.session.get(BreakageIncident, incident_id)
+            if incident is not None and incident.eco_id:
+                return self.session.get(ECO, incident.eco_id)
+
+        # Fallback: substring scan for pre-migration data (incidents
+        # whose `eco_id` is NULL but whose ECO was created before
+        # the migration). NOT race-safe — only the CAS link path in
+        # create_breakage_design_loopback_eco is.
         normalized = str(reference or "").strip()
         if not normalized:
             return None
@@ -4281,10 +4300,19 @@ class BreakageIncidentService:
     ) -> BreakageDesignLoopbackEcoCreation:
         """Explicitly create an ECO for an eligible breakage design loopback.
 
-        The caller owns the transaction boundary. This method delegates
-        permission/event behavior to ECOService.create_eco and only performs
-        best-effort query-before-create dedupe via the existing breakage
-        reference envelope in ECO.description.
+        The caller owns the transaction boundary. Permission/event
+        behavior is delegated to ECOService.create_eco. Durable
+        idempotency (Tier-B #3 §3.2, taskbook `3e5104f`): the link
+        is wired by a compare-and-swap UPDATE
+        (``WHERE id=:i AND eco_id IS NULL``). The CAS — NOT the
+        UNIQUE index — is the concurrency sync point: the row write
+        lock serializes concurrent callers so exactly one gets
+        rowcount==1; the rowcount==0 loser rolls back its own
+        ECOService.create_eco INSERT (undone because create_eco has
+        no internal commit) and returns the winner with
+        created=False. `allow_duplicate=True` is an explicit
+        detached duplicate — it skips the CAS entirely and leaves
+        `eco_id` untouched.
         """
 
         preparation = self.prepare_breakage_design_loopback_intake(incident_id)
@@ -4300,7 +4328,9 @@ class BreakageIncidentService:
 
         reference = derive_breakage_change_reference(preparation.descriptor)
         if not allow_duplicate:
-            existing = self._find_breakage_design_loopback_eco_by_reference(reference)
+            existing = self._find_breakage_design_loopback_eco_by_reference(
+                reference, incident_id=incident_id
+            )
             if existing is not None:
                 return BreakageDesignLoopbackEcoCreation(
                     incident_id=incident_id,
@@ -4313,12 +4343,78 @@ class BreakageIncidentService:
         kwargs = preparation.eco_draft_inputs.as_kwargs()
         kwargs["user_id"] = user_id
         eco = ECOService(self.session).create_eco(**kwargs)
+
+        if allow_duplicate:
+            # Explicit detached duplicate — do NOT attempt the CAS
+            # link. `eco_id` stays whatever it was (NULL or the
+            # canonical first ECO). Author-ratified semantics.
+            return BreakageDesignLoopbackEcoCreation(
+                incident_id=incident_id,
+                preparation=preparation,
+                reference=reference,
+                eco=eco,
+                created=True,
+            )
+
+        # Compare-and-swap link. The single atomic conditional
+        # UPDATE is the concurrency sync point — the row write lock
+        # blocks a concurrent caller's UPDATE behind this one until
+        # this transaction's caller commits, after which the loser
+        # re-evaluates the predicate and matches zero rows.
+        #
+        # Predicate is `eco_id IS NULL OR eco_id points at a
+        # missing ECO`. The taskbook §4.4 illustrative snippet
+        # showed only `eco_id IS NULL`, but §4.1/§5-test-6 ratified
+        # the behavioral contract that a *dangling* link (the ECO
+        # was hard-deleted; no FK so no SET NULL cascade) must
+        # degrade so a fresh create proceeds. A bare `IS NULL`
+        # predicate would permanently wedge such an incident (its
+        # eco_id is non-NULL but useless). The `NOT IN (SELECT id
+        # FROM meta_ecos)` arm reconciles the snippet with the
+        # ratified behavioral contract while staying a single
+        # atomic UPDATE (row write lock still serializes the
+        # genuine race — a committed valid winner.eco_id IS in
+        # meta_ecos, so the loser's predicate is false → rowcount
+        # 0). The just-flushed loser ECO is in meta_ecos too, so a
+        # genuine winner is never mistaken for dangling.
+        result = self.session.execute(
+            sa_update(BreakageIncident)
+            .where(
+                BreakageIncident.id == incident_id,
+                sa_or(
+                    BreakageIncident.eco_id.is_(None),
+                    BreakageIncident.eco_id.not_in(sa_select(ECO.id)),
+                ),
+            )
+            .values(eco_id=eco.id)
+        )
+        if result.rowcount == 1:
+            self.session.flush()
+            return BreakageDesignLoopbackEcoCreation(
+                incident_id=incident_id,
+                preparation=preparation,
+                reference=reference,
+                eco=eco,
+                created=True,
+            )
+
+        # rowcount == 0 → another transaction already linked an ECO
+        # to this incident. We lost the race. Roll back our own
+        # create_eco (undone because ECOService.create_eco has no
+        # internal commit), re-read the winner's link, return it.
+        self.session.rollback()
+        incident = self.session.get(BreakageIncident, incident_id)
+        winner = (
+            self.session.get(ECO, incident.eco_id)
+            if incident is not None and incident.eco_id
+            else None
+        )
         return BreakageDesignLoopbackEcoCreation(
             incident_id=incident_id,
             preparation=preparation,
             reference=reference,
-            eco=eco,
-            created=True,
+            eco=winner,
+            created=False,
         )
 
     def metrics(

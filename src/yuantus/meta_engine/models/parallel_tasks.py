@@ -183,6 +183,15 @@ class BreakageIncident(Base):
     responsibility = Column(String(120), nullable=True)
     status = Column(String(30), nullable=False, default="open", index=True)
     severity = Column(String(30), nullable=False, default="medium", index=True)
+    # Durable design-loopback ECO link (Tier-B #3 §3.2, taskbook
+    # `3e5104f`). Bare String soft-link — NO ForeignKey, matching
+    # this table's existing convention (product_item_id / bom_id /
+    # version_id) and sidestepping the tenant-baseline FK-ordering
+    # problem (meta_breakage_incidents is created before meta_ecos).
+    # UNIQUE is a cross-incident data-integrity backstop only; the
+    # race-safety mechanism is the compare-and-swap UPDATE in
+    # BreakageIncidentService.create_breakage_design_loopback_eco.
+    eco_id = Column(String, nullable=True, unique=True, index=True)
     created_by_id = Column(
         Integer, ForeignKey("rbac_users.id", ondelete="SET NULL"), nullable=True
     )
