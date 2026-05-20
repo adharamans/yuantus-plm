@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from yuantus.meta_engine.models.eco import ECO, ECOStage
 from yuantus.meta_engine.models.item import Item  # noqa: F401
 from yuantus.meta_engine.models.job import ConversionJob
 from yuantus.meta_engine.models.parallel_tasks import (
@@ -60,6 +61,11 @@ def session():
             ConversionJob.__table__,
             ReportLocaleProfile.__table__,
             ItemVersion.__table__,
+            # Tier-B #3 §3.7: prometheus_metrics now reads
+            # `eco_id IN (SELECT id FROM meta_ecos)` for the
+            # design-loopback link gauges.
+            ECOStage.__table__,
+            ECO.__table__,
         ],
     )
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)

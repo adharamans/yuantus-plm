@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
+from sqlalchemy import func as sa_func
 from sqlalchemy import or_ as sa_or
 from sqlalchemy import select as sa_select
 from sqlalchemy import update as sa_update
@@ -11427,6 +11428,65 @@ class ParallelOpsOverviewService:
             return f"{name}{{{','.join(label_rows)}}} {metric_value}"
         return f"{name} {metric_value}"
 
+    def _breakage_design_loopback_metrics(self) -> Dict[str, Any]:
+        """Tier-B #3 §3.7 (taskbook ``c2e404f``). Point-in-time,
+        full-table SQL aggregate over ``BreakageIncident.eco_id``
+        — the §3.2 durable substrate, **not** an in-memory
+        ``event_bus`` counter (which would lose on restart /
+        multi-process). Live-link 口径 (§3.B): a row counts iff
+        ``eco_id IN (SELECT id FROM meta_ecos)`` — SQL NULL
+        semantics make this also exclude ``eco_id IS NULL``, and
+        the IN-subquery shape matches §3.2's CAS predicate so a
+        dangling ``eco_id`` (the linked ECO was hard-deleted; no
+        FK cascade) is correctly excluded.
+
+        Called **only from** ``prometheus_metrics`` (§3.A
+        resolution (b), Medium 1) — ``summary()`` is NOT touched
+        and ``/parallel-ops/summary[/export]`` JSON stays
+        byte-identical.
+
+        Three ``func.count`` + ``GROUP BY`` round-trips; no
+        ``query(BreakageIncident).all()`` (pinned by the §5 AST
+        guard ``test_no_load_all_uses_sql_aggregate``).
+        """
+
+        live_link = BreakageIncident.eco_id.in_(sa_select(ECO.id))
+        links_total = (
+            self.session.query(sa_func.count(BreakageIncident.id))
+            .filter(live_link)
+            .scalar()
+            or 0
+        )
+        by_status_rows = (
+            self.session.query(
+                BreakageIncident.status,
+                sa_func.count(BreakageIncident.id),
+            )
+            .filter(live_link)
+            .group_by(BreakageIncident.status)
+            .all()
+        )
+        by_severity_rows = (
+            self.session.query(
+                BreakageIncident.severity,
+                sa_func.count(BreakageIncident.id),
+            )
+            .filter(live_link)
+            .group_by(BreakageIncident.severity)
+            .all()
+        )
+        return {
+            "links_total": int(links_total),
+            "by_status": {
+                str(status or "unknown"): int(count)
+                for status, count in by_status_rows
+            },
+            "by_severity": {
+                str(severity or "unknown"): int(count)
+                for severity, count in by_severity_rows
+            },
+        }
+
     def prometheus_metrics(
         self,
         *,
@@ -11902,6 +11962,49 @@ class ParallelOpsOverviewService:
                     "yuantus_parallel_breakage_helpdesk_failure_trend_total_jobs",
                     point.get("total_jobs"),
                     labels=labels,
+                )
+            )
+
+        # Tier-B #3 §3.7 design-loopback link gauges (taskbook
+        # ``c2e404f``). Point-in-time, full-table SQL aggregate;
+        # NO ``common_labels`` (§3.D Medium 2) — emitting a
+        # full-table value under ``window_days`` / filter labels
+        # would be a lie. ``*_links_total`` has no labels at all;
+        # ``*_by_status`` only ``{status}``; ``*_by_severity``
+        # only ``{severity}``.
+        loopback_metrics = self._breakage_design_loopback_metrics()
+        lines.extend(
+            [
+                "# HELP yuantus_parallel_breakage_design_loopback_links_total Breakage incidents with a live design-loopback ECO link.",
+                "# TYPE yuantus_parallel_breakage_design_loopback_links_total gauge",
+                self._prometheus_line(
+                    "yuantus_parallel_breakage_design_loopback_links_total",
+                    loopback_metrics["links_total"],
+                ),
+                "# HELP yuantus_parallel_breakage_design_loopback_links_by_status Breakage incidents with a live design-loopback ECO link, grouped by incident status.",
+                "# TYPE yuantus_parallel_breakage_design_loopback_links_by_status gauge",
+            ]
+        )
+        for status_value, count in sorted(loopback_metrics["by_status"].items()):
+            lines.append(
+                self._prometheus_line(
+                    "yuantus_parallel_breakage_design_loopback_links_by_status",
+                    count,
+                    labels={"status": status_value},
+                )
+            )
+        lines.extend(
+            [
+                "# HELP yuantus_parallel_breakage_design_loopback_links_by_severity Breakage incidents with a live design-loopback ECO link, grouped by incident severity.",
+                "# TYPE yuantus_parallel_breakage_design_loopback_links_by_severity gauge",
+            ]
+        )
+        for severity_value, count in sorted(loopback_metrics["by_severity"].items()):
+            lines.append(
+                self._prometheus_line(
+                    "yuantus_parallel_breakage_design_loopback_links_by_severity",
+                    count,
+                    labels={"severity": severity_value},
                 )
             )
 
