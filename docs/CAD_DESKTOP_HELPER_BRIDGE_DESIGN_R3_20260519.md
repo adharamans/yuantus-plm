@@ -304,7 +304,7 @@ for each detected product:
              5. 用 helper-session 文件里的 pid 查进程：
                 - 进程不存在 → 视为残留（步骤 6）
                 - 进程存在但映像路径与 image_path 不匹配 → 视为残留（步骤 6；可能 PID 已被复用）
-                - 进程存在且映像路径匹配 yuantus-cad-helper.exe → **helper 进程活着但 HTTP 不健康**（死锁 / GC 卡 / Kestrel 异常）→
+                - 进程存在且映像路径与发现文件 image_path 字段匹配 → **helper 进程活着但 HTTP 不健康**（死锁 / GC 卡 / Kestrel 异常）→
                     退出码 **HELPER_UNHEALTHY**（**不删** helper-session 文件，避免误删一个仍活着但不健康的 helper 的发现条目）；
                     提示用户："helper 进程 (pid=<N>) 仍在运行但 /healthz 失败，请人工 taskkill 后重试或运行诊断"
              6. 强制删除 helper-session-{sessionId}.json
