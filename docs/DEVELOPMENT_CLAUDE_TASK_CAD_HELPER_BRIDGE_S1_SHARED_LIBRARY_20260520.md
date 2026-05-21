@@ -130,7 +130,7 @@ csproj):
 
 ```
 Yuantus.Cad.Shared/
-├── Yuantus.Cad.Shared.csproj         <TargetFrameworks>net46;net6.0</TargetFrameworks>
+├── Yuantus.Cad.Shared.csproj         <TargetFrameworks>net46;net6.0-windows</TargetFrameworks>
 ├── Identity/
 │   ├── Paths.cs                      — deterministic %APPDATA% paths (install-id.json, helper.exe, session-file)
 │   ├── InstallId.cs                  — atomic generator (§3.C)
@@ -156,13 +156,38 @@ No `Logging/` — S1 is a library; logging is the caller's
 responsibility. No `Hosting/` — Kestrel is S3. No `Cli/` — CLI
 entry points are S7's helper command.
 
-### 3.B Multi-target `net46;net6.0` — PRE-RATIFIED
+### 3.B Multi-target `net46;net6.0-windows` — RATIFIED (Medium fix 2026-05-20)
 
-- `<TargetFrameworks>net46;net6.0</TargetFrameworks>` in the
-  csproj.
-- **`net6.0` target requires `<SupportedOSPlatform>Windows</SupportedOSPlatform>`**
-  because `System.Security.Cryptography.ProtectedData` (DPAPI)
-  is Windows-only and emits CA1416 otherwise.
+- `<TargetFrameworks>net46;net6.0-windows</TargetFrameworks>`
+  in the csproj.
+- **The net6.0 target uses the Windows-specific TFM
+  `net6.0-windows`** (not bare `net6.0`). Rationale:
+  `System.Security.Cryptography.ProtectedData` (DPAPI),
+  `Microsoft.Win32.Registry`, and the helper-process consumer
+  ecosystem (`yuantus-cad-helper.exe`, AutoCAD/ZWCAD plugins)
+  are **Windows-only by design** — the `net6.0-windows` TFM
+  expresses that constraint at the SDK / NuGet metadata layer
+  and propagates it to consumers automatically. The CA1416
+  platform-compatibility analyzer recognizes the `-windows`
+  TFM suffix and treats the whole assembly as Windows-targeted
+  with no additional attribute needed.
+- **Medium finding fix (2026-05-20):** an earlier draft of
+  this taskbook proposed `<SupportedOSPlatform>Windows</SupportedOSPlatform>`
+  as an MSBuild property. That property does **not** exist in
+  the standard .NET SDK schema and would have been silently
+  ignored. The standard .NET SDK mechanisms are: (a) the TFM
+  suffix `net6.0-windows` (this taskbook's ratified choice);
+  (b) the assembly/type-level attribute
+  `[SupportedOSPlatform("windows")]` from
+  `System.Runtime.Versioning` (recorded rejected — the TFM
+  already constrains the assembly, attribute would be
+  redundant); (c) the build-time property
+  `<EnableWindowsTargeting>true</EnableWindowsTargeting>`
+  (only relevant when cross-building a `net6.0-windows`
+  project from a non-Windows host — Yuantus CI runs on
+  GitHub Actions Windows runners per #614 §5.10, so this is
+  **not required** here; documented for future cross-platform
+  CI changes).
 - Single-source: aim for **zero `#if` blocks** in production
   files. Only one expected `#if NETFRAMEWORK` site (if any) —
   in `DpapiEnvelope.cs` if the net6.0 NuGet's `using` namespace
@@ -172,8 +197,9 @@ entry points are S7's helper command.
   hard-to-enforce style rule (not test-pinned, but reviewer
   guidance).
 - AutoCAD 2018 baseline is `v4.6`; netstandard2.0's official
-  matrix requires `v4.6.1+`; multi-target `net46;net6.0` is the
-  correct choice — netstandard2.0 is explicitly **rejected**.
+  matrix requires `v4.6.1+`; multi-target `net46;net6.0-windows`
+  is the correct choice — netstandard2.0 is explicitly
+  **rejected**.
 
 NuGet packages (pinned versions are the impl PR's call;
 the taskbook pins **identity**):
@@ -397,8 +423,9 @@ if the spawn itself raced).
 
 - New `clients/cad-desktop-helper/Shared/Yuantus.Cad.Shared.csproj`
   + the module-layout source files in §3.A.
-- `<TargetFrameworks>net46;net6.0</TargetFrameworks>` +
-  `<SupportedOSPlatform>Windows</SupportedOSPlatform>` (net6.0).
+- `<TargetFrameworks>net46;net6.0-windows</TargetFrameworks>`
+  in the csproj (the Windows-specific TFM is the SDK-standard
+  mechanism; see §3.B for the full rationale + Medium fix).
 - NuGet refs per §3.B (Newtonsoft.Json,
   System.Security.Cryptography.ProtectedData).
 - No solution-file edit, no CADDedupPlugin edit, no helper exe,
@@ -477,8 +504,9 @@ the test **names** are mandatory). Both targets compile + run.
   `Delete*` in the public surface.
 
 **Multi-target acceptance:** the test project itself is
-multi-target `net46;net6.0`; `dotnet test` runs both. CI matrix
-must include both target runs (impl-PR's CI config concern).
+multi-target `net46;net6.0-windows`; `dotnet test` runs both.
+CI matrix must include both target runs (impl-PR's CI config
+concern).
 
 ## 6. Verification Commands (impl PR)
 
@@ -505,7 +533,8 @@ Tier-B #3 work; S1 adds no Python service route).
 
 `docs/DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_S1_SHARED_LIBRARY_R1_20260520.md`
 + index line. Must document: the §3.B multi-target build
-verification (both `lib/net46/` and `lib/net6.0/` produced);
+verification (both `lib/net46/` and `lib/net6.0-windows/`
+produced under the package output);
 the §3.C atomic-`install-id` race-test proof; the §3.D DPAPI
 round-trip proof; the §3.J probe-token-decoupling proof; the
 §3.K spawner deterministic-path + no-args proof; the §3.H
@@ -594,10 +623,20 @@ S11 integration. **Never parallelize Tier-B-class slices**
 - **§3.K spawner contract** — deterministic path constant,
   bare args, **never** `--reset-local-token`. Confirm the
   source-scan guard test (§5) catches a future drift.
-- **§3.B multi-target** — `net46;net6.0` is correct
-  (netstandard2.0 explicitly rejected due to AutoCAD 2018
-  v4.6 baseline). Confirm `<SupportedOSPlatform>Windows</SupportedOSPlatform>`
-  is required for net6.0 (CA1416).
+- **§3.B multi-target — RATIFIED `net46;net6.0-windows`**
+  (Medium-fix 2026-05-20). netstandard2.0 explicitly rejected
+  due to the AutoCAD 2018 v4.6 baseline; the Windows-specific
+  TFM `net6.0-windows` is the SDK-standard mechanism for
+  expressing the Windows-only constraint (DPAPI / Registry /
+  helper.exe consumer ecosystem). The invented
+  `<SupportedOSPlatform>` MSBuild property from an earlier
+  draft is **rejected** (does not exist in the .NET SDK schema
+  and would be silently ignored); the
+  `[SupportedOSPlatform("windows")]` attribute is **redundant**
+  given the TFM suffix; `<EnableWindowsTargeting>true</EnableWindowsTargeting>`
+  is **not required** under current Windows-runner CI but is
+  documented as the SDK escape hatch for future cross-Linux
+  builds.
 - **§5 MANDATORY tests** — confirm the 17 named tests cover
   the §3 contract floor; flag any §3 primitive that lacks a
   test pin.
