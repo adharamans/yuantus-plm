@@ -8,23 +8,40 @@ using Newtonsoft.Json.Linq;
 
 namespace Yuantus.Cad.Shared.Discovery
 {
+    /// <summary>
+    /// Performs the local helper liveness probe without injecting authentication headers.
+    /// </summary>
     public sealed class HelperProbe : IDisposable
     {
+        /// <summary>
+        /// Default upper bound for a single local helper health request.
+        /// </summary>
         public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMilliseconds(500);
 
         private readonly HttpClient _httpClient;
         private readonly bool _disposeClient;
 
+        /// <summary>
+        /// Initializes a probe with an owned default HTTP client.
+        /// </summary>
         public HelperProbe()
             : this(new HttpClient(), true)
         {
         }
 
+        /// <summary>
+        /// Initializes a probe with an owned HTTP client around the supplied message handler.
+        /// </summary>
+        /// <param name="handler">Message handler used by tests or callers that need custom transport.</param>
         public HelperProbe(HttpMessageHandler handler)
             : this(new HttpClient(handler), true)
         {
         }
 
+        /// <summary>
+        /// Initializes a probe with a caller-owned HTTP client.
+        /// </summary>
+        /// <param name="httpClient">HTTP client to use for health requests.</param>
         public HelperProbe(HttpClient httpClient)
             : this(httpClient, false)
         {
@@ -36,6 +53,14 @@ namespace Yuantus.Cad.Shared.Discovery
             _disposeClient = disposeClient;
         }
 
+        /// <summary>
+        /// Calls the helper <c>/healthz</c> endpoint and validates both status code and response body.
+        /// </summary>
+        /// <param name="host">Loopback host to probe.</param>
+        /// <param name="port">Helper port from the session discovery file.</param>
+        /// <param name="timeout">Maximum duration for this probe attempt.</param>
+        /// <param name="cancellationToken">Cancellation token for the probe.</param>
+        /// <returns>Health probe outcome.</returns>
         public async Task<HelperProbeResult> HealthAsync(
             string host,
             int port,
@@ -77,6 +102,12 @@ namespace Yuantus.Cad.Shared.Discovery
             }
         }
 
+        /// <summary>
+        /// Calls the helper <c>/healthz</c> endpoint on 127.0.0.1 with the default timeout.
+        /// </summary>
+        /// <param name="port">Helper port from the session discovery file.</param>
+        /// <param name="cancellationToken">Cancellation token for the probe.</param>
+        /// <returns>Health probe outcome.</returns>
         public Task<HelperProbeResult> HealthAsync(int port, CancellationToken cancellationToken)
         {
             return HealthAsync("127.0.0.1", port, DefaultTimeout, cancellationToken);
@@ -109,6 +140,9 @@ namespace Yuantus.Cad.Shared.Discovery
             }
         }
 
+        /// <summary>
+        /// Releases the owned HTTP client when this probe created it.
+        /// </summary>
         public void Dispose()
         {
             if (_disposeClient)

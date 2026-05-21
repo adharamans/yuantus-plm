@@ -6,9 +6,19 @@ using Yuantus.Cad.Shared.Transport;
 
 namespace Yuantus.Cad.Shared.Discovery
 {
+    /// <summary>
+    /// Resolves a running helper base URI from the session file or starts the helper process.
+    /// </summary>
     public sealed class HelperLocator : IDisposable
     {
+        /// <summary>
+        /// Default maximum wait for a newly spawned helper to publish a healthy session file.
+        /// </summary>
         public static readonly TimeSpan DefaultMaxWait = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Default poll interval while waiting for helper startup.
+        /// </summary>
         public static readonly TimeSpan DefaultPollInterval = TimeSpan.FromMilliseconds(100);
 
         private readonly HelperProbe _probe;
@@ -18,11 +28,22 @@ namespace Yuantus.Cad.Shared.Discovery
         private readonly TimeSpan _pollInterval;
         private readonly bool _disposeProbe;
 
+        /// <summary>
+        /// Initializes a locator using the default session file, spawner, and health probe.
+        /// </summary>
         public HelperLocator()
             : this(new HelperProbe(), HelperSessionFile.Read, HelperSpawner.Spawn, DefaultMaxWait, DefaultPollInterval, true)
         {
         }
 
+        /// <summary>
+        /// Initializes a locator with caller-supplied primitives for tests and custom hosts.
+        /// </summary>
+        /// <param name="probe">Health probe to use. The caller retains ownership.</param>
+        /// <param name="readSessionFile">Function that reads the current helper session file.</param>
+        /// <param name="spawn">Function that starts the helper process.</param>
+        /// <param name="maxWait">Maximum time to wait for a spawned helper to become healthy.</param>
+        /// <param name="pollInterval">Interval between session-file probe attempts.</param>
         public HelperLocator(
             HelperProbe probe,
             Func<HelperSessionFile> readSessionFile,
@@ -49,6 +70,11 @@ namespace Yuantus.Cad.Shared.Discovery
             _disposeProbe = disposeProbe;
         }
 
+        /// <summary>
+        /// Returns the base URI of an existing healthy helper, or starts one and waits for health.
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token for startup and probe polling.</param>
+        /// <returns>Base URI for the local helper.</returns>
         public async Task<Uri> EnsureHelperRunningAsync(CancellationToken cancellationToken)
         {
             var existing = _readSessionFile();
@@ -84,6 +110,9 @@ namespace Yuantus.Cad.Shared.Discovery
                 true);
         }
 
+        /// <summary>
+        /// Releases the owned probe when this locator created it.
+        /// </summary>
         public void Dispose()
         {
             if (_disposeProbe)

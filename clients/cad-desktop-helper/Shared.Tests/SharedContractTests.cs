@@ -55,7 +55,7 @@ namespace Yuantus.Cad.Shared.Tests
 
                     var results = await Task.WhenAll(tasks);
 
-                    Assert.Equal(1, results.Distinct().Count());
+                    Assert.Single(results.Distinct());
                     Assert.Equal(1, writes);
                     Assert.True(File.Exists(Paths.InstallIdFile));
                 }
