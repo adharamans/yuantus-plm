@@ -55,6 +55,7 @@ def test_all_workflow_inline_run_scripts_are_bash_syntax_valid_on_ubuntu_jobs() 
         assert isinstance(jobs, dict), f"workflow jobs must be mapping: {wf}"
 
         run_steps_checked = 0
+        ubuntu_jobs_checked = 0
         for job_name, job in jobs.items():
             if not isinstance(job, dict):
                 continue
@@ -63,6 +64,7 @@ def test_all_workflow_inline_run_scripts_are_bash_syntax_valid_on_ubuntu_jobs() 
             runs_on = str(job.get("runs-on", ""))
             if "ubuntu" not in runs_on:
                 continue
+            ubuntu_jobs_checked += 1
 
             steps = job.get("steps")
             if not isinstance(steps, list):
@@ -81,4 +83,5 @@ def test_all_workflow_inline_run_scripts_are_bash_syntax_valid_on_ubuntu_jobs() 
                 _bash_n(normalized, label)
                 run_steps_checked += 1
 
-        assert run_steps_checked > 0, f"No inline run steps checked for {wf}"
+        if ubuntu_jobs_checked:
+            assert run_steps_checked > 0, f"No inline run steps checked for {wf}"

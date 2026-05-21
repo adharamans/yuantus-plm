@@ -5,7 +5,7 @@
 **Out of scope this revision**: Tauri Companion UI、HKCU 文件关联落盘、Vault 同步、3D Viewer、BOM 桌面视图、SolidWorks/Inventor/CATIA/NX/Creo 适配、国产 CAD R3 阶段写 DWG、helper 暴露服务端 values/target_properties/target_cad_fields 等非 item_id 路径。
 
 R3 在 R2 基础上修复以下问题（详见 §11 变更记录）：
-- **High**：.NET 目标框架与 AutoCAD 2018 v4.6 基线对齐（Shared 多目标 net46+net6.0；Bridge 走 .NET Framework v4.6；NETLOAD 装载必须为完整 .NET Framework 程序集）
+- **High**：.NET 目标框架与 AutoCAD 2018 v4.6 基线对齐（Shared 多目标 net46+net6.0-windows；Bridge 走 .NET Framework v4.6；NETLOAD 装载必须为完整 .NET Framework 程序集）
 - **High**：恢复 `/sync/inbound` 和 `/sync/outbound`，保证 `PLMMATPUSH` 命令不退化
 - **Medium**：`item_id` 强制为 helper 层范围约束，服务端并未硬约束
 - **Medium**：补完 local token bootstrap 与 reset 流程；`--reset-local-token` 仅本机交互式执行，不接受 HTTP / 远程触发
@@ -97,7 +97,7 @@ R3 在 R2 基础上修复以下问题（详见 §11 变更记录）：
 │  yuantus-cad-detector.exe             │ Yuantus PLM API       │      │
 │  (.NET 6 self-contained,              │ /auth/login           │      │
 │   one-shot, read-only, no writes)     │ /plugins/cad-         │      │
-│   └─▶ 也引用 Shared (net6.0 target)   │   material-sync/...   │      │
+│   └─▶ 也引用 Shared (net6.0-windows)  │   material-sync/...   │      │
 │                                       └──────────────────────┘       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -106,7 +106,7 @@ R3 在 R2 基础上修复以下问题（详见 §11 变更记录）：
 
 | 层 | 名称 | 目标框架 | 职责 |
 |---|---|---|---|
-| Transport 共享层 | `Yuantus.Cad.Shared` | **多目标：`net46;net6.0`** | helper 进程发现（读 `helper-session-{sessionId}.json`）、helper 自动启动、DPAPI token 读写、HTTP 同步调用、错误信封解码、注册表抽象、`install-id.json` 原子读写 |
+| Transport 共享层 | `Yuantus.Cad.Shared` | **多目标：`net46;net6.0-windows`** | helper 进程发现（读 `helper-session-{sessionId}.json`）、helper 自动启动、DPAPI token 读写、HTTP 同步调用、错误信封解码、注册表抽象、`install-id.json` 原子读写 |
 | AutoCAD 路线 | `CADDedupPlugin` | v4.6（2018）/ v4.8（2024）多 config | 引用 Shared 的 **net46** target 取代原 `MaterialSyncApiClient` 的直连 HTTP；继续承担 DWG 读写、diff 窗口、PLMMAT* 命令、`/audit/apply-result` 上报 |
 | 国产 CAD 路线 | `YuantusCadHelperBridge.dll` | **.NET Framework v4.6**（NETLOAD 必须完整 .NET Framework） | 引用 Shared 的 **net46** target；仅对外暴露 `(yuantus-helper-call endpoint json) → json` LISP 函数；不写 DWG、不解析业务 JSON |
 | 桌面服务 | `yuantus-cad-helper.exe` | **.NET 6 self-contained** | Kestrel loopback；端点实现；SQLite 审计 |
@@ -117,7 +117,7 @@ R3 在 R2 基础上修复以下问题（详见 §11 变更记录）：
 - helper 是 **唯一** 与 PLM 服务端通信的本机出口。CAD 端两个客户端 DLL 都不直接打 PLM。
 - LISP 永不直接发 HTTP、永不读 DPAPI、永不持有 token。
 - `CADDedupPlugin` **不**通过 LISP 桥调用 helper —— 它是 C# 进程内直接 `ProjectReference` `Yuantus.Cad.Shared`，直接方法调用。LISP 桥只为国产 CAD 服务。
-- **netstandard2.0 不在 R3 范围**：.NET Framework v4.6 不在 netstandard2.0 官方兼容矩阵（需 v4.6.1+），Shared 走多目标 `net46;net6.0` 而非 netstandard。
+- **netstandard2.0 不在 R3 范围**：.NET Framework v4.6 不在 netstandard2.0 官方兼容矩阵（需 v4.6.1+），Shared 走多目标 `net46;net6.0-windows` 而非 netstandard。
 
 ---
 
@@ -127,7 +127,7 @@ R3 在 R2 基础上修复以下问题（详见 §11 变更记录）：
 |---|---|---|---|
 | detector 实现语言 | **.NET 6 / C#**（self-contained 单 exe） | PowerShell（仅限本地诊断） | 与 helper 同栈；可共享 Shared 中的注册表抽象 |
 | helper 实现语言 | **.NET 6 / C#** + `Kestrel`（仅绑 loopback） | Rust + `axum` | 同栈复用；Rust 留作后续优化备选 |
-| **`Yuantus.Cad.Shared` 目标框架** | **`<TargetFrameworks>net46;net6.0</TargetFrameworks>`** | netstandard2.0（**已排除**） | AutoCAD 2018 基线 v4.6 不在 netstandard2.0 官方支持矩阵；多目标比拆双库更紧凑且共享源码 |
+| **`Yuantus.Cad.Shared` 目标框架** | **`<TargetFrameworks>net46;net6.0-windows</TargetFrameworks>`** | netstandard2.0（**已排除**） | AutoCAD 2018 基线 v4.6 不在 netstandard2.0 官方支持矩阵；`net6.0-windows` 显式表达 DPAPI / Registry / helper consumer 的 Windows-only 事实；多目标比拆双库更紧凑且共享源码 |
 | **`YuantusCadHelperBridge.dll` 目标框架** | **`<TargetFrameworkVersion>v4.6</TargetFrameworkVersion>`** | netstandard2.0（**已排除**） | NETLOAD 进 acad.exe / ZWCAD.exe 必须为完整 .NET Framework 程序集；以 AutoCAD 2018 v4.6 基线为最低共同分母 |
 | `CADDedupPlugin` 目标框架 | 保持现有 `v4.6`（2018）/`v4.8`（2024）多 config | — | 既有项目结构，零改动 |
 | 进程间发现 | `%APPDATA%\YuantusPLM\helper-session-{sessionId}.json`（per-session）+ `%APPDATA%\YuantusPLM\install-id.json`（per-user-per-machine，原子 CreateNew） | Named Pipe | 跨技术栈兼容；LISP / Tauri / PowerShell 都能读 |
@@ -980,7 +980,7 @@ User                CADDedupPlugin (in acad.exe)   helper.exe              PLM A
 | `clients/autocad-material-sync/CADDedupPlugin/UserIdentification.cs` | 既有 | **保留**；helper 内部新增同等概念的 `LocalIdentity`（在 Shared 中） |
 | `plugins/yuantus-cad-material-sync/main.py` | 既有 | **零改动**。helper 只是新增客户端 |
 | `services/cad-extractor/` `services/cad-connector/` | 既有 | **零改动**；helper R3 不代理这两个服务 |
-| `clients/cad-desktop-helper/Shared/` | **新增**：`Yuantus.Cad.Shared.csproj`（**`<TargetFrameworks>net46;net6.0</TargetFrameworks>`**） | helper discovery + DPAPI token + HTTP transport client + 错误信封 + 注册表抽象 + bootstrap 流程 |
+| `clients/cad-desktop-helper/Shared/` | **新增**：`Yuantus.Cad.Shared.csproj`（**`<TargetFrameworks>net46;net6.0-windows</TargetFrameworks>`**） | helper discovery + DPAPI token + HTTP transport client + 错误信封 + 注册表抽象 + `InstallId.GetOrCreate()` 原子 primitive |
 | `clients/cad-desktop-helper/Detector/` | **新增**：`yuantus-cad-detector.csproj`（**net6.0 self-contained**） | 引用 Shared net6.0；只读注册表 + 文件系统扫描 |
 | `clients/cad-desktop-helper/Helper/` | **新增**：`yuantus-cad-helper.csproj`（**net6.0 self-contained**） | 引用 Shared net6.0；Kestrel loopback；端点实现；SQLite 审计；`--reset-local-token` 子命令 |
 | `clients/cad-desktop-helper/Bridge/` | **新增**：`YuantusCadHelperBridge.csproj`（**`<TargetFrameworkVersion>v4.6</TargetFrameworkVersion>`**） | 引用 Shared net46；NETLOAD 暴露 `(yuantus-helper-call ...)` LISP 函数 |
@@ -989,7 +989,7 @@ User                CADDedupPlugin (in acad.exe)   helper.exe              PLM A
 **关键引用关系（R3 修订）**：
 
 ```
-Yuantus.Cad.Shared (multi-target: net46;net6.0)
+Yuantus.Cad.Shared (multi-target: net46;net6.0-windows)
    │
    ├─◀─ CADDedupPlugin (.NET Framework v4.6/v4.8 multi-config)
    │        │
@@ -1001,17 +1001,17 @@ Yuantus.Cad.Shared (multi-target: net46;net6.0)
    │
    ├─◀─ yuantus-cad-helper (.NET 6 self-contained)
    │        │
-   │        └─ ProjectReference Shared → 自动选 net6.0 target
+   │        └─ ProjectReference Shared → 自动选 net6.0-windows target
    │
    └─◀─ yuantus-cad-detector (.NET 6 self-contained)
             │
-            └─ ProjectReference Shared → 自动选 net6.0 target
+            └─ ProjectReference Shared → 自动选 net6.0-windows target
 ```
 
 **为什么多目标而非 netstandard2.0**：
 - AutoCAD 2018 基线 `CADDedupPlugin.csproj:16` 是 `TargetFrameworkVersion = v4.6`
 - netstandard2.0 官方矩阵要求 .NET Framework v4.6.1+；v4.6 在矩阵外
-- multi-target `net46;net6.0` 让同一份源码出两套程序集，分别给 .NET Framework 客户端和 .NET 6 服务端使用，零兼容性风险
+- multi-target `net46;net6.0-windows` 让同一份源码出两套程序集，分别给 .NET Framework 客户端和 .NET 6 Windows helper/detector 使用，零兼容性风险
 - NETLOAD 进 acad.exe 必须为完整 .NET Framework 程序集；netstandard2.0 类库即使被 .NET Framework 引用，也会引入 facade 依赖问题
 
 ---
@@ -1043,7 +1043,7 @@ Yuantus.Cad.Shared (multi-target: net46;net6.0)
 | 6 | **PLMMATPUSH 真机回归通过：CADDedupPlugin → helper `/sync/inbound` → 服务端 `/plugins/cad-material-sync/sync/inbound` → 物料正确入库** | 手测 |
 | 7 | **Local token bootstrap 真机回归：全新机器首次安装 helper，第一次 `PLMMATPULL` 不卡住，DPAPI 中 token 正确生成** | 手测 |
 | 8 | **`--reset-local-token` 真机回归：交互式终端可执行；SSH/WinRM 远程触发被拒** | 手测 |
-| 9 | **Shared 多目标编译验证：`dotnet build` 产出 `Yuantus.Cad.Shared.dll` 同时包含 `lib/net46/` 与 `lib/net6.0/` 两个目标** | CI |
+| 9 | **Shared 多目标编译验证：`dotnet build` 产出 `Yuantus.Cad.Shared.dll` 同时包含 `lib/net46/` 与 `lib/net6.0-windows/` 两个目标** | CI |
 | 10 | ZWCAD 真机：装 LISP 瘦壳 + Bridge.dll（v4.6），运行 `YUANTUS_DIFF_PREVIEW` 拿到 `write_cad_fields` 并展示 | 手测 |
 | 11 | 文档：本设计稿 + 一份运维 README + 一份 `verify_helper_e2e.ps1` 脚本 | 文档 |
 | 12 | Codex / 独立评审通过；任何与本稿冲突的实现差异必须在 PR 描述里显式列出 | 评审 |
@@ -1054,9 +1054,9 @@ Yuantus.Cad.Shared (multi-target: net46;net6.0)
 
 | Slice | 内容 | 估时 |
 |---|---|---|
-| S1 | `Yuantus.Cad.Shared`：多目标 `net46;net6.0` 工程结构；helper discovery + DPAPI 封装（bootstrap + reset） + HTTP transport + 错误信封 + 注册表抽象 | **2 天**（R2 1.5 天 + 多目标 / bootstrap 复杂度） |
+| S1 | `Yuantus.Cad.Shared`：多目标 `net46;net6.0-windows` 工程结构；helper discovery primitive + DPAPI / local token primitive + HTTP transport（JSON + multipart content）+ 错误信封 + 注册表抽象（默认 Registry64）+ `InstallId.GetOrCreate()` 原子 primitive（CreateNew + IOException 重读 + corruption 分类） | **2.5 天**（R2 1.5 天 + 多目标 / bootstrap / install-id primitive 复杂度） |
 | S2 | detector：注册表 + 文件系统扫描 + JSON schema + Procmon 零写验证模板 | 1.5 天 |
-| S3 | helper：Kestrel loopback + 端口分配 + `helper-session-{sessionId}.json` 生命周期 + install-id.json 原子生成 + 单例恢复完整算法（R3.2 PID + 路径双匹配、HELPER_UNHEALTHY 分支、裸 /healthz 探活）+ bootstrap token 生成 | **1.5 天**（R3.2 增加原子生成 + 死活判定复杂度） |
+| S3 | helper：Kestrel loopback + 端口分配 + `helper-session-{sessionId}.json` 生命周期 + 消费 `Shared.InstallId.GetOrCreate()` 组装 `Local\YuantusCadHelper-{installId}` Mutex + 单例恢复完整算法（R3.2 PID + 路径双匹配、HELPER_UNHEALTHY 分支、裸 /healthz 探活）+ bootstrap token 生成 | **1.5 天**（install-id 实现移到 S1；helper 启动 / 死活判定复杂度仍在 S3） |
 | S4 | helper：DPAPI token 第 1/2 层鉴权 + 来源 PID + 路径白名单 | 1 天 |
 | S5 | helper：`/healthz` `/version` `/session/*`（含 tenant_id / org_id / default_profile_id） + `/cad/current-drawing` | 1 天 |
 | S6 | helper：`/diff/preview` + `/sync/inbound` + `/sync/outbound` + `pull_id` 缓存 + `/audit/apply-result` + SQLite | **2 天**（R2 1.5 天 + 增加两个透传端点） |
@@ -1066,7 +1066,7 @@ Yuantus.Cad.Shared (multi-target: net46;net6.0)
 | S10 | ZWCAD/GstarCAD LISP 瘦壳：`YUANTUS_DIFF_PREVIEW` 等命令 + 命令行展示（不写 DWG） | 1 天 |
 | S11 | 集成 + 验收测试 + 文档 | 2 天 |
 
-总计：约 **15.5 个工作日**，单人节奏；可两人并行到 9 个工作日。每个 Slice 走独立 PR + 单独 opt-in（按 memory 中"每个 phase 独立 opt-in"规则）。
+总计：约 **16 个工作日**，单人节奏；可两人并行到 9-10 个工作日。每个 Slice 走独立 PR + 单独 opt-in（按 memory 中"每个 phase 独立 opt-in"规则）。
 
 **Slice 顺序依赖**：S1 是基础，必须先做；S2/S3 可并行；S4 依赖 S1；S5/S6 依赖 S3/S4；S7 依赖 S4；S8 依赖 S1+S6；S9 依赖 S1；S10 依赖 S9；S11 收尾。
 
@@ -1081,3 +1081,4 @@ Yuantus.Cad.Shared (multi-target: net46;net6.0)
 | R3 | 2026-05-19 | Codex 第二轮审阅修订。**High**：.NET 目标框架与 AutoCAD 2018 v4.6 基线对齐 —— Shared 改多目标 `net46;net6.0` 替代 netstandard2.0；Bridge.dll 改 `.NET Framework v4.6`；helper/detector 保持 net6.0 self-contained。**High**：恢复 `/sync/inbound` 与 `/sync/outbound` 端点（透传服务端同名路径），保证 `PLMMATPUSH` 命令不退化。新增 §6.3 PLMMATPUSH 时序图。**Medium**：`item_id` 强制约束改为 helper 层范围限定，服务端 `CadDiffPreviewRequest.item_id` 实为可选；helper 不暴露 values/target_properties 等其他路径。**Medium**：新增 §5.3.1 Local Token Bootstrap 流程（helper 启动时生成 + 写 DPAPI + Shared 读 DPAPI 注入）；新增 §5.3.2 `--reset-local-token` 命令（强制交互式终端检测、拒绝远程触发、helper 服务模式不暴露任何 HTTP reset 端点）。新增错误码 `HELPER_LOCAL_TOKEN_BOOTSTRAP_FAILED` / `HELPER_INPUT_VALIDATION_FAILED`。验收新增 CI 用例 19/20/21、手测用例 10/11/12 与门槛 6/7/8/9。工作分解从 13 天升到 14.5 天。 |
 | R3.1 | 2026-05-19 | Codex 第三轮审阅修订（commit 前最后一轮收敛）。**Medium**：补 `DedupApiClient.cs` 的迁移说明 —— §7 集成点表新增该客户端的内部 HTTP 调用走 `Yuantus.Cad.Shared` → helper `/dedup/check`，且 `/api/dedup/check` 是 **multipart/form-data** 文件上传（非 JSON），Shared 需支持 multipart 转发；§5.4 端点表对应行补上 multipart 标注与对应 .NET 客户端方法；§10 S8 合并 MaterialSyncApiClient + DedupApiClient 两客户端迁移并加 multipart 实现，估时 1.5 → 2 天；总工作量 14.5 → 15 天。此修订保证"helper 是唯一与 PLM 服务端通信的本机出口"在范围与代码两侧都成立。 |
 | R3.2 | 2026-05-19 | Codex 第四轮审阅修订（PR #614 reviewer comment 响应）。**High**：`install-id.json` 改为原子生成 —— 用 `FileStream(FileMode.CreateNew)` 独占创建；IOException 回退立即重读既有文件；废弃 "exists 检查 + WriteAllText" 的竞态写法。新增 §5.1.1 子节专门描述。**Medium**：明确 per-user-per-session 隔离模型 —— `Local\YuantusCadHelper-{installId}` Mutex 天然 session-scoped；`helper.json` 改名 `helper-session-{sessionId}.json`，文件名内嵌 sessionId；schema 新增 `session_id` + `image_path` 字段；跨 RDP session 共享同一 helper 进程**不支持**，列入未决问题 #8。**Medium**：单例恢复探活改为**裸 GET /healthz**（不带本地 token），把"helper 是否活着"与"DPAPI 是否可读"解耦；持有 Mutex 但 /healthz 失败时按 PID + 映像路径双校验区分 `HELPER_UNHEALTHY`（存活但不健康，不删发现文件）与 `HELPER_SINGLETON_LOST`（持有者已死，删文件重试）。新增错误码 `HELPER_UNHEALTHY` / `HELPER_INSTALL_ID_UNAVAILABLE`。验收新增 CI 用例 4b/4c/4d/4e/4f。§10 S3 估时 1 → 1.5 天，总工时 15 → 15.5 天。 |
+| R3.3 | 2026-05-20 | S1 实现期 micro-amend。Shared 目标框架收敛为 `net46;net6.0-windows`；`InstallId.GetOrCreate()` 原子 primitive 明确归属 S1，S3 只消费该 primitive 组装 Mutex / session 启动；S1 增补 RegistryView 默认 Registry64、multipart-capable `PostContentAsync`、25 项 mandatory Shared contract tests + reviewer-hardening tests。总工时 15.5 → 16 天。 |

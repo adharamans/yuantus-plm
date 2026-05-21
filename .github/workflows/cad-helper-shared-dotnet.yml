@@ -1,0 +1,49 @@
+name: cad-helper-shared-dotnet
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/cad-helper-shared-dotnet.yml"
+      - "clients/cad-desktop-helper/Shared/**"
+      - "clients/cad-desktop-helper/Shared.Tests/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/cad-helper-shared-dotnet.yml"
+      - "clients/cad-desktop-helper/Shared/**"
+      - "clients/cad-desktop-helper/Shared.Tests/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dotnet:
+    name: dotnet build/test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "6.0.x"
+
+      - name: Restore Shared tests
+        run: dotnet restore clients/cad-desktop-helper/Shared.Tests/Yuantus.Cad.Shared.Tests.csproj
+
+      - name: Build Shared
+        run: dotnet build clients/cad-desktop-helper/Shared/Yuantus.Cad.Shared.csproj --configuration Release --no-restore
+
+      - name: Test Shared
+        run: dotnet test clients/cad-desktop-helper/Shared.Tests/Yuantus.Cad.Shared.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=cad-helper-shared.trx"
