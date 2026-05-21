@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuantus.local/schemas/cad-detector-report.schema.json",
+  "type": "object",
+  "required": ["schema_version", "scanned_at", "host", "products", "recommendations", "warnings"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "scanned_at": { "type": "string", "format": "date-time" },
+    "host": {
+      "type": "object",
+      "required": ["os", "arch", "username", "is_admin"],
+      "properties": {
+        "os": { "type": "string" },
+        "arch": { "type": "string" },
+        "username": { "type": "string" },
+        "is_admin": { "type": "boolean" }
+      }
+    },
+    "products": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "vendor", "product", "install_root", "exe_path", "support_dirs", "plugin_bundle_dirs", "yuantus_bundle", "compatibility", "errors"],
+        "properties": {
+          "id": { "type": "string" },
+          "vendor": { "type": "string" },
+          "product": { "type": "string" },
+          "release_key": { "type": ["string", "null"] },
+          "marketing_version": { "type": ["string", "null"] },
+          "language": { "type": ["string", "null"] },
+          "install_root": { "type": ["string", "null"] },
+          "exe_path": { "type": ["string", "null"] },
+          "support_dirs": { "type": "array", "items": { "type": "string" } },
+          "plugin_bundle_dirs": { "type": "array", "items": { "type": "string" } },
+          "yuantus_bundle": {
+            "type": "object",
+            "required": ["present"],
+            "properties": {
+              "present": { "type": "boolean" },
+              "path": { "type": ["string", "null"] },
+              "package_version": { "type": ["string", "null"] },
+              "supports_release": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "compatibility": {
+            "enum": ["supported", "supported-no-bundle", "bundle-mismatch", "experimental", "registry-orphan", "unknown"]
+          },
+          "errors": { "type": "array" }
+        }
+      }
+    },
+    "recommendations": { "type": "array" },
+    "warnings": { "type": "array" }
+  }
+}
