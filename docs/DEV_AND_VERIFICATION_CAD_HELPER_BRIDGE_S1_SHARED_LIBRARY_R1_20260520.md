@@ -96,6 +96,10 @@ The `net6.0-windows` target uses `Microsoft.Win32.Registry` `5.0.0` because
 GitHub Actions restore proved there is no stable `6.0.0` package on nuget.org;
 the first failed Windows run reported nearest `6.0.0-preview.5.21301.5`.
 
+The test project pins `xunit` `2.4.2` and `xunit.runner.visualstudio` `2.4.5`
+because the initial runner `2.5.6` requires `net462` and cannot restore for the
+S1 baseline `net46` target.
+
 ## 4. Contract Tests
 
 `SharedContractTests.cs` implements the 25 mandatory S1 test names from the
