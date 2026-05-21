@@ -5,6 +5,9 @@ from pathlib import Path
 import yaml
 
 _ALLOWED_RUNNERS = {"ubuntu-latest"}
+_RUNNER_EXCEPTIONS = {
+    (".github/workflows/cad-helper-shared-dotnet.yml", "dotnet"): {"windows-latest"},
+}
 
 
 def _find_repo_root(start: Path) -> Path:
@@ -25,10 +28,11 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _assert_runner_is_allowed(*, workflow_rel: str, job_name: str, runner: object) -> None:
+    allowed = _ALLOWED_RUNNERS | _RUNNER_EXCEPTIONS.get((workflow_rel, job_name), set())
     if isinstance(runner, str):
-        assert runner in _ALLOWED_RUNNERS, (
+        assert runner in allowed, (
             f"{workflow_rel} job '{job_name}' runs-on={runner!r} not in allowed set "
-            f"{sorted(_ALLOWED_RUNNERS)}"
+            f"{sorted(allowed)}"
         )
         return
 
@@ -39,9 +43,9 @@ def _assert_runner_is_allowed(*, workflow_rel: str, job_name: str, runner: objec
                 f"{workflow_rel} job '{job_name}' runs-on[{idx}] must be string, "
                 f"got {type(item).__name__}"
             )
-            assert item in _ALLOWED_RUNNERS, (
+            assert item in allowed, (
                 f"{workflow_rel} job '{job_name}' runs-on[{idx}]={item!r} not in allowed set "
-                f"{sorted(_ALLOWED_RUNNERS)}"
+                f"{sorted(allowed)}"
             )
         return
 

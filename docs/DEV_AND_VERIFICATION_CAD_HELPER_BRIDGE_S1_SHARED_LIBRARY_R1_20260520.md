@@ -83,6 +83,9 @@ resolves them as follows:
   for `Yuantus.Cad.Shared` because macOS local verification cannot execute
   `net46;net6.0-windows` build/test and PR review explicitly needs a real
   Windows .NET gate.
+- Workflow contracts were extended with a path/job-specific runner-policy
+  exception for `.github/workflows/cad-helper-shared-dotnet.yml` job `dotnet`;
+  the rest of the repository remains on the existing `ubuntu-latest` default.
 - XML documentation output remains enabled for packaged consumers, but CS1591
   is not a S1 gate. DTO/property-level XML comment completeness is deliberately
   suppressed so Windows CI reports behavioral build/test failures rather than
