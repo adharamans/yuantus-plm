@@ -83,6 +83,10 @@ resolves them as follows:
   for `Yuantus.Cad.Shared` because macOS local verification cannot execute
   `net46;net6.0-windows` build/test and PR review explicitly needs a real
   Windows .NET gate.
+- XML documentation output remains enabled for packaged consumers, but CS1591
+  is not a S1 gate. DTO/property-level XML comment completeness is deliberately
+  suppressed so Windows CI reports behavioral build/test failures rather than
+  documentation-coverage noise.
 - Logging: no logger dependency inside `Yuantus.Cad.Shared`. Primitive failures
   surface through `HelperException` with structured `Code`, `Retryable`, and
   `Details`; S3 helper hosting is the first slice that should wire logging.

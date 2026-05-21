@@ -5,6 +5,7 @@
     <AssemblyName>Yuantus.Cad.Shared</AssemblyName>
     <RootNamespace>Yuantus.Cad.Shared</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
     <EnableWindowsTargeting Condition="'$(OS)' != 'Windows_NT'">true</EnableWindowsTargeting>
   </PropertyGroup>
 
