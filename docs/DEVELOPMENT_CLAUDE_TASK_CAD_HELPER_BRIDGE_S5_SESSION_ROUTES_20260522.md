@@ -189,7 +189,24 @@ It must preserve existing S3/S4 fields while writing the file:
 - `server_allowlist`.
 
 S5 must not corrupt or reorder unknown top-level JSON fields in a way that loses
-future settings. The implementation may use `JObject` for preservation.
+future settings. The implementation may use `JObject` for preservation, but it
+must not rely on non-atomic read-modify-write.
+
+Config persistence must use the same write-safety class as S3 session-file
+publish:
+
+1. read the current `config.json` into a JSON object;
+2. merge only the S5-owned fields;
+3. write to a same-directory temporary file;
+4. atomically replace or move into `config.json`;
+5. delete the temporary file on failure.
+
+Concurrency invariant: R3.2 explicitly allows two Windows sessions for the same
+user to run helper instances concurrently. Because `config.json` is per-user
+shared state, S5 must tolerate competing read-modify-write rounds without file
+corruption or partial JSON. Last-writer-wins for the same field is acceptable in
+R1; truncation, malformed JSON, and dropping unrelated existing fields are not
+acceptable.
 
 ### 3.E Server URL policy and server_allowlist gate
 
@@ -205,9 +222,21 @@ Ratified S5 behavior:
 4. `server_allowlist` is enforced if present in `config.json` before login.
 5. Empty or missing `server_allowlist` means no additional allowlist restriction
    beyond absolute `http/https` validation.
-6. Wildcard host entries like `https://*.yuantus.internal` match one or more
-   subdomain labels, not the bare root.
-7. On allowlist failure, return helper envelope `ok=false` with
+6. Matching is URI-based, not raw string prefix based:
+   - parse both the candidate `server_url` and each allowlist entry as absolute
+     URIs;
+   - scheme must match exactly after lowercasing;
+   - host comparison is case-insensitive;
+   - exact-host entries match only parsed host equality, so
+     `https://plm.example.com.evil.com` must not match
+     `https://plm.example.com`;
+   - explicit ports must match exactly;
+   - absent ports normalize to the scheme default (`80` for `http`, `443` for
+     `https`);
+   - path, query, and fragment are ignored by the allowlist decision.
+7. Wildcard host entries like `https://*.yuantus.internal` match one or more
+   parsed subdomain labels, not the bare root and not raw substrings.
+8. On allowlist failure, return helper envelope `ok=false` with
    `HELPER_INPUT_VALIDATION_FAILED` and do not call PLM.
 
 Rationale: S4 explicitly deferred server fields; S5 is the first safe point to
@@ -229,7 +258,9 @@ Ratified behavior:
 
 S5 may place bearer-token storage beside S1 `LocalTokenStore` primitives or in
 Helper-specific code, but it must use the same DPAPI envelope semantics and
-error code family. If DPAPI fails, return `HELPER_DPAPI_UNAVAILABLE`.
+error code family. It must use the R3.2 design entropy literal
+`yuantus-cad-plm-bearer-v1` for the PLM bearer token. If DPAPI fails, return
+`HELPER_DPAPI_UNAVAILABLE`.
 
 ### 3.G Login request and response
 
@@ -287,9 +318,12 @@ retain only safe identity fields needed for status display; it must not echo
 
 S5 preserves the helper envelope contract:
 
-- PLM HTTP 401/403 or PLM `ok=false` auth failure becomes helper `ok=false`
-  with `AUTH_PLM_NOT_LOGGED_IN` or the PLM error code if a structured PLM error
-  is available.
+- PLM `/api/v1/auth/login` returns a raw server `LoginResponse` on success and
+  HTTP errors such as `{"detail":"..."}` on failure; it is not a helper
+  envelope.
+- PLM HTTP 401/403 becomes helper `ok=false` with
+  `AUTH_PLM_NOT_LOGGED_IN`. The PLM `detail` body is the error-message source,
+  not a helper-envelope source.
 - Network failure to PLM becomes helper `ok=false` with `PLM_VALIDATION_FAILED`
   or a narrower helper-owned code if the implementation adds one already present
   in `ErrorCodes`.
@@ -357,9 +391,7 @@ Request shape:
 {
   "drawing": {
     "filename": "J2824002-06.dwg",
-    "filepath": "D:\\projects\\demo\\",
-    "is_titled": true,
-    "modified": false
+    "filepath": "D:\\projects\\demo\\"
   },
   "cad_system": "autocad"
 }
@@ -371,7 +403,6 @@ Ratified behavior:
 - S5 accepts drawing context supplied by S8/S9/S10 callers in the future.
 - `filename` is required and non-empty.
 - `filepath` is optional but, when present, must be a string.
-- `is_titled` and `modified` are optional booleans.
 - `cad_system` is optional; if present it must be one of `autocad`, `zwcad`, or
   `gstarcad`.
 - The endpoint returns the normalized stored drawing context.
@@ -433,28 +464,33 @@ xUnit equivalents:
 2. `test_session_routes_are_protected_by_s4_security_gate`
 3. `test_session_login_requires_valid_server_url_tenant_username_password`
 4. `test_session_login_enforces_server_allowlist_before_plm_call`
-5. `test_session_login_forwards_only_auth_payload_to_plm_login`
-6. `test_session_login_stores_bearer_with_dpapi_not_config_json`
-7. `test_session_login_persists_server_tenant_org_and_default_profile`
-8. `test_session_login_response_never_echoes_access_token_or_password`
-9. `test_session_login_failure_preserves_previous_session_and_token`
-10. `test_session_status_missing_token_or_tenant_returns_logged_out_not_error`
-11. `test_session_status_never_calls_plm_and_never_returns_bearer`
-12. `test_session_logout_clears_bearer_tenant_org_but_preserves_server_and_profile`
-13. `test_session_logout_is_idempotent_and_does_not_call_plm`
-14. `test_current_drawing_accepts_caller_supplied_context_without_reading_dwg`
-15. `test_current_drawing_rejects_missing_filename_and_invalid_cad_system`
-16. `test_current_drawing_is_memory_only_not_config_or_sqlite`
-17. `test_s5_adds_exactly_version_session_and_current_drawing_routes`
-18. `test_s5_does_not_add_s6_s7_s8_routes_or_sqlite_or_reset_token`
-19. `test_s5_keeps_cad_helper_dotnet_workflow_covering_helper_tests`
-20. `test_s5_preserves_s4_auth_origin_contract_tests`
+5. `test_server_allowlist_uses_parsed_uri_host_and_port_not_string_prefix`
+6. `test_session_login_forwards_only_auth_payload_to_plm_login`
+7. `test_session_login_stores_bearer_with_dpapi_not_config_json`
+8. `test_plm_bearer_uses_ratified_dpapi_entropy`
+9. `test_session_login_persists_server_tenant_org_and_default_profile`
+10. `test_session_config_write_is_atomic_and_preserves_unknown_fields`
+11. `test_session_login_response_never_echoes_access_token_or_password`
+12. `test_session_login_failure_preserves_previous_session_and_token`
+13. `test_session_status_missing_token_or_tenant_returns_logged_out_not_error`
+14. `test_session_status_never_calls_plm_and_never_returns_bearer`
+15. `test_session_logout_clears_bearer_tenant_org_but_preserves_server_and_profile`
+16. `test_session_logout_is_idempotent_and_does_not_call_plm`
+17. `test_current_drawing_accepts_caller_supplied_context_without_reading_dwg`
+18. `test_current_drawing_rejects_missing_filename_and_invalid_cad_system`
+19. `test_current_drawing_is_memory_only_not_config_or_sqlite`
+20. `test_s5_adds_exactly_version_session_and_current_drawing_routes`
+21. `test_s5_does_not_add_s6_s7_s8_routes_or_sqlite_or_reset_token`
+22. `test_s5_keeps_cad_helper_dotnet_workflow_covering_helper_tests`
+23. `test_s5_preserves_s4_auth_origin_contract_tests`
 
 Additional drift/source guards:
 
 - scan production Helper source for exactly these route strings:
   `/healthz`, `/version`, `/session/login`, `/session/logout`,
   `/session/status`, `/cad/current-drawing`;
+- assert the production helper source has exactly 6 route declarations across
+  `MapGet` and `MapPost`, and no `MapPut`, `MapDelete`, or `MapPatch`;
 - assert no `UseCors`, `Access-Control-Allow-*`, `--reset-local-token`,
   `SQLite`, `CADDedupPlugin`, `/diff/preview`, `/sync/inbound`,
   `/sync/outbound`, `/audit/apply-result`, `/dedup/check`, `/shell/notify`;
@@ -563,8 +599,14 @@ S6 and later slices remain independent opt-ins.
 
 - Confirm S5 is the correct owner for layer-2 PLM bearer token storage and
   forwarding primitives after S4's explicit deferral.
+- Confirm PLM bearer storage uses the R3.2 entropy literal
+  `yuantus-cad-plm-bearer-v1`.
 - Confirm `server_allowlist` enforcement belongs in S5 login rather than S6,
   because S5 is the first outbound PLM call surface.
+- Confirm `server_allowlist` matching is parsed-URI host/scheme/port matching,
+  not raw string prefix matching.
+- Confirm shared `config.json` writes use temp-write plus atomic replace/move so
+  two Windows-session helpers cannot leave partial JSON.
 - Confirm `/session/logout` is local-only and preserves `server_url` plus
   `default_profile_id` while clearing bearer, tenant, and org.
 - Confirm `/session/status` reports logged-out rather than erroring when token or
