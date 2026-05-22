@@ -173,6 +173,20 @@ dotnet test clients/cad-desktop-helper/Helper.Tests/Yuantus.Cad.Helper.Tests.csp
 The dedicated `cad-helper-shared-dotnet` workflow run for the PR SHA is the
 authoritative .NET signal.
 
+GitHub Actions:
+
+- Initial `.NET` run on `2029c3e` failed in `Build Helper` because
+  `WebApplication.RunAsync(cancellationToken)` resolved to the .NET 6
+  `string url` overload. The fix switched the helper host to
+  `StartAsync(...)` + `WaitForShutdownAsync(...)`.
+- Follow-up `.NET` run `26271074077`, job `77324419049`, passed for head
+  `63f05d6`:
+  - Restore Shared/Detector/Helper tests: success.
+  - Build Shared/Detector/Helper: success.
+  - Test Shared/Detector/Helper: success.
+  - The existing `net6.0-windows` out-of-support warning remains inherited from
+    S2 and is not introduced by S3.
+
 ## 9. Test Coverage
 
 `HelperStartupContractTests.cs` implements the 21 taskbook-mandated tests:
