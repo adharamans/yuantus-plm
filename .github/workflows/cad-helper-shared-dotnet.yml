@@ -8,6 +8,8 @@ on:
       - "clients/cad-desktop-helper/Shared.Tests/**"
       - "clients/cad-desktop-helper/Detector/**"
       - "clients/cad-desktop-helper/Detector.Tests/**"
+      - "clients/cad-desktop-helper/Helper/**"
+      - "clients/cad-desktop-helper/Helper.Tests/**"
   push:
     branches:
       - main
@@ -17,6 +19,8 @@ on:
       - "clients/cad-desktop-helper/Shared.Tests/**"
       - "clients/cad-desktop-helper/Detector/**"
       - "clients/cad-desktop-helper/Detector.Tests/**"
+      - "clients/cad-desktop-helper/Helper/**"
+      - "clients/cad-desktop-helper/Helper.Tests/**"
   workflow_dispatch: {}
 
 permissions:
@@ -49,6 +53,9 @@ jobs:
       - name: Restore Detector tests
         run: dotnet restore clients/cad-desktop-helper/Detector.Tests/Yuantus.Cad.Detector.Tests.csproj
 
+      - name: Restore Helper tests
+        run: dotnet restore clients/cad-desktop-helper/Helper.Tests/Yuantus.Cad.Helper.Tests.csproj
+
       - name: Build Shared
         run: dotnet build clients/cad-desktop-helper/Shared/Yuantus.Cad.Shared.csproj --configuration Release --no-restore
 
@@ -60,3 +67,9 @@ jobs:
 
       - name: Test Detector
         run: dotnet test clients/cad-desktop-helper/Detector.Tests/Yuantus.Cad.Detector.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=cad-helper-detector.trx"
+
+      - name: Build Helper
+        run: dotnet build clients/cad-desktop-helper/Helper/Yuantus.Cad.Helper.csproj --configuration Release --no-restore
+
+      - name: Test Helper
+        run: dotnet test clients/cad-desktop-helper/Helper.Tests/Yuantus.Cad.Helper.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=cad-helper-helper.trx"
