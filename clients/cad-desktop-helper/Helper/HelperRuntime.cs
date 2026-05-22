@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -1251,6 +1252,756 @@ namespace Yuantus.Cad.Helper
         }
     }
 
+    public sealed class HelperRouteResult
+    {
+        private HelperRouteResult(bool ok, object data, string code, string message)
+        {
+            Ok = ok;
+            Data = data;
+            Code = code;
+            Message = message;
+        }
+
+        public bool Ok { get; private set; }
+        public object Data { get; private set; }
+        public string Code { get; private set; }
+        public string Message { get; private set; }
+
+        public static HelperRouteResult Success(object data)
+        {
+            return new HelperRouteResult(true, data, null, null);
+        }
+
+        public static HelperRouteResult Error(string code, string message)
+        {
+            return new HelperRouteResult(false, null, code, message);
+        }
+    }
+
+    public static class HelperRouteResponse
+    {
+        public static Task WriteAsync(HttpContext context, HelperRouteResult result, CancellationToken cancellationToken)
+        {
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = "application/json; charset=utf-8";
+            var envelope = new ResponseEnvelope<object>
+            {
+                Ok = result.Ok,
+                Data = result.Data,
+                Error = result.Ok ? null : new HelperError
+                {
+                    Code = result.Code,
+                    Message = result.Message,
+                    Retryable = false,
+                    Details = new Dictionary<string, object>()
+                }
+            };
+            return context.Response.WriteAsync(JsonConvert.SerializeObject(envelope), cancellationToken);
+        }
+
+        public static string ToJson(HelperRouteResult result)
+        {
+            var envelope = new ResponseEnvelope<object>
+            {
+                Ok = result.Ok,
+                Data = result.Data,
+                Error = result.Ok ? null : new HelperError
+                {
+                    Code = result.Code,
+                    Message = result.Message,
+                    Retryable = false,
+                    Details = new Dictionary<string, object>()
+                }
+            };
+            return JsonConvert.SerializeObject(envelope);
+        }
+    }
+
+    public sealed class HelperVersionResponse
+    {
+        [JsonProperty("helper_version")]
+        public string HelperVersion { get; set; }
+
+        [JsonProperty("protocol_version")]
+        public string ProtocolVersion { get; set; }
+
+        [JsonProperty("features")]
+        public string[] Features { get; set; }
+
+        public static HelperVersionResponse Current()
+        {
+            return new HelperVersionResponse
+            {
+                HelperVersion = "0.1.0",
+                ProtocolVersion = Paths.ProtocolVersion,
+                Features = new[] { "session", "current_drawing" }
+            };
+        }
+    }
+
+    public sealed class SessionLoginRequest
+    {
+        [JsonProperty("server_url")]
+        public string ServerUrl { get; set; }
+
+        [JsonProperty("tenant_id")]
+        public string TenantId { get; set; }
+
+        [JsonProperty("org_id")]
+        public string OrgId { get; set; }
+
+        [JsonProperty("default_profile_id")]
+        public string DefaultProfileId { get; set; }
+
+        [JsonProperty("username")]
+        public string Username { get; set; }
+
+        [JsonProperty("password")]
+        public string Password { get; set; }
+    }
+
+    public sealed class SessionLoginResponse
+    {
+        [JsonProperty("logged_in")]
+        public bool LoggedIn { get; set; }
+
+        [JsonProperty("server_url")]
+        public string ServerUrl { get; set; }
+
+        [JsonProperty("tenant_id")]
+        public string TenantId { get; set; }
+
+        [JsonProperty("org_id")]
+        public string OrgId { get; set; }
+
+        [JsonProperty("default_profile_id")]
+        public string DefaultProfileId { get; set; }
+
+        [JsonProperty("username")]
+        public string Username { get; set; }
+    }
+
+    public sealed class SessionStatusResponse
+    {
+        [JsonProperty("logged_in")]
+        public bool LoggedIn { get; set; }
+
+        [JsonProperty("server_url")]
+        public string ServerUrl { get; set; }
+
+        [JsonProperty("tenant_id")]
+        public string TenantId { get; set; }
+
+        [JsonProperty("org_id")]
+        public string OrgId { get; set; }
+
+        [JsonProperty("default_profile_id")]
+        public string DefaultProfileId { get; set; }
+    }
+
+    public sealed class SessionLogoutResponse
+    {
+        [JsonProperty("logged_in")]
+        public bool LoggedIn { get; set; }
+    }
+
+    public sealed class CurrentDrawingRequest
+    {
+        [JsonProperty("drawing")]
+        public CurrentDrawingPayload Drawing { get; set; }
+
+        [JsonProperty("cad_system")]
+        public string CadSystem { get; set; }
+    }
+
+    public sealed class CurrentDrawingPayload
+    {
+        [JsonProperty("filename")]
+        public string Filename { get; set; }
+
+        [JsonProperty("filepath")]
+        public string Filepath { get; set; }
+    }
+
+    public sealed class CurrentDrawingResponse
+    {
+        [JsonProperty("drawing")]
+        public CurrentDrawingPayload Drawing { get; set; }
+
+        [JsonProperty("cad_system")]
+        public string CadSystem { get; set; }
+    }
+
+    public sealed class PlmLoginRequest
+    {
+        [JsonProperty("tenant_id")]
+        public string TenantId { get; set; }
+
+        [JsonProperty("org_id")]
+        public string OrgId { get; set; }
+
+        [JsonProperty("username")]
+        public string Username { get; set; }
+
+        [JsonProperty("password")]
+        public string Password { get; set; }
+    }
+
+    public sealed class PlmLoginResponse
+    {
+        [JsonProperty("access_token")]
+        public string AccessToken { get; set; }
+
+        [JsonProperty("tenant_id")]
+        public string TenantId { get; set; }
+
+        [JsonProperty("user_id")]
+        public string UserId { get; set; }
+    }
+
+    public sealed class HelperSessionSnapshot
+    {
+        public string ServerUrl { get; set; }
+        public string TenantId { get; set; }
+        public string OrgId { get; set; }
+        public string DefaultProfileId { get; set; }
+    }
+
+    public interface IHelperSessionConfigStore
+    {
+        HelperSessionSnapshot Read();
+        IReadOnlyList<string> ReadServerAllowlist();
+        void SaveLogin(string serverUrl, string tenantId, string orgId, string defaultProfileId);
+        void ClearLogin();
+    }
+
+    public sealed class JsonHelperSessionConfigStore : IHelperSessionConfigStore
+    {
+        private readonly string _configPath;
+
+        public JsonHelperSessionConfigStore(string configPath)
+        {
+            _configPath = configPath;
+        }
+
+        public HelperSessionSnapshot Read()
+        {
+            var document = ReadDocument();
+            return new HelperSessionSnapshot
+            {
+                ServerUrl = Value(document, "server_url"),
+                TenantId = Value(document, "tenant_id"),
+                OrgId = Value(document, "org_id"),
+                DefaultProfileId = Value(document, "default_profile_id")
+            };
+        }
+
+        public IReadOnlyList<string> ReadServerAllowlist()
+        {
+            var document = ReadDocument();
+            var array = document["server_allowlist"] as JArray;
+            if (array == null)
+            {
+                return new string[0];
+            }
+            return array
+                .Select(item => item.Type == JTokenType.String ? item.Value<string>() : null)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .ToArray();
+        }
+
+        public void SaveLogin(string serverUrl, string tenantId, string orgId, string defaultProfileId)
+        {
+            Update(document =>
+            {
+                document["server_url"] = serverUrl;
+                document["tenant_id"] = tenantId;
+                SetOrRemove(document, "org_id", orgId);
+                SetOrRemove(document, "default_profile_id", defaultProfileId);
+            });
+        }
+
+        public void ClearLogin()
+        {
+            Update(document =>
+            {
+                document.Remove("tenant_id");
+                document.Remove("org_id");
+            });
+        }
+
+        private void Update(Action<JObject> mutate)
+        {
+            var document = ReadDocument();
+            mutate(document);
+            AtomicWrite(document);
+        }
+
+        private JObject ReadDocument()
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(_configPath) || !File.Exists(_configPath))
+                {
+                    return new JObject();
+                }
+                var raw = File.ReadAllText(_configPath, Encoding.UTF8);
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    return new JObject();
+                }
+                return JObject.Parse(raw);
+            }
+            catch (Exception)
+            {
+                return new JObject();
+            }
+        }
+
+        private void AtomicWrite(JObject document)
+        {
+            var directory = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var temp = _configPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, JsonConvert.SerializeObject(document, Formatting.Indented), Encoding.UTF8);
+                if (File.Exists(_configPath))
+                {
+                    File.Replace(temp, _configPath, null);
+                }
+                else
+                {
+                    File.Move(temp, _configPath);
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temp))
+                    {
+                        File.Delete(temp);
+                    }
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+
+        private static string Value(JObject document, string name)
+        {
+            var token = document[name];
+            return token == null || token.Type == JTokenType.Null ? null : token.Value<string>();
+        }
+
+        private static void SetOrRemove(JObject document, string name, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                document.Remove(name);
+            }
+            else
+            {
+                document[name] = value;
+            }
+        }
+    }
+
+    public interface IPlmBearerTokenStore
+    {
+        string Read();
+        void Write(string accessToken);
+        void Clear();
+    }
+
+    public sealed class DpapiPlmBearerTokenStore : IPlmBearerTokenStore
+    {
+        public const string EntropyLiteral = "yuantus-cad-plm-bearer-v1";
+        private static readonly byte[] Entropy = Encoding.UTF8.GetBytes(EntropyLiteral);
+        private readonly string _tokenPath;
+
+        public DpapiPlmBearerTokenStore(string tokenPath)
+        {
+            _tokenPath = tokenPath;
+        }
+
+        public string Read()
+        {
+            try
+            {
+                if (!File.Exists(_tokenPath))
+                {
+                    return null;
+                }
+                var encrypted = File.ReadAllBytes(_tokenPath);
+                var plain = DpapiEnvelope.Unprotect(encrypted, Entropy);
+                return Encoding.UTF8.GetString(plain);
+            }
+            catch (HelperException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new HelperException(ErrorCodes.HelperDpapiUnavailable, "Unable to read PLM bearer token.", false, null, ex);
+            }
+        }
+
+        public void Write(string accessToken)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_tokenPath));
+                var encrypted = DpapiEnvelope.Protect(Encoding.UTF8.GetBytes(accessToken ?? string.Empty), Entropy);
+                File.WriteAllBytes(_tokenPath, encrypted);
+            }
+            catch (HelperException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new HelperException(ErrorCodes.HelperDpapiUnavailable, "Unable to write PLM bearer token.", false, null, ex);
+            }
+        }
+
+        public void Clear()
+        {
+            try
+            {
+                if (File.Exists(_tokenPath))
+                {
+                    File.Delete(_tokenPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new HelperException(ErrorCodes.HelperDpapiUnavailable, "Unable to clear PLM bearer token.", false, null, ex);
+            }
+        }
+    }
+
+    public sealed class ServerAllowlist
+    {
+        private readonly string[] _patterns;
+
+        public ServerAllowlist(IEnumerable<string> patterns)
+        {
+            _patterns = (patterns ?? new string[0])
+                .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+                .Select(pattern => pattern.Trim())
+                .ToArray();
+        }
+
+        public bool Allows(Uri serverUri)
+        {
+            if (_patterns.Length == 0)
+            {
+                return true;
+            }
+
+            foreach (var pattern in _patterns)
+            {
+                if (Matches(pattern, serverUri))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool Matches(string pattern, Uri serverUri)
+        {
+            Uri patternUri;
+            if (!Uri.TryCreate(pattern, UriKind.Absolute, out patternUri))
+            {
+                return false;
+            }
+            if (!string.Equals(patternUri.Scheme, serverUri.Scheme, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            if (NormalizePort(patternUri) != NormalizePort(serverUri))
+            {
+                return false;
+            }
+            return HostMatches(patternUri.Host, serverUri.Host);
+        }
+
+        private static bool HostMatches(string patternHost, string serverHost)
+        {
+            if (patternHost.StartsWith("*.", StringComparison.Ordinal))
+            {
+                var suffix = patternHost.Substring(1);
+                return serverHost.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) &&
+                       serverHost.Length > suffix.Length;
+            }
+            return string.Equals(patternHost, serverHost, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int NormalizePort(Uri uri)
+        {
+            if (!uri.IsDefaultPort)
+            {
+                return uri.Port;
+            }
+            if (string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+            {
+                return 443;
+            }
+            return 80;
+        }
+    }
+
+    public interface IPlmLoginClient
+    {
+        Task<PlmLoginResponse> LoginAsync(Uri serverUri, PlmLoginRequest request, CancellationToken cancellationToken);
+    }
+
+    public sealed class PlmLoginRejectedException : Exception
+    {
+        public PlmLoginRejectedException(string message)
+            : base(message)
+        {
+        }
+    }
+
+    public sealed class HttpPlmLoginClient : IPlmLoginClient
+    {
+        private readonly HttpClient _httpClient;
+
+        public HttpPlmLoginClient(HttpClient httpClient)
+        {
+            _httpClient = httpClient;
+        }
+
+        public async Task<PlmLoginResponse> LoginAsync(Uri serverUri, PlmLoginRequest request, CancellationToken cancellationToken)
+        {
+            var endpoint = new Uri(serverUri.ToString().TrimEnd('/') + "/auth/login");
+            var json = JsonConvert.SerializeObject(request);
+            using (var content = new StringContent(json, Encoding.UTF8, "application/json"))
+            using (var response = await _httpClient.PostAsync(endpoint, content, cancellationToken).ConfigureAwait(false))
+            {
+                var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    throw new PlmLoginRejectedException(ExtractDetail(body));
+                }
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new HttpRequestException("PLM login validation failed with HTTP " + (int)response.StatusCode + ".");
+                }
+                return JsonConvert.DeserializeObject<PlmLoginResponse>(body);
+            }
+        }
+
+        private static string ExtractDetail(string body)
+        {
+            try
+            {
+                var json = JObject.Parse(body ?? string.Empty);
+                return json.Value<string>("detail") ?? "PLM login rejected.";
+            }
+            catch (Exception)
+            {
+                return "PLM login rejected.";
+            }
+        }
+    }
+
+    public sealed class CurrentDrawingStore
+    {
+        private CurrentDrawingResponse _current;
+
+        public CurrentDrawingResponse Read()
+        {
+            return _current;
+        }
+
+        public CurrentDrawingResponse Write(CurrentDrawingRequest request)
+        {
+            var response = new CurrentDrawingResponse
+            {
+                Drawing = new CurrentDrawingPayload
+                {
+                    Filename = request.Drawing.Filename.Trim(),
+                    Filepath = request.Drawing.Filepath
+                },
+                CadSystem = string.IsNullOrWhiteSpace(request.CadSystem) ? null : request.CadSystem.Trim().ToLowerInvariant()
+            };
+            _current = response;
+            return response;
+        }
+    }
+
+    public sealed class HelperSessionService
+    {
+        private readonly IHelperSessionConfigStore _config;
+        private readonly IPlmBearerTokenStore _bearer;
+        private readonly IPlmLoginClient _plm;
+        private readonly CurrentDrawingStore _drawing;
+
+        public HelperSessionService(
+            IHelperSessionConfigStore config,
+            IPlmBearerTokenStore bearer,
+            IPlmLoginClient plm,
+            CurrentDrawingStore drawing)
+        {
+            _config = config;
+            _bearer = bearer;
+            _plm = plm;
+            _drawing = drawing;
+        }
+
+        public async Task<HelperRouteResult> LoginAsync(SessionLoginRequest request, CancellationToken cancellationToken)
+        {
+            Uri serverUri;
+            var validation = ValidateLoginRequest(request, out serverUri);
+            if (validation != null)
+            {
+                return validation;
+            }
+
+            if (!new ServerAllowlist(_config.ReadServerAllowlist()).Allows(serverUri))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "server_url is not allowed.");
+            }
+
+            try
+            {
+                var response = await _plm.LoginAsync(serverUri, new PlmLoginRequest
+                {
+                    TenantId = request.TenantId.Trim(),
+                    OrgId = TrimToNull(request.OrgId),
+                    Username = request.Username.Trim(),
+                    Password = request.Password
+                }, cancellationToken).ConfigureAwait(false);
+
+                if (response == null || string.IsNullOrWhiteSpace(response.AccessToken))
+                {
+                    return HelperRouteResult.Error(ErrorCodes.PlmValidationFailed, "PLM login did not return an access token.");
+                }
+
+                _bearer.Write(response.AccessToken);
+                var normalized = NormalizeServerUrl(serverUri);
+                _config.SaveLogin(normalized, request.TenantId.Trim(), TrimToNull(request.OrgId), TrimToNull(request.DefaultProfileId));
+                return HelperRouteResult.Success(new SessionLoginResponse
+                {
+                    LoggedIn = true,
+                    ServerUrl = normalized,
+                    TenantId = request.TenantId.Trim(),
+                    OrgId = TrimToNull(request.OrgId),
+                    DefaultProfileId = TrimToNull(request.DefaultProfileId),
+                    Username = request.Username.Trim()
+                });
+            }
+            catch (PlmLoginRejectedException ex)
+            {
+                return HelperRouteResult.Error(ErrorCodes.AuthPlmNotLoggedIn, ex.Message);
+            }
+            catch (HelperException ex)
+            {
+                if (ex.Code == ErrorCodes.HelperDpapiUnavailable)
+                {
+                    return HelperRouteResult.Error(ErrorCodes.HelperDpapiUnavailable, ex.Message);
+                }
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return HelperRouteResult.Error(ErrorCodes.PlmValidationFailed, ex.Message);
+            }
+        }
+
+        public HelperRouteResult Logout()
+        {
+            _bearer.Clear();
+            _config.ClearLogin();
+            return HelperRouteResult.Success(new SessionLogoutResponse { LoggedIn = false });
+        }
+
+        public HelperRouteResult Status()
+        {
+            var snapshot = _config.Read();
+            string token = null;
+            try
+            {
+                token = _bearer.Read();
+            }
+            catch (HelperException ex)
+            {
+                if (ex.Code == ErrorCodes.HelperDpapiUnavailable)
+                {
+                    return HelperRouteResult.Error(ErrorCodes.HelperDpapiUnavailable, ex.Message);
+                }
+                throw;
+            }
+
+            return HelperRouteResult.Success(new SessionStatusResponse
+            {
+                LoggedIn = !string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(snapshot.TenantId),
+                ServerUrl = snapshot.ServerUrl,
+                TenantId = snapshot.TenantId,
+                OrgId = snapshot.OrgId,
+                DefaultProfileId = snapshot.DefaultProfileId
+            });
+        }
+
+        public HelperRouteResult SetCurrentDrawing(CurrentDrawingRequest request)
+        {
+            if (request == null || request.Drawing == null || string.IsNullOrWhiteSpace(request.Drawing.Filename))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "drawing.filename is required.");
+            }
+            if (!string.IsNullOrWhiteSpace(request.CadSystem) &&
+                !new[] { "autocad", "zwcad", "gstarcad" }.Contains(request.CadSystem.Trim().ToLowerInvariant()))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "cad_system is invalid.");
+            }
+            return HelperRouteResult.Success(_drawing.Write(request));
+        }
+
+        private static HelperRouteResult ValidateLoginRequest(SessionLoginRequest request, out Uri serverUri)
+        {
+            serverUri = null;
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.ServerUrl) ||
+                string.IsNullOrWhiteSpace(request.TenantId) ||
+                string.IsNullOrWhiteSpace(request.Username) ||
+                string.IsNullOrWhiteSpace(request.Password))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "server_url, tenant_id, username, and password are required.");
+            }
+            if (!Uri.TryCreate(request.ServerUrl.Trim(), UriKind.Absolute, out serverUri) ||
+                (!string.Equals(serverUri.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+                 !string.Equals(serverUri.Scheme, "https", StringComparison.OrdinalIgnoreCase)))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "server_url must be an absolute http or https URL.");
+            }
+            return null;
+        }
+
+        private static string NormalizeServerUrl(Uri serverUri)
+        {
+            return serverUri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        }
+
+        private static string TrimToNull(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+    }
+
     public static class HelperConfig
     {
         public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromMinutes(30);
@@ -1337,6 +2088,11 @@ namespace Yuantus.Cad.Helper
                 localToken,
                 securityOptions,
                 new WindowsTcpOriginProcessResolver(new DefaultProcessInspector()));
+            var sessionService = new HelperSessionService(
+                new JsonHelperSessionConfigStore(Path.Combine(Paths.RootDirectory, "config.json")),
+                new DpapiPlmBearerTokenStore(Path.Combine(Paths.RootDirectory, "plm-bearer-token.bin")),
+                new HttpPlmLoginClient(new HttpClient()),
+                new CurrentDrawingStore());
 
             app.Use(async (context, next) =>
             {
@@ -1368,6 +2124,48 @@ namespace Yuantus.Cad.Helper
                 idle.Touch(clock.UtcNow);
                 context.Response.ContentType = "application/json; charset=utf-8";
                 await context.Response.WriteAsync("{\"ok\":true}", cancellationToken).ConfigureAwait(false);
+            });
+
+            app.MapGet("/version", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                await HelperRouteResponse
+                    .WriteAsync(context, HelperRouteResult.Success(HelperVersionResponse.Current()), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/session/login", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<SessionLoginRequest>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await sessionService.LoginAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/session/logout", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                await HelperRouteResponse
+                    .WriteAsync(context, sessionService.Logout(), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapGet("/session/status", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                await HelperRouteResponse
+                    .WriteAsync(context, sessionService.Status(), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/cad/current-drawing", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<CurrentDrawingRequest>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, sessionService.SetCurrentDrawing(request), cancellationToken)
+                    .ConfigureAwait(false);
             });
 
             using (var idleCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
@@ -1409,6 +2207,19 @@ namespace Yuantus.Cad.Helper
                     {
                     }
                 }
+            }
+        }
+
+        private static async Task<T> ReadJsonAsync<T>(HttpContext context)
+        {
+            using (var reader = new StreamReader(context.Request.Body, Encoding.UTF8))
+            {
+                var body = await reader.ReadToEndAsync().ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(body))
+                {
+                    return default(T);
+                }
+                return JsonConvert.DeserializeObject<T>(body);
             }
         }
     }

@@ -361,17 +361,17 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_no_s5_s7_s8_scope_leak_after_s4_security()
+        public void test_no_s6_s7_s8_scope_leak_after_s5_session_routes()
         {
             var sources = ReadHelperSources();
 
             Assert.DoesNotContain("Authorization", sources);
-            Assert.DoesNotContain("/session/", sources);
-            Assert.DoesNotContain("/cad/current-drawing", sources);
             Assert.DoesNotContain("/diff/preview", sources);
             Assert.DoesNotContain("/sync/inbound", sources);
             Assert.DoesNotContain("/sync/outbound", sources);
             Assert.DoesNotContain("/audit/apply-result", sources);
+            Assert.DoesNotContain("/dedup/check", sources);
+            Assert.DoesNotContain("/shell/notify", sources);
             Assert.DoesNotContain("--reset-local-token", sources);
             Assert.DoesNotContain("SQLite", sources);
             Assert.DoesNotContain("CADDedupPlugin", sources);

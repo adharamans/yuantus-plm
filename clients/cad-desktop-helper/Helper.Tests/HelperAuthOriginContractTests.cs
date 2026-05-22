@@ -22,14 +22,14 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_version_path_is_reserved_exempt_but_not_implemented()
+        public void test_version_path_remains_bare_exempt_after_s5_implementation()
         {
             var gate = Gate(new ThrowingOriginResolver());
 
             Assert.True(gate.Authorize(Request("GET", "/Version", null, null)).Allowed);
             Assert.True(gate.Authorize(Request("GET", "/version?ignored=true", null, null)).Allowed);
             Assert.False(gate.Authorize(Request("GET", "/version/", null, null)).Allowed);
-            Assert.DoesNotContain("MapGet(\"/version\"", ReadHelperSources());
+            Assert.Contains("MapGet(\"/version\"", ReadHelperSources());
         }
 
         [Fact]
@@ -229,40 +229,39 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_s4_adds_no_production_routes_beyond_healthz()
+        public void test_s4_auth_gate_remains_in_front_of_s5_routes()
         {
             var sources = ReadHelperSources();
 
-            Assert.Equal(1, CountOccurrences(sources, "MapGet("));
             Assert.Contains("MapGet(\"/healthz\"", sources);
-            Assert.DoesNotContain("MapPost(", sources);
+            Assert.Contains("MapGet(\"/version\"", sources);
+            Assert.Contains("MapPost(\"/session/login\"", sources);
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
-            Assert.DoesNotContain("MapGet(\"/version\"", sources);
+            Assert.Contains("security.Authorize", sources);
         }
 
         [Fact]
-        public void test_s4_does_not_implement_plm_bearer_session_or_authorization_forwarding()
+        public void test_s4_still_does_not_forward_browser_authorization_header()
         {
             var sources = ReadHelperSources();
 
-            Assert.DoesNotContain("Bearer", sources);
             Assert.DoesNotContain("Authorization", sources);
-            Assert.DoesNotContain("AUTH_PLM_NOT_LOGGED_IN", sources);
-            Assert.DoesNotContain("/session/login", sources);
+            Assert.Contains("ErrorCodes.AuthPlmNotLoggedIn", sources);
+            Assert.Contains("/session/login", sources);
         }
 
         [Fact]
-        public void test_no_s5_s6_s7_s8_scope_leak()
+        public void test_no_s6_s7_s8_scope_leak_after_s5_session_routes()
         {
             var sources = ReadHelperSources();
 
-            Assert.DoesNotContain("/session/", sources);
-            Assert.DoesNotContain("/cad/current-drawing", sources);
             Assert.DoesNotContain("/diff/preview", sources);
             Assert.DoesNotContain("/sync/inbound", sources);
             Assert.DoesNotContain("/sync/outbound", sources);
             Assert.DoesNotContain("/audit/apply-result", sources);
+            Assert.DoesNotContain("/dedup/check", sources);
+            Assert.DoesNotContain("/shell/notify", sources);
             Assert.DoesNotContain("--reset-local-token", sources);
             Assert.DoesNotContain("SQLite", sources);
             Assert.DoesNotContain("CADDedupPlugin", sources);
