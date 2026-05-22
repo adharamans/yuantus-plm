@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -123,17 +126,18 @@ namespace Yuantus.Cad.Helper
                 ownsLifecycle = true;
 
                 var bootstrapper = new LocalTokenBootstrapper(runtime.TokenStore, runtime.RandomBytes);
-                bootstrapper.EnsureToken();
+                var localToken = bootstrapper.EnsureToken();
 
                 var port = runtime.PortAllocator.Allocate().Port;
                 var session = HelperSessionDocument.Create(runtime.Paths, port, runtime.Clock.UtcNow);
                 runtime.SessionFiles.Publish(session);
 
                 var idleTimeout = HelperConfig.LoadIdleTimeout(runtime.Paths.ConfigFilePath);
+                var securityOptions = HelperSecurityOptions.Load(runtime.Paths.ConfigFilePath);
                 try
                 {
                     await runtime.HostRunner
-                        .RunAsync(port, session, idleTimeout, runtime.Clock, runtime.Delay, cancellationToken)
+                        .RunAsync(port, session, idleTimeout, localToken, securityOptions, runtime.Clock, runtime.Delay, cancellationToken)
                         .ConfigureAwait(false);
                     return 0;
                 }
@@ -811,6 +815,442 @@ namespace Yuantus.Cad.Helper
         }
     }
 
+    public sealed class OriginAllowlistEntry
+    {
+        public OriginAllowlistEntry(string imageName, string pathPattern)
+        {
+            ImageName = imageName;
+            PathPattern = pathPattern;
+        }
+
+        public string ImageName { get; private set; }
+        public string PathPattern { get; private set; }
+    }
+
+    public sealed class HelperSecurityOptions
+    {
+        private static readonly OriginAllowlistEntry[] Defaults = new[]
+        {
+            new OriginAllowlistEntry("acad.exe", @"C:\Program Files\Autodesk\AutoCAD*\acad.exe"),
+            new OriginAllowlistEntry("ZWCAD.exe", @"C:\Program Files\ZWSOFT\ZWCAD*\ZWCAD.exe"),
+            new OriginAllowlistEntry("gscad.exe", @"C:\Program Files\Gstarsoft\GstarCAD*\gscad.exe"),
+            new OriginAllowlistEntry("yuantus-tauri-companion.exe", @"*\YuantusPLM\companion\yuantus-tauri-companion.exe")
+        };
+
+        public HelperSecurityOptions(IEnumerable<OriginAllowlistEntry> originAllowlist)
+        {
+            OriginAllowlist = (originAllowlist ?? Defaults).ToArray();
+        }
+
+        public IReadOnlyList<OriginAllowlistEntry> OriginAllowlist { get; private set; }
+
+        public static HelperSecurityOptions Default()
+        {
+            return new HelperSecurityOptions(Defaults);
+        }
+
+        public static HelperSecurityOptions Load(string configPath)
+        {
+            var entries = new List<OriginAllowlistEntry>(Defaults);
+            try
+            {
+                if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
+                {
+                    return new HelperSecurityOptions(entries);
+                }
+
+                var document = JObject.Parse(File.ReadAllText(configPath));
+                var configured = document["origin_whitelist"] as JArray;
+                if (configured == null)
+                {
+                    return new HelperSecurityOptions(entries);
+                }
+
+                var parsed = new List<OriginAllowlistEntry>();
+                foreach (var item in configured)
+                {
+                    var imageName = item.Value<string>("image_name");
+                    var pathPattern = item.Value<string>("path_pattern");
+                    if (string.IsNullOrWhiteSpace(imageName) || string.IsNullOrWhiteSpace(pathPattern))
+                    {
+                        return new HelperSecurityOptions(entries);
+                    }
+                    parsed.Add(new OriginAllowlistEntry(imageName.Trim(), pathPattern.Trim()));
+                }
+
+                entries.AddRange(parsed);
+                return new HelperSecurityOptions(Deduplicate(entries));
+            }
+            catch (Exception)
+            {
+                return new HelperSecurityOptions(entries);
+            }
+        }
+
+        private static IEnumerable<OriginAllowlistEntry> Deduplicate(IEnumerable<OriginAllowlistEntry> entries)
+        {
+            return entries
+                .GroupBy(entry => entry.ImageName.ToLowerInvariant() + "\n" + entry.PathPattern.ToLowerInvariant())
+                .Select(group => group.First())
+                .OrderBy(entry => entry.ImageName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(entry => entry.PathPattern, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+    }
+
+    public sealed class HelperSecurityRequest
+    {
+        public string Method { get; set; }
+        public string Path { get; set; }
+        public string[] LocalTokenHeaders { get; set; }
+        public string[] ProtocolHeaders { get; set; }
+        public OriginConnection Connection { get; set; }
+    }
+
+    public sealed class HelperSecurityDecision
+    {
+        private HelperSecurityDecision(bool allowed, int statusCode, string code, string message)
+        {
+            Allowed = allowed;
+            StatusCode = statusCode;
+            Code = code;
+            Message = message;
+        }
+
+        public bool Allowed { get; private set; }
+        public int StatusCode { get; private set; }
+        public string Code { get; private set; }
+        public string Message { get; private set; }
+
+        public static HelperSecurityDecision Allow()
+        {
+            return new HelperSecurityDecision(true, 0, null, null);
+        }
+
+        public static HelperSecurityDecision Deny(int statusCode, string code, string message)
+        {
+            return new HelperSecurityDecision(false, statusCode, code, message);
+        }
+    }
+
+    public sealed class HelperSecurityGate
+    {
+        private readonly string _localToken;
+        private readonly HelperSecurityOptions _options;
+        private readonly IOriginProcessResolver _originResolver;
+
+        public HelperSecurityGate(string localToken, HelperSecurityOptions options, IOriginProcessResolver originResolver)
+        {
+            _localToken = localToken ?? string.Empty;
+            _options = options ?? HelperSecurityOptions.Default();
+            _originResolver = originResolver;
+        }
+
+        public HelperSecurityDecision Authorize(HelperSecurityRequest request)
+        {
+            if (IsExempt(request))
+            {
+                return HelperSecurityDecision.Allow();
+            }
+
+            var token = SingleHeaderValue(request.LocalTokenHeaders);
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return HelperSecurityDecision.Deny(
+                    StatusCodes.Status401Unauthorized,
+                    ErrorCodes.AuthLocalTokenMissing,
+                    "Local helper token is missing.");
+            }
+
+            if (!FixedTimeTokenEquals(_localToken, token))
+            {
+                return HelperSecurityDecision.Deny(
+                    StatusCodes.Status401Unauthorized,
+                    ErrorCodes.AuthLocalTokenInvalid,
+                    "Local helper token is invalid.");
+            }
+
+            var protocol = SingleHeaderValue(request.ProtocolHeaders);
+            if (!string.Equals(protocol, Paths.ProtocolVersion, StringComparison.Ordinal))
+            {
+                return HelperSecurityDecision.Deny(
+                    StatusCodes.Status426UpgradeRequired,
+                    ErrorCodes.ProtoVersionUnsupported,
+                    "Helper protocol version is unsupported.");
+            }
+
+            var origin = _originResolver == null ? null : _originResolver.Resolve(request.Connection);
+            if (origin == null || !origin.Exists || string.IsNullOrWhiteSpace(origin.ImageName) || string.IsNullOrWhiteSpace(origin.ImagePath))
+            {
+                return OriginDenied();
+            }
+
+            if (!IsAllowedOrigin(origin))
+            {
+                return OriginDenied();
+            }
+
+            return HelperSecurityDecision.Allow();
+        }
+
+        public static bool IsExempt(HelperSecurityRequest request)
+        {
+            if (request == null || !string.Equals(request.Method, "GET", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var path = request.Path ?? string.Empty;
+            return string.Equals(path, "/healthz", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(path, "/version", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool FixedTimeTokenEquals(string expected, string supplied)
+        {
+            var expectedBytes = Encoding.UTF8.GetBytes(expected ?? string.Empty);
+            var suppliedBytes = Encoding.UTF8.GetBytes(supplied ?? string.Empty);
+            var length = Math.Max(expectedBytes.Length, suppliedBytes.Length);
+            var diff = expectedBytes.Length ^ suppliedBytes.Length;
+
+            for (var i = 0; i < length; i++)
+            {
+                var left = i < expectedBytes.Length ? expectedBytes[i] : (byte)0;
+                var right = i < suppliedBytes.Length ? suppliedBytes[i] : (byte)0;
+                diff |= left ^ right;
+            }
+
+            return diff == 0;
+        }
+
+        private bool IsAllowedOrigin(OriginProcess origin)
+        {
+            foreach (var entry in _options.OriginAllowlist)
+            {
+                if (string.Equals(origin.ImageName, entry.ImageName, StringComparison.OrdinalIgnoreCase) &&
+                    GlobMatches(entry.PathPattern, origin.ImagePath))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string SingleHeaderValue(string[] values)
+        {
+            if (values == null || values.Length != 1)
+            {
+                return null;
+            }
+            return values[0];
+        }
+
+        private static HelperSecurityDecision OriginDenied()
+        {
+            return HelperSecurityDecision.Deny(
+                StatusCodes.Status403Forbidden,
+                ErrorCodes.OriginProcessNotAllowed,
+                "Origin process is not allowed.");
+        }
+
+        private static bool GlobMatches(string pattern, string value)
+        {
+            if (pattern == null || value == null)
+            {
+                return false;
+            }
+
+            var regex = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+            return Regex.IsMatch(value, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+    }
+
+    public sealed class OriginConnection
+    {
+        public IPAddress LocalAddress { get; set; }
+        public int LocalPort { get; set; }
+        public IPAddress RemoteAddress { get; set; }
+        public int RemotePort { get; set; }
+    }
+
+    public sealed class OriginProcess
+    {
+        public OriginProcess(bool exists, string imageName, string imagePath)
+        {
+            Exists = exists;
+            ImageName = imageName;
+            ImagePath = imagePath;
+        }
+
+        public bool Exists { get; private set; }
+        public string ImageName { get; private set; }
+        public string ImagePath { get; private set; }
+    }
+
+    public interface IOriginProcessResolver
+    {
+        OriginProcess Resolve(OriginConnection connection);
+    }
+
+    public sealed class WindowsTcpOriginProcessResolver : IOriginProcessResolver
+    {
+        private const int AF_INET = 2;
+        private readonly IProcessInspector _processInspector;
+
+        public WindowsTcpOriginProcessResolver(IProcessInspector processInspector)
+        {
+            _processInspector = processInspector;
+        }
+
+        public OriginProcess Resolve(OriginConnection connection)
+        {
+            if (connection == null ||
+                connection.LocalAddress == null ||
+                connection.RemoteAddress == null ||
+                connection.LocalAddress.AddressFamily != AddressFamily.InterNetwork ||
+                connection.RemoteAddress.AddressFamily != AddressFamily.InterNetwork)
+            {
+                return new OriginProcess(false, null, null);
+            }
+
+            var pid = FindOwningPid(connection);
+            if (pid <= 0)
+            {
+                return new OriginProcess(false, null, null);
+            }
+
+            var snapshot = _processInspector.Inspect(pid);
+            if (!snapshot.Exists || string.IsNullOrWhiteSpace(snapshot.ImagePath))
+            {
+                return new OriginProcess(false, null, null);
+            }
+
+            return new OriginProcess(true, Path.GetFileName(snapshot.ImagePath), snapshot.ImagePath);
+        }
+
+        private static int FindOwningPid(OriginConnection connection)
+        {
+            var size = 0;
+            var result = GetExtendedTcpTable(IntPtr.Zero, ref size, true, AF_INET, TcpTableClass.OwnerPidAll, 0);
+            if (result != 0 && result != 122)
+            {
+                return 0;
+            }
+
+            var table = Marshal.AllocHGlobal(size);
+            try
+            {
+                result = GetExtendedTcpTable(table, ref size, true, AF_INET, TcpTableClass.OwnerPidAll, 0);
+                if (result != 0)
+                {
+                    return 0;
+                }
+
+                var rowCount = Marshal.ReadInt32(table);
+                var rowPtr = IntPtr.Add(table, 4);
+                var rowSize = Marshal.SizeOf(typeof(TcpRowOwnerPid));
+                for (var i = 0; i < rowCount; i++)
+                {
+                    var row = (TcpRowOwnerPid)Marshal.PtrToStructure(rowPtr, typeof(TcpRowOwnerPid));
+                    if (Matches(row, connection))
+                    {
+                        return (int)row.OwningPid;
+                    }
+                    rowPtr = IntPtr.Add(rowPtr, rowSize);
+                }
+
+                return 0;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(table);
+            }
+        }
+
+        private static bool Matches(TcpRowOwnerPid row, OriginConnection connection)
+        {
+            return AddressEquals(row.LocalAddr, connection.LocalAddress) &&
+                   AddressEquals(row.RemoteAddr, connection.RemoteAddress) &&
+                   PortFromRow(row.LocalPort) == connection.LocalPort &&
+                   PortFromRow(row.RemotePort) == connection.RemotePort;
+        }
+
+        private static bool AddressEquals(uint rowAddress, IPAddress address)
+        {
+            return new IPAddress(rowAddress).Equals(address);
+        }
+
+        private static int PortFromRow(uint rowPort)
+        {
+            var bytes = BitConverter.GetBytes(rowPort);
+            return (bytes[0] << 8) + bytes[1];
+        }
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern uint GetExtendedTcpTable(
+            IntPtr tcpTable,
+            ref int tcpTableLength,
+            bool sort,
+            int ipVersion,
+            TcpTableClass tableClass,
+            uint reserved);
+
+        private enum TcpTableClass
+        {
+            OwnerPidAll = 5
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TcpRowOwnerPid
+        {
+            public uint State;
+            public uint LocalAddr;
+            public uint LocalPort;
+            public uint RemoteAddr;
+            public uint RemotePort;
+            public uint OwningPid;
+        }
+    }
+
+    public static class HelperSecurityResponse
+    {
+        public static async Task WriteAsync(HttpContext context, HelperSecurityDecision decision, CancellationToken cancellationToken)
+        {
+            context.Response.StatusCode = decision.StatusCode;
+            context.Response.ContentType = "application/json; charset=utf-8";
+            var envelope = new ResponseEnvelope<object>
+            {
+                Ok = false,
+                Data = null,
+                Error = new HelperError
+                {
+                    Code = decision.Code,
+                    Message = decision.Message,
+                    Retryable = false,
+                    Details = new Dictionary<string, object>()
+                }
+            };
+            await context.Response.WriteAsync(JsonConvert.SerializeObject(envelope), cancellationToken).ConfigureAwait(false);
+        }
+
+        public static string ToJson(HelperSecurityDecision decision)
+        {
+            var envelope = new ResponseEnvelope<object>
+            {
+                Ok = false,
+                Data = null,
+                Error = new HelperError
+                {
+                    Code = decision.Code,
+                    Message = decision.Message,
+                    Retryable = false,
+                    Details = new Dictionary<string, object>()
+                }
+            };
+            return JsonConvert.SerializeObject(envelope);
+        }
+    }
+
     public static class HelperConfig
     {
         public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromMinutes(30);
@@ -866,6 +1306,8 @@ namespace Yuantus.Cad.Helper
             int port,
             HelperSessionDocument session,
             TimeSpan idleTimeout,
+            string localToken,
+            HelperSecurityOptions securityOptions,
             IClock clock,
             IDelay delay,
             CancellationToken cancellationToken);
@@ -877,6 +1319,8 @@ namespace Yuantus.Cad.Helper
             int port,
             HelperSessionDocument session,
             TimeSpan idleTimeout,
+            string localToken,
+            HelperSecurityOptions securityOptions,
             IClock clock,
             IDelay delay,
             CancellationToken cancellationToken)
@@ -889,10 +1333,33 @@ namespace Yuantus.Cad.Helper
 
             var app = builder.Build();
             var idle = new IdleTracker(idleTimeout, clock.UtcNow);
+            var security = new HelperSecurityGate(
+                localToken,
+                securityOptions,
+                new WindowsTcpOriginProcessResolver(new DefaultProcessInspector()));
 
             app.Use(async (context, next) =>
             {
                 idle.Touch(clock.UtcNow);
+                var decision = security.Authorize(new HelperSecurityRequest
+                {
+                    Method = context.Request.Method,
+                    Path = context.Request.Path.Value,
+                    LocalTokenHeaders = context.Request.Headers["X-Yuantus-Local-Token"].ToArray(),
+                    ProtocolHeaders = context.Request.Headers["X-Yuantus-Protocol"].ToArray(),
+                    Connection = new OriginConnection
+                    {
+                        LocalAddress = context.Connection.LocalIpAddress,
+                        LocalPort = context.Connection.LocalPort,
+                        RemoteAddress = context.Connection.RemoteIpAddress,
+                        RemotePort = context.Connection.RemotePort
+                    }
+                });
+                if (!decision.Allowed)
+                {
+                    await HelperSecurityResponse.WriteAsync(context, decision, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
                 await next().ConfigureAwait(false);
             });
 

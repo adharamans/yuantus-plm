@@ -48,7 +48,6 @@ namespace Yuantus.Cad.Helper.Tests
 
             Assert.Contains("MapGet(\"/healthz\"", sources);
             Assert.Contains("{\\\"ok\\\":true}", sources);
-            Assert.DoesNotContain("X-Yuantus-Local-Token", sources);
             Assert.DoesNotContain("Authorization", sources);
         }
 
@@ -362,13 +361,11 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_no_s4_s7_s8_scope_leak()
+        public void test_no_s5_s7_s8_scope_leak_after_s4_security()
         {
             var sources = ReadHelperSources();
 
-            Assert.DoesNotContain("X-Yuantus-Local-Token", sources);
             Assert.DoesNotContain("Authorization", sources);
-            Assert.DoesNotContain("/version", sources);
             Assert.DoesNotContain("/session/", sources);
             Assert.DoesNotContain("/cad/current-drawing", sources);
             Assert.DoesNotContain("/diff/preview", sources);
@@ -737,13 +734,20 @@ namespace Yuantus.Cad.Helper.Tests
                 int port,
                 HelperSessionDocument session,
                 TimeSpan idleTimeout,
+                string localToken,
+                HelperSecurityOptions securityOptions,
                 IClock clock,
                 IDelay delay,
                 CancellationToken cancellationToken)
             {
                 RunCalls++;
+                LocalToken = localToken;
+                SecurityOptions = securityOptions;
                 return Task.CompletedTask;
             }
+
+            public string LocalToken { get; private set; }
+            public HelperSecurityOptions SecurityOptions { get; private set; }
         }
     }
 }
