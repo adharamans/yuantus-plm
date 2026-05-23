@@ -15,6 +15,9 @@ namespace Yuantus.Cad.Shared.Transport
         public const string OriginProcessNotAllowed = "ORIGIN_PROCESS_NOT_ALLOWED";
         public const string CadContextMissing = "CAD_CONTEXT_MISSING";
         public const string AuditWriteFailed = "AUDIT_WRITE_FAILED";
+        public const string AuditPullIdUnknown = "AUDIT_PULL_ID_UNKNOWN";
+        public const string AuditAlreadyReported = "AUDIT_ALREADY_REPORTED";
+        public const string AuditPullIdExpired = "AUDIT_PULL_ID_EXPIRED";
         public const string PlmItemNotFound = "PLM_ITEM_NOT_FOUND";
         public const string PlmProfileMismatch = "PLM_PROFILE_MISMATCH";
         public const string PlmValidationFailed = "PLM_VALIDATION_FAILED";

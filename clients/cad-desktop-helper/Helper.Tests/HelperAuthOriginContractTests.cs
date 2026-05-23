@@ -246,24 +246,24 @@ namespace Yuantus.Cad.Helper.Tests
         {
             var sources = ReadHelperSources();
 
-            Assert.DoesNotContain("Authorization", sources);
+            Assert.DoesNotContain("context.Request.Headers[\"Authorization\"]", sources);
+            Assert.Contains("request.Headers.Authorization = new AuthenticationHeaderValue(\"Bearer\", bearerToken)", sources);
             Assert.Contains("ErrorCodes.AuthPlmNotLoggedIn", sources);
             Assert.Contains("/session/login", sources);
         }
 
         [Fact]
-        public void test_no_s6_s7_s8_scope_leak_after_s5_session_routes()
+        public void test_no_s7_s8_scope_leak_after_s6_business_audit_routes()
         {
             var sources = ReadHelperSources();
 
-            Assert.DoesNotContain("/diff/preview", sources);
-            Assert.DoesNotContain("/sync/inbound", sources);
-            Assert.DoesNotContain("/sync/outbound", sources);
-            Assert.DoesNotContain("/audit/apply-result", sources);
+            Assert.Contains("/diff/preview", sources);
+            Assert.Contains("/sync/inbound", sources);
+            Assert.Contains("/sync/outbound", sources);
+            Assert.Contains("/audit/apply-result", sources);
             Assert.DoesNotContain("/dedup/check", sources);
             Assert.DoesNotContain("/shell/notify", sources);
             Assert.DoesNotContain("--reset-local-token", sources);
-            Assert.DoesNotContain("SQLite", sources);
             Assert.DoesNotContain("CADDedupPlugin", sources);
         }
 

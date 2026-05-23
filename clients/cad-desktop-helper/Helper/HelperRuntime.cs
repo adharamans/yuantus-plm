@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -15,6 +16,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -2054,6 +2056,702 @@ namespace Yuantus.Cad.Helper
         }
     }
 
+    public sealed class PlmBusinessResponse
+    {
+        private PlmBusinessResponse(bool ok, JToken data, string code, string message)
+        {
+            Ok = ok;
+            Data = data;
+            Code = code;
+            Message = message;
+        }
+
+        public bool Ok { get; private set; }
+        public JToken Data { get; private set; }
+        public string Code { get; private set; }
+        public string Message { get; private set; }
+
+        public static PlmBusinessResponse Success(JToken data)
+        {
+            return new PlmBusinessResponse(true, data, null, null);
+        }
+
+        public static PlmBusinessResponse Error(string code, string message)
+        {
+            return new PlmBusinessResponse(false, null, code, message);
+        }
+    }
+
+    public interface IPlmBusinessClient
+    {
+        Task<PlmBusinessResponse> PostAsync(
+            Uri serverUri,
+            string endpointPath,
+            string bearerToken,
+            string traceId,
+            JObject payload,
+            CancellationToken cancellationToken);
+    }
+
+    public sealed class HttpPlmBusinessClient : IPlmBusinessClient
+    {
+        private readonly HttpClient _httpClient;
+
+        public HttpPlmBusinessClient(HttpClient httpClient)
+        {
+            _httpClient = httpClient;
+        }
+
+        public async Task<PlmBusinessResponse> PostAsync(
+            Uri serverUri,
+            string endpointPath,
+            string bearerToken,
+            string traceId,
+            JObject payload,
+            CancellationToken cancellationToken)
+        {
+            var endpoint = new Uri(serverUri.ToString().TrimEnd('/') + endpointPath);
+            using (var request = new HttpRequestMessage(HttpMethod.Post, endpoint))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+                request.Headers.TryAddWithoutValidation("X-Yuantus-Protocol", Paths.ProtocolVersion);
+                request.Headers.TryAddWithoutValidation("X-Yuantus-Trace-Id", traceId);
+                request.Content = new StringContent(
+                    JsonConvert.SerializeObject(payload ?? new JObject()),
+                    Encoding.UTF8,
+                    "application/json");
+
+                using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+                {
+                    var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+                    {
+                        return PlmBusinessResponse.Error(ErrorCodes.AuthPlmNotLoggedIn, "PLM session is not authorized.");
+                    }
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        return PlmBusinessResponse.Error(ErrorCodes.PlmValidationFailed, "PLM request failed with HTTP " + (int)response.StatusCode + ".");
+                    }
+                    return ParsePlmBody(endpointPath, body);
+                }
+            }
+        }
+
+        private static PlmBusinessResponse ParsePlmBody(string endpointPath, string body)
+        {
+            JToken parsed;
+            try
+            {
+                parsed = JToken.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+            }
+            catch (JsonException)
+            {
+                return PlmBusinessResponse.Error(ErrorCodes.PlmValidationFailed, "PLM response was not valid JSON.");
+            }
+
+            var obj = parsed as JObject;
+            if (obj == null)
+            {
+                return PlmBusinessResponse.Success(parsed);
+            }
+
+            var okToken = obj["ok"];
+            if (okToken != null && okToken.Type == JTokenType.Boolean && !okToken.Value<bool>())
+            {
+                var envelopeError = obj["error"] as JObject;
+                if (envelopeError != null && !string.IsNullOrWhiteSpace(envelopeError.Value<string>("code")))
+                {
+                    return PlmBusinessResponse.Error(
+                        envelopeError.Value<string>("code"),
+                        envelopeError.Value<string>("message") ?? "PLM request failed.");
+                }
+
+                if (string.Equals(obj.Value<string>("action"), "conflict", StringComparison.OrdinalIgnoreCase) ||
+                    HasNonEmptyArray(obj["conflicts"]))
+                {
+                    return PlmBusinessResponse.Error(ErrorCodes.PlmInboundConflict, "PLM inbound sync reported conflicts.");
+                }
+
+                return PlmBusinessResponse.Error(ErrorCodes.PlmValidationFailed, "PLM request returned ok=false.");
+            }
+
+            return PlmBusinessResponse.Success(obj);
+        }
+
+        private static bool HasNonEmptyArray(JToken token)
+        {
+            var array = token as JArray;
+            return array != null && array.Count > 0;
+        }
+    }
+
+    public sealed class PullCacheEntry
+    {
+        public string PullId { get; set; }
+        public string DrawingPath { get; set; }
+        public JObject WriteCadFields { get; set; }
+        public DateTimeOffset CreatedAt { get; set; }
+        public bool Reported { get; set; }
+    }
+
+    public enum PullCacheLookupStatus
+    {
+        Ready,
+        Unknown,
+        Expired,
+        AlreadyReported
+    }
+
+    public sealed class PullCacheLookup
+    {
+        private PullCacheLookup(PullCacheLookupStatus status, PullCacheEntry entry)
+        {
+            Status = status;
+            Entry = entry;
+        }
+
+        public PullCacheLookupStatus Status { get; private set; }
+        public PullCacheEntry Entry { get; private set; }
+
+        public static PullCacheLookup Ready(PullCacheEntry entry)
+        {
+            return new PullCacheLookup(PullCacheLookupStatus.Ready, entry);
+        }
+
+        public static PullCacheLookup Unknown()
+        {
+            return new PullCacheLookup(PullCacheLookupStatus.Unknown, null);
+        }
+
+        public static PullCacheLookup Expired(PullCacheEntry entry)
+        {
+            return new PullCacheLookup(PullCacheLookupStatus.Expired, entry);
+        }
+
+        public static PullCacheLookup AlreadyReported(PullCacheEntry entry)
+        {
+            return new PullCacheLookup(PullCacheLookupStatus.AlreadyReported, entry);
+        }
+    }
+
+    public sealed class PullCache
+    {
+        public static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
+        private readonly Dictionary<string, PullCacheEntry> _entries = new Dictionary<string, PullCacheEntry>(StringComparer.Ordinal);
+        private readonly object _lock = new object();
+
+        public PullCacheEntry Create(JObject request, JToken serverResponse, DateTimeOffset createdAt)
+        {
+            var entry = new PullCacheEntry
+            {
+                PullId = "PULL-" + Guid.NewGuid().ToString("N"),
+                DrawingPath = ExtractDrawingPathForAudit(request),
+                WriteCadFields = ExtractObject(ExtractServerObjectToken(serverResponse, "write_cad_fields")),
+                CreatedAt = createdAt,
+                Reported = false
+            };
+            lock (_lock)
+            {
+                _entries[entry.PullId] = entry;
+            }
+            return entry;
+        }
+
+        public PullCacheLookup Lookup(string pullId, DateTimeOffset now)
+        {
+            PullCacheEntry entry;
+            lock (_lock)
+            {
+                if (!_entries.TryGetValue(pullId ?? string.Empty, out entry))
+                {
+                    return PullCacheLookup.Unknown();
+                }
+                if (entry.Reported)
+                {
+                    return PullCacheLookup.AlreadyReported(entry);
+                }
+                if (now - entry.CreatedAt >= Ttl)
+                {
+                    return PullCacheLookup.Expired(entry);
+                }
+                return PullCacheLookup.Ready(entry);
+            }
+        }
+
+        public void MarkReported(string pullId)
+        {
+            lock (_lock)
+            {
+                PullCacheEntry entry;
+                if (_entries.TryGetValue(pullId ?? string.Empty, out entry))
+                {
+                    entry.Reported = true;
+                }
+            }
+        }
+
+        public static string ExtractDrawingPathForAudit(JObject request)
+        {
+            if (request == null)
+            {
+                return null;
+            }
+            var nested = request.SelectToken("drawing.filepath");
+            if (nested != null && nested.Type == JTokenType.String)
+            {
+                return nested.Value<string>();
+            }
+            return request.Value<string>("drawing_path");
+        }
+
+        private static JObject ExtractObject(JToken token)
+        {
+            var obj = token as JObject;
+            return obj == null ? new JObject() : (JObject)obj.DeepClone();
+        }
+
+        private static JToken ExtractServerObjectToken(JToken serverResponse, string name)
+        {
+            var obj = serverResponse as JObject;
+            return obj == null ? null : obj[name];
+        }
+    }
+
+    public sealed class AuditEvent
+    {
+        public DateTimeOffset Timestamp { get; set; }
+        public string Endpoint { get; set; }
+        public string DrawingPath { get; set; }
+        public string ProfileId { get; set; }
+        public string ItemId { get; set; }
+        public string PullId { get; set; }
+        public string CadSystem { get; set; }
+        public string Outcome { get; set; }
+        public string ErrorCode { get; set; }
+        public int DurationMs { get; set; }
+        public string TraceId { get; set; }
+        public string AppliedFieldsJson { get; set; }
+        public string FailedFieldsJson { get; set; }
+    }
+
+    public interface IAuditEventStore
+    {
+        void Write(AuditEvent auditEvent);
+    }
+
+    public sealed class SqliteAuditEventStore : IAuditEventStore
+    {
+        private readonly string _databasePath;
+
+        public SqliteAuditEventStore(string databasePath)
+        {
+            _databasePath = databasePath;
+        }
+
+        public void Write(AuditEvent auditEvent)
+        {
+            if (auditEvent == null)
+            {
+                throw new ArgumentNullException("auditEvent");
+            }
+
+            var directory = Path.GetDirectoryName(_databasePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var builder = new SqliteConnectionStringBuilder { DataSource = _databasePath };
+            using (var connection = new SqliteConnection(builder.ToString()))
+            {
+                connection.Open();
+                EnsureSchema(connection);
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = @"
+INSERT INTO audit_events (
+  ts, endpoint, drawing_path, profile_id, item_id, pull_id, cad_system,
+  outcome, error_code, duration_ms, trace_id, applied_fields_json,
+  failed_fields_json
+) VALUES (
+  $ts, $endpoint, $drawing_path, $profile_id, $item_id, $pull_id, $cad_system,
+  $outcome, $error_code, $duration_ms, $trace_id, $applied_fields_json,
+  $failed_fields_json
+)";
+                    Add(command, "$ts", auditEvent.Timestamp.ToUniversalTime().ToString("o"));
+                    Add(command, "$endpoint", auditEvent.Endpoint);
+                    Add(command, "$drawing_path", auditEvent.DrawingPath);
+                    Add(command, "$profile_id", auditEvent.ProfileId);
+                    Add(command, "$item_id", auditEvent.ItemId);
+                    Add(command, "$pull_id", auditEvent.PullId);
+                    Add(command, "$cad_system", auditEvent.CadSystem);
+                    Add(command, "$outcome", auditEvent.Outcome);
+                    Add(command, "$error_code", auditEvent.ErrorCode);
+                    Add(command, "$duration_ms", auditEvent.DurationMs);
+                    Add(command, "$trace_id", auditEvent.TraceId);
+                    Add(command, "$applied_fields_json", auditEvent.AppliedFieldsJson);
+                    Add(command, "$failed_fields_json", auditEvent.FailedFieldsJson);
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        private static void EnsureSchema(SqliteConnection connection)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+CREATE TABLE IF NOT EXISTS audit_events (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  drawing_path TEXT,
+  profile_id TEXT,
+  item_id TEXT,
+  pull_id TEXT,
+  cad_system TEXT,
+  outcome TEXT NOT NULL,
+  error_code TEXT,
+  duration_ms INTEGER NOT NULL,
+  trace_id TEXT NOT NULL,
+  applied_fields_json TEXT,
+  failed_fields_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
+";
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private static void Add(SqliteCommand command, string name, object value)
+        {
+            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+    }
+
+    public interface IAuditWarningWriter
+    {
+        void WriteAuditFailure(string endpoint, string traceId, string reason);
+    }
+
+    public sealed class ConsoleAuditWarningWriter : IAuditWarningWriter
+    {
+        public void WriteAuditFailure(string endpoint, string traceId, string reason)
+        {
+            Console.Error.WriteLine("[AUDIT_WRITE_FAILED] endpoint=" + Sanitize(endpoint) + " trace_id=" + Sanitize(traceId) + " reason=" + Sanitize(reason));
+        }
+
+        private static string Sanitize(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "unknown";
+            }
+            return Regex.Replace(value, @"[^A-Za-z0-9_\-./]", "_");
+        }
+    }
+
+    public sealed class HelperBusinessAuditService
+    {
+        private const string DiffPreviewEndpoint = "/plugins/cad-material-sync/diff/preview";
+        private const string SyncInboundEndpoint = "/plugins/cad-material-sync/sync/inbound";
+        private const string SyncOutboundEndpoint = "/plugins/cad-material-sync/sync/outbound";
+
+        private static readonly HashSet<string> ApplyResultOutcomes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "ok",
+            "partial",
+            "failed",
+            "not-applied-display-only"
+        };
+
+        private readonly IHelperSessionConfigStore _config;
+        private readonly IPlmBearerTokenStore _bearer;
+        private readonly IPlmBusinessClient _plm;
+        private readonly PullCache _pullCache;
+        private readonly IAuditEventStore _audit;
+        private readonly IClock _clock;
+        private readonly IAuditWarningWriter _warnings;
+
+        public HelperBusinessAuditService(
+            IHelperSessionConfigStore config,
+            IPlmBearerTokenStore bearer,
+            IPlmBusinessClient plm,
+            PullCache pullCache,
+            IAuditEventStore audit,
+            IClock clock,
+            IAuditWarningWriter warnings)
+        {
+            _config = config;
+            _bearer = bearer;
+            _plm = plm;
+            _pullCache = pullCache;
+            _audit = audit;
+            _clock = clock;
+            _warnings = warnings;
+        }
+
+        public async Task<HelperRouteResult> DiffPreviewAsync(JObject request, CancellationToken cancellationToken)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.Value<string>("item_id")))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "item_id is required.");
+            }
+            if (HasNonEmptyObject(request["values"]) ||
+                HasNonEmptyObject(request["target_properties"]) ||
+                HasNonEmptyObject(request["target_cad_fields"]))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "S6 diff preview accepts item_id path only.");
+            }
+
+            Uri serverUri;
+            string bearer;
+            var sessionError = TryReadSession(out serverUri, out bearer);
+            if (sessionError != null)
+            {
+                return sessionError;
+            }
+
+            var traceId = NewTraceId();
+            var started = _clock.UtcNow;
+            var response = await _plm.PostAsync(serverUri, DiffPreviewEndpoint, bearer, traceId, request, cancellationToken).ConfigureAwait(false);
+            var result = ToRouteResult(response);
+            if (response.Ok)
+            {
+                var pull = _pullCache.Create(request, response.Data, _clock.UtcNow);
+                result = HelperRouteResult.Success(new JObject
+                {
+                    ["pull_id"] = pull.PullId,
+                    ["server_response"] = response.Data == null ? new JObject() : response.Data.DeepClone()
+                });
+            }
+            return WriteAuditAfterBusiness("/diff/preview", request, result, null, traceId, started);
+        }
+
+        public Task<HelperRouteResult> SyncInboundAsync(JObject request, CancellationToken cancellationToken)
+        {
+            return ForwardBusinessAsync("/sync/inbound", SyncInboundEndpoint, request, cancellationToken);
+        }
+
+        public Task<HelperRouteResult> SyncOutboundAsync(JObject request, CancellationToken cancellationToken)
+        {
+            return ForwardBusinessAsync("/sync/outbound", SyncOutboundEndpoint, request, cancellationToken);
+        }
+
+        public HelperRouteResult ApplyResult(JObject request)
+        {
+            var traceId = NewTraceId();
+            var started = _clock.UtcNow;
+            var pullId = request == null ? null : request.Value<string>("pull_id");
+            var outcome = request == null ? null : request.Value<string>("outcome");
+
+            if (string.IsNullOrWhiteSpace(pullId) || string.IsNullOrWhiteSpace(outcome) || !ApplyResultOutcomes.Contains(outcome))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "pull_id and a valid outcome are required.");
+            }
+
+            var lookup = _pullCache.Lookup(pullId, _clock.UtcNow);
+            if (lookup.Status == PullCacheLookupStatus.Unknown)
+            {
+                return HelperRouteResult.Error(ErrorCodes.AuditPullIdUnknown, "pull_id is unknown.");
+            }
+            if (lookup.Status == PullCacheLookupStatus.Expired)
+            {
+                return HelperRouteResult.Error(ErrorCodes.AuditPullIdExpired, "pull_id has expired.");
+            }
+            if (lookup.Status == PullCacheLookupStatus.AlreadyReported)
+            {
+                return HelperRouteResult.Error(ErrorCodes.AuditAlreadyReported, "pull_id has already been reported.");
+            }
+
+            try
+            {
+                _audit.Write(CreateAuditEvent(
+                    "/audit/apply-result",
+                    request,
+                    lookup.Entry,
+                    outcome,
+                    null,
+                    traceId,
+                    started,
+                    JsonObjectString(request["applied_fields"]),
+                    JsonObjectString(request["failed_fields"])));
+                _pullCache.MarkReported(pullId);
+                return HelperRouteResult.Success(new JObject
+                {
+                    ["reported"] = true,
+                    ["pull_id"] = pullId
+                });
+            }
+            catch (Exception)
+            {
+                return HelperRouteResult.Error(ErrorCodes.AuditWriteFailed, "Unable to write local audit row.");
+            }
+        }
+
+        public void AuditSessionResult(string endpoint, HelperRouteResult result)
+        {
+            try
+            {
+                _audit.Write(new AuditEvent
+                {
+                    Timestamp = _clock.UtcNow,
+                    Endpoint = endpoint,
+                    Outcome = result != null && result.Ok ? "ok" : "failed",
+                    ErrorCode = result == null || result.Ok ? null : result.Code,
+                    DurationMs = 0,
+                    TraceId = NewTraceId()
+                });
+            }
+            catch (Exception ex)
+            {
+                _warnings.WriteAuditFailure(endpoint, "session", ShortReason(ex));
+            }
+        }
+
+        private async Task<HelperRouteResult> ForwardBusinessAsync(
+            string helperEndpoint,
+            string plmEndpoint,
+            JObject request,
+            CancellationToken cancellationToken)
+        {
+            Uri serverUri;
+            string bearer;
+            var sessionError = TryReadSession(out serverUri, out bearer);
+            if (sessionError != null)
+            {
+                return sessionError;
+            }
+
+            var traceId = NewTraceId();
+            var started = _clock.UtcNow;
+            var response = await _plm.PostAsync(serverUri, plmEndpoint, bearer, traceId, request ?? new JObject(), cancellationToken).ConfigureAwait(false);
+            return WriteAuditAfterBusiness(helperEndpoint, request, ToRouteResult(response), null, traceId, started);
+        }
+
+        private HelperRouteResult TryReadSession(out Uri serverUri, out string bearer)
+        {
+            serverUri = null;
+            bearer = null;
+
+            var snapshot = _config.Read();
+            if (snapshot == null || string.IsNullOrWhiteSpace(snapshot.TenantId) || string.IsNullOrWhiteSpace(snapshot.ServerUrl))
+            {
+                return HelperRouteResult.Error(ErrorCodes.AuthTenantMissing, "tenant_id and server_url are required.");
+            }
+            if (!Uri.TryCreate(snapshot.ServerUrl, UriKind.Absolute, out serverUri))
+            {
+                return HelperRouteResult.Error(ErrorCodes.PlmValidationFailed, "server_url is invalid.");
+            }
+
+            try
+            {
+                bearer = _bearer.Read();
+            }
+            catch (HelperException ex)
+            {
+                return HelperRouteResult.Error(ex.Code, ex.Message);
+            }
+            if (string.IsNullOrWhiteSpace(bearer))
+            {
+                return HelperRouteResult.Error(ErrorCodes.AuthPlmNotLoggedIn, "PLM bearer token is missing.");
+            }
+            return null;
+        }
+
+        private HelperRouteResult WriteAuditAfterBusiness(
+            string endpoint,
+            JObject request,
+            HelperRouteResult result,
+            PullCacheEntry entry,
+            string traceId,
+            DateTimeOffset started)
+        {
+            try
+            {
+                _audit.Write(CreateAuditEvent(
+                    endpoint,
+                    request,
+                    entry,
+                    result.Ok ? "ok" : "failed",
+                    result.Ok ? null : result.Code,
+                    traceId,
+                    started,
+                    null,
+                    null));
+            }
+            catch (Exception ex)
+            {
+                if (result.Ok)
+                {
+                    _warnings.WriteAuditFailure(endpoint, traceId, ShortReason(ex));
+                }
+            }
+            return result;
+        }
+
+        private AuditEvent CreateAuditEvent(
+            string endpoint,
+            JObject request,
+            PullCacheEntry entry,
+            string outcome,
+            string errorCode,
+            string traceId,
+            DateTimeOffset started,
+            string appliedFieldsJson,
+            string failedFieldsJson)
+        {
+            var now = _clock.UtcNow;
+            return new AuditEvent
+            {
+                Timestamp = now,
+                Endpoint = endpoint,
+                DrawingPath = entry == null ? PullCache.ExtractDrawingPathForAudit(request) : entry.DrawingPath,
+                ProfileId = request == null ? null : request.Value<string>("profile_id"),
+                ItemId = request == null ? null : request.Value<string>("item_id"),
+                PullId = entry == null ? request == null ? null : request.Value<string>("pull_id") : entry.PullId,
+                CadSystem = request == null ? null : request.Value<string>("cad_system"),
+                Outcome = outcome,
+                ErrorCode = errorCode,
+                DurationMs = Math.Max(0, (int)(now - started).TotalMilliseconds),
+                TraceId = traceId,
+                AppliedFieldsJson = appliedFieldsJson,
+                FailedFieldsJson = failedFieldsJson
+            };
+        }
+
+        private static HelperRouteResult ToRouteResult(PlmBusinessResponse response)
+        {
+            if (response.Ok)
+            {
+                return HelperRouteResult.Success(response.Data == null ? new JObject() : response.Data.DeepClone());
+            }
+            return HelperRouteResult.Error(response.Code, response.Message);
+        }
+
+        private static bool HasNonEmptyObject(JToken token)
+        {
+            var obj = token as JObject;
+            return obj != null && obj.Properties().Any();
+        }
+
+        private static string JsonObjectString(JToken token)
+        {
+            return token == null || token.Type == JTokenType.Null ? null : JsonConvert.SerializeObject(token);
+        }
+
+        private static string NewTraceId()
+        {
+            return Guid.NewGuid().ToString("N");
+        }
+
+        private static string ShortReason(Exception ex)
+        {
+            return ex == null ? "unknown" : ex.GetType().Name;
+        }
+    }
+
     public static class HelperConfig
     {
         public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromMinutes(30);
@@ -2140,11 +2838,23 @@ namespace Yuantus.Cad.Helper
                 localToken,
                 securityOptions,
                 new WindowsTcpOriginProcessResolver(new DefaultProcessInspector()));
+            var configStore = new JsonHelperSessionConfigStore(Path.Combine(Paths.RootDirectory, "config.json"));
+            var bearerStore = new DpapiPlmBearerTokenStore(Path.Combine(Paths.RootDirectory, "plm-bearer-token.bin"));
+            var httpClient = new HttpClient();
+            var auditStore = new SqliteAuditEventStore(Path.Combine(Paths.RootDirectory, "audit.db"));
             var sessionService = new HelperSessionService(
-                new JsonHelperSessionConfigStore(Path.Combine(Paths.RootDirectory, "config.json")),
-                new DpapiPlmBearerTokenStore(Path.Combine(Paths.RootDirectory, "plm-bearer-token.bin")),
-                new HttpPlmLoginClient(new HttpClient()),
+                configStore,
+                bearerStore,
+                new HttpPlmLoginClient(httpClient),
                 new CurrentDrawingStore());
+            var businessAuditService = new HelperBusinessAuditService(
+                configStore,
+                bearerStore,
+                new HttpPlmBusinessClient(httpClient),
+                new PullCache(),
+                auditStore,
+                clock,
+                new ConsoleAuditWarningWriter());
 
             app.Use(async (context, next) =>
             {
@@ -2190,16 +2900,20 @@ namespace Yuantus.Cad.Helper
             {
                 idle.Touch(clock.UtcNow);
                 var request = await ReadJsonAsync<SessionLoginRequest>(context).ConfigureAwait(false);
+                var result = await sessionService.LoginAsync(request, cancellationToken).ConfigureAwait(false);
+                businessAuditService.AuditSessionResult("/session/login", result);
                 await HelperRouteResponse
-                    .WriteAsync(context, await sessionService.LoginAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .WriteAsync(context, result, cancellationToken)
                     .ConfigureAwait(false);
             });
 
             app.MapPost("/session/logout", async context =>
             {
                 idle.Touch(clock.UtcNow);
+                var result = sessionService.Logout();
+                businessAuditService.AuditSessionResult("/session/logout", result);
                 await HelperRouteResponse
-                    .WriteAsync(context, sessionService.Logout(), cancellationToken)
+                    .WriteAsync(context, result, cancellationToken)
                     .ConfigureAwait(false);
             });
 
@@ -2217,6 +2931,42 @@ namespace Yuantus.Cad.Helper
                 var request = await ReadJsonAsync<CurrentDrawingRequest>(context).ConfigureAwait(false);
                 await HelperRouteResponse
                     .WriteAsync(context, sessionService.SetCurrentDrawing(request), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/diff/preview", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.DiffPreviewAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/sync/inbound", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.SyncInboundAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/sync/outbound", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.SyncOutboundAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/audit/apply-result", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, businessAuditService.ApplyResult(request), cancellationToken)
                     .ConfigureAwait(false);
             });
 
