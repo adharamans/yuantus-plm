@@ -48,17 +48,20 @@ namespace Yuantus.Cad.Bridge
 
         /// <summary>
         /// Production wiring: locator delegates to S1 <c>HelperLocator</c>,
-        /// transport delegates to S1 <c>HelperTransport</c>, writer emits
-        /// failures to <see cref="System.Console.Error"/>. The CAD-host
-        /// adapter substitutes the writer with an AutoCAD editor-backed
-        /// implementation but keeps locator and transport unchanged.
+        /// transport delegates to S1 <c>HelperTransport</c>. The
+        /// <paramref name="writer"/> receives the §3.G sanitized failure
+        /// line for every failure path (endpoint validation, JSON parse,
+        /// helper locator, helper transport, sync wrapper). The CAD-host
+        /// adapter passes <c>AutoCadCommandLineWriter</c>; a null argument
+        /// falls back to <see cref="ConsoleBridgeCommandLineWriter"/> for
+        /// service / debug-mode invocations.
         /// </summary>
-        public static BridgeCallService CreateProduction()
+        public static BridgeCallService CreateProduction(IBridgeCommandLineWriter writer = null)
         {
             return new BridgeCallService(
                 new SharedBridgeLocator(),
                 new SharedBridgeTransport(),
-                new ConsoleBridgeCommandLineWriter());
+                writer ?? new ConsoleBridgeCommandLineWriter());
         }
 
         /// <summary>

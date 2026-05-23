@@ -214,6 +214,17 @@ namespace Yuantus.Cad.Bridge.Tests
         [Fact]
         public async Task test_s9_error_output_never_contains_local_token_request_body_or_response_body()
         {
+            // The bridge's defense against token/body leakage is the
+            // short-reason convention in BridgeCallService: every caught
+            // exception is mapped to its TYPE NAME (e.g. "HelperException",
+            // "JsonException"), never the message body. The writer's
+            // character sanitizer defangs control characters and special
+            // syntax; it is NOT a content-aware redactor and is not asked
+            // to be. So this test verifies the contract that matters:
+            // when a HelperException carries a secret in its Message, the
+            // production code path passes only the type name to the writer,
+            // and no token / body / payload value appears anywhere in the
+            // recorded failure line.
             const string SecretToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             const string SecretBody = "supersecret-request-body-content";
             var writer = new RecordingCommandLineWriter();
@@ -230,14 +241,32 @@ namespace Yuantus.Cad.Bridge.Tests
             var result = await service.CallAsync("/sync/inbound", payload.ToString(), CancellationToken.None);
 
             Assert.False(result.Ok);
-            var consoleWriter = new ConsoleBridgeCommandLineWriter();
+            Assert.Equal(ErrorCodes.AuthLocalTokenInvalid, result.Code);
+
+            var line = Assert.Single(writer.Lines);
+            // Production short-reason convention: caught HelperException
+            // yields the type name, not the secret-bearing message.
+            Assert.Equal("HelperException", line.Reason);
+            Assert.Equal(ErrorCodes.AuthLocalTokenInvalid, line.Code);
+
+            // Neither the secret token, the secret body, nor any payload
+            // field value appears in any recorded line field.
+            Assert.DoesNotContain(SecretToken, line.Code ?? string.Empty);
+            Assert.DoesNotContain(SecretToken, line.Reason ?? string.Empty);
+            Assert.DoesNotContain(SecretBody, line.Code ?? string.Empty);
+            Assert.DoesNotContain(SecretBody, line.Reason ?? string.Empty);
+
+            // Defense-in-depth: rendering the line through the production
+            // ConsoleBridgeCommandLineWriter using ONLY the values the
+            // production path produced (code + ShortReason) yields no
+            // secret either. This is the realistic NETLOAD output shape.
             using (var captured = new StringWriter())
             {
                 var prior = Console.Error;
                 Console.SetError(captured);
                 try
                 {
-                    consoleWriter.WriteFailure(result.Code, "helper returned 401 with body " + SecretBody);
+                    new ConsoleBridgeCommandLineWriter().WriteFailure(line.Code, line.Reason);
                 }
                 finally
                 {
@@ -245,9 +274,10 @@ namespace Yuantus.Cad.Bridge.Tests
                 }
                 var stderr = captured.ToString();
                 Assert.Contains("[YUANTUS_HELPER_CALL_FAILED]", stderr);
+                Assert.Contains("code=" + ErrorCodes.AuthLocalTokenInvalid, stderr);
+                Assert.Contains("reason=HelperException", stderr);
                 Assert.DoesNotContain(SecretToken, stderr);
                 Assert.DoesNotContain(SecretBody, stderr);
-                Assert.DoesNotContain("supersecret-request-body-content", stderr);
             }
         }
 
@@ -501,12 +531,27 @@ namespace Yuantus.Cad.Bridge.Tests
 
         // -------------------- fakes --------------------
 
+        // Shared monotonic sequencer used by both RecordingBridgeLocator
+        // and RecordingBridgeTransport. Two type-scoped counters would
+        // independently start at 0 and both record order 1 within a single
+        // test, defeating the §5 test 6 strict-sequencing assertion (locator
+        // must be called before transport). One shared counter is the
+        // minimum fix.
+        private static class CallSequence
+        {
+            private static int _counter;
+
+            public static int Next()
+            {
+                return System.Threading.Interlocked.Increment(ref _counter);
+            }
+        }
+
         private sealed class RecordingBridgeLocator : IBridgeLocator
         {
             private readonly Uri _baseUri;
             public int Calls { get; private set; }
             public int CallOrder { get; private set; }
-            private static int _orderCounter;
 
             public RecordingBridgeLocator(Uri baseUri)
             {
@@ -516,7 +561,7 @@ namespace Yuantus.Cad.Bridge.Tests
             public Task<Uri> EnsureHelperRunningAsync(CancellationToken cancellationToken)
             {
                 Calls++;
-                CallOrder = System.Threading.Interlocked.Increment(ref _orderCounter);
+                CallOrder = CallSequence.Next();
                 return Task.FromResult(_baseUri);
             }
 
@@ -539,8 +584,6 @@ namespace Yuantus.Cad.Bridge.Tests
 
         private sealed class RecordingBridgeTransport : IBridgeTransport
         {
-            private static int _orderCounter;
-
             public int Calls { get; private set; }
             public int CallOrder { get; private set; }
             public Uri LastBaseUri { get; private set; }
@@ -556,7 +599,7 @@ namespace Yuantus.Cad.Bridge.Tests
                 CancellationToken cancellationToken)
             {
                 Calls++;
-                CallOrder = System.Threading.Interlocked.Increment(ref _orderCounter);
+                CallOrder = CallSequence.Next();
                 LastBaseUri = baseUri;
                 LastEndpoint = endpoint;
                 LastPayload = payload;

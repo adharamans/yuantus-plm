@@ -60,7 +60,7 @@ the build output is the same .NET Framework v4.6 assembly
 mirrors the rest of the CAD helper stack so non-Windows hosts can at least
 type-check the source.
 
-### 2.2 Lisp surface and arity
+### 2.2 Lisp surface, arity, and string-type enforcement
 
 Exactly one Lisp primitive is registered:
 
@@ -69,11 +69,20 @@ Exactly one Lisp primitive is registered:
 ```
 
 `AutoCadHostAdapter.YuantusHelperCall` reads the `ResultBuffer.AsArray()`
-output and verifies `values.Length == 2`. Arity mismatches (0, 1, 3+ args, or
-either argument being `null`) deterministically return `null` to Lisp (which
-the host treats as `nil`) and write the sanitized line
+output and applies a strict two-string-argument check:
+
+1. `values != null && values.Length == 2`;
+2. each value has `TypeCode == 5005` (the documented numeric code for
+   `Autodesk.AutoCAD.Runtime.LispDataType.Text`);
+3. each `value.Value` is an actual managed `string` (defense in depth
+   against type-code/payload mismatch).
+
+Any of: 0 / 1 / 3+ arguments, `null` value, non-string Lisp type (integer,
+real, list, T/nil, etc.) deterministically returns `null` to Lisp (which
+the host treats as `nil`) and writes the sanitized line
 `[YUANTUS_HELPER_CALL_FAILED] code=HELPER_INPUT_VALIDATION_FAILED reason=arity`
-to the CAD command line per §3.B.
+to the CAD command line per §3.B. Non-string Lisp values are **never**
+coerced through `.ToString()` — they fail closed.
 
 ### 2.3 Endpoint validation
 
@@ -135,15 +144,23 @@ This keeps the `nil` value reserved for bridge/helper failure and makes a
 successful JSON-null payload distinguishable from transport failure, per the
 convergence pin in §3.E.
 
-### 2.7 Production wiring (M1 convergence pin)
+### 2.7 Production wiring (M1 convergence pin) and writer routing
 
-`BridgeCallService.CreateProduction()` wires:
+`BridgeCallService.CreateProduction(IBridgeCommandLineWriter writer)`
+wires:
 
 - `SharedBridgeLocator` → `new HelperLocator().EnsureHelperRunningAsync(...)`;
 - `SharedBridgeTransport` → `new HelperTransport(baseUri)
   .PostJsonAsync<JToken>(...)`;
-- `ConsoleBridgeCommandLineWriter` (the CAD-host adapter substitutes
-  `AutoCadCommandLineWriter` at runtime).
+- the caller-supplied `writer` (or `ConsoleBridgeCommandLineWriter` if
+  `null`).
+
+`AutoCadHostAdapter` constructs `AutoCadCommandLineWriter` ONCE and passes
+it to `CreateProduction`. The same writer instance is also used directly
+for the arity/type-mismatch failure at the adapter level. This is the
+post-review fix for the wiring gap that previously sent endpoint /
+JSON / locator / transport failure lines to `Console.Error` instead of
+the CAD command line.
 
 Per the merged taskbook §5 test 6 disambiguation and new test 20
 (`test_s9_static_wiring_reaches_production_helper_locator_and_transport`),

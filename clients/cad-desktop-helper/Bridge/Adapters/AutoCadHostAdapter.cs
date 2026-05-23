@@ -24,27 +24,34 @@ namespace Yuantus.Cad.Bridge.Adapters
 {
     /// <summary>
     /// AutoCAD-host shim. Registers exactly one Lisp function,
-    /// <c>yuantus-helper-call</c>, with a two-argument arity check, and
-    /// delegates to <see cref="BridgeCallService.Call"/>. Returns a Lisp
-    /// string on success or <c>null</c> (which AutoCAD's Lisp layer maps to
-    /// <c>nil</c>) on failure. No CAD business behavior, no DWG mutation,
-    /// no modal UI.
+    /// <c>yuantus-helper-call</c>, with a strict two-string-argument check
+    /// (non-string Lisp values return <c>nil</c> per §3.B, not coerced via
+    /// <c>ToString()</c>). All failure paths — arity, type, endpoint
+    /// validation, JSON parse, helper locator, helper transport — print
+    /// through the production <see cref="AutoCadCommandLineWriter"/>, not
+    /// the SDK-free console writer. Returns a Lisp string on success or
+    /// <c>null</c> (which AutoCAD's Lisp layer maps to <c>nil</c>) on
+    /// failure. No CAD business behavior, no DWG mutation, no modal UI.
     /// </summary>
     public static class AutoCadHostAdapter
     {
-        private static readonly BridgeCallService Service =
-            BridgeCallService.CreateProduction();
+        // AutoCAD Lisp string type code (Autodesk.AutoCAD.Runtime.LispDataType.Text).
+        // Hardcoded as the documented numeric value so the source compiles
+        // even on AutoCAD SDK versions where the enum name is namespaced
+        // differently.
+        private const short LispStringTypeCode = 5005;
+
+        private static readonly AutoCadCommandLineWriter Writer = new AutoCadCommandLineWriter();
+        private static readonly BridgeCallService Service = BridgeCallService.CreateProduction(Writer);
 
         [LispFunction("yuantus-helper-call")]
         public static object YuantusHelperCall(ResultBuffer args)
         {
-            var writer = new AutoCadCommandLineWriter();
-
             string endpoint;
             string jsonRequest;
             if (!TryReadStringArgs(args, out endpoint, out jsonRequest))
             {
-                writer.WriteFailure("HELPER_INPUT_VALIDATION_FAILED", "arity");
+                Writer.WriteFailure("HELPER_INPUT_VALIDATION_FAILED", "arity");
                 return null;
             }
 
@@ -69,17 +76,26 @@ namespace Yuantus.Cad.Bridge.Adapters
             {
                 return false;
             }
-            if (values[0] == null || values[0].Value == null)
+            if (!IsLispStringValue(values[0]) || !IsLispStringValue(values[1]))
             {
                 return false;
             }
-            if (values[1] == null || values[1].Value == null)
-            {
-                return false;
-            }
-            endpoint = values[0].Value.ToString();
-            json = values[1].Value.ToString();
+            endpoint = (string)values[0].Value;
+            json = (string)values[1].Value;
             return true;
+        }
+
+        private static bool IsLispStringValue(TypedValue value)
+        {
+            if (value == null || value.Value == null)
+            {
+                return false;
+            }
+            if (value.TypeCode != LispStringTypeCode)
+            {
+                return false;
+            }
+            return value.Value is string;
         }
     }
 
