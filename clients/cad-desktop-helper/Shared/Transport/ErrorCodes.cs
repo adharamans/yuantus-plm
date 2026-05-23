@@ -18,6 +18,9 @@ namespace Yuantus.Cad.Shared.Transport
         public const string AuditPullIdUnknown = "AUDIT_PULL_ID_UNKNOWN";
         public const string AuditAlreadyReported = "AUDIT_ALREADY_REPORTED";
         public const string AuditPullIdExpired = "AUDIT_PULL_ID_EXPIRED";
+        public const string HelperResetRequiresInteractive = "HELPER_RESET_REQUIRES_INTERACTIVE";
+        public const string HelperResetCancelled = "HELPER_RESET_CANCELLED";
+        public const string HelperResetHelperRunning = "HELPER_RESET_HELPER_RUNNING";
         public const string PlmItemNotFound = "PLM_ITEM_NOT_FOUND";
         public const string PlmProfileMismatch = "PLM_PROFILE_MISMATCH";
         public const string PlmValidationFailed = "PLM_VALIDATION_FAILED";

@@ -305,7 +305,7 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_s5_s6_do_not_add_s7_s8_routes_or_reset_token()
+        public void test_s5_s6_s7_do_not_add_s8_routes_or_dedup()
         {
             var sources = ReadHelperSources();
 
@@ -313,13 +313,13 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("/sync/inbound", sources);
             Assert.Contains("/sync/outbound", sources);
             Assert.Contains("/audit/apply-result", sources);
+            Assert.Contains("--reset-local-token", sources);
             Assert.DoesNotContain("/dedup/check", sources);
             Assert.DoesNotContain("/shell/notify", sources);
             Assert.DoesNotContain("/compose", sources);
             Assert.DoesNotContain("/validate", sources);
             Assert.DoesNotContain("/tasks", sources);
             Assert.DoesNotContain("/diagnostics/snapshot", sources);
-            Assert.DoesNotContain("--reset-local-token", sources);
             Assert.DoesNotContain("UseCors", sources);
         }
 

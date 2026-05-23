@@ -347,7 +347,6 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.DoesNotContain("/validate", sources);
             Assert.DoesNotContain("/tasks", sources);
             Assert.DoesNotContain("/diagnostics/snapshot", sources);
-            Assert.DoesNotContain("--reset-local-token", sources);
             Assert.DoesNotContain("CADDedupPlugin", sources);
             Assert.DoesNotContain("UseCors", sources);
             Assert.DoesNotContain("context.Request.Headers[\"Authorization\"]", sources);

@@ -29,20 +29,7 @@ namespace Yuantus.Cad.Helper
 {
     public sealed class HelperRuntime
     {
-        public static readonly HelperRuntime Default = new HelperRuntime(
-            new DefaultHelperPaths(),
-            new SharedInstallIdProvider(),
-            new SharedLocalTokenStore(),
-            new CryptographicRandomBytes(),
-            new PortAllocator(new TcpPortBinder()),
-            null,
-            new SystemNamedMutexFactory(),
-            new SharedHealthProbe(),
-            new DefaultProcessInspector(),
-            new SystemDelay(),
-            new SystemClock(),
-            new ConsoleErrorWriter(),
-            new KestrelHelperHostRunner());
+        public static readonly HelperRuntime Default = BuildDefault();
 
         public HelperRuntime(
             IHelperPaths paths,
@@ -57,7 +44,8 @@ namespace Yuantus.Cad.Helper
             IDelay delay,
             IClock clock,
             IErrorWriter errorWriter,
-            IHelperHostRunner hostRunner)
+            IHelperHostRunner hostRunner,
+            IResetLocalTokenCommand resetCommand = null)
         {
             Paths = paths;
             InstallIds = installIds;
@@ -72,6 +60,7 @@ namespace Yuantus.Cad.Helper
             Clock = clock;
             ErrorWriter = errorWriter;
             HostRunner = hostRunner;
+            ResetCommand = resetCommand;
         }
 
         public IHelperPaths Paths { get; private set; }
@@ -87,13 +76,70 @@ namespace Yuantus.Cad.Helper
         public IClock Clock { get; private set; }
         public IErrorWriter ErrorWriter { get; private set; }
         public IHelperHostRunner HostRunner { get; private set; }
+        public IResetLocalTokenCommand ResetCommand { get; private set; }
+
+        private static HelperRuntime BuildDefault()
+        {
+            var paths = new DefaultHelperPaths();
+            var installIds = new SharedInstallIdProvider();
+            var tokenStore = new SharedLocalTokenStore();
+            var randomBytes = new CryptographicRandomBytes();
+            var mutexFactory = new SystemNamedMutexFactory();
+            var processInspector = new DefaultProcessInspector();
+            var clock = new SystemClock();
+            var errorWriter = new ConsoleErrorWriter();
+            var sessionFileScanner = new FileSystemHelperSessionFileScanner(paths);
+            var activeHelperDetector = new DefaultActiveHelperDetector(
+                installIds,
+                mutexFactory,
+                sessionFileScanner,
+                processInspector);
+            var auditStore = new SqliteAuditEventStore(Path.Combine(paths.RootDirectory, "audit.db"));
+            var auditWarnings = new ConsoleAuditWarningWriter();
+            var resetCommand = new ResetLocalTokenCommand(
+                tokenStore,
+                randomBytes,
+                activeHelperDetector,
+                auditStore,
+                auditWarnings,
+                new SystemResetConsole(),
+                new DefaultResetInvocationContext(),
+                clock,
+                errorWriter);
+            return new HelperRuntime(
+                paths,
+                installIds,
+                tokenStore,
+                randomBytes,
+                new PortAllocator(new TcpPortBinder()),
+                null,
+                mutexFactory,
+                new SharedHealthProbe(),
+                processInspector,
+                new SystemDelay(),
+                clock,
+                errorWriter,
+                new KestrelHelperHostRunner(),
+                resetCommand);
+        }
     }
 
     public static class HelperCommand
     {
+        public const string ResetLocalTokenArgument = "--reset-local-token";
+
         public static async Task<int> RunAsync(string[] args, HelperRuntime runtime, CancellationToken cancellationToken)
         {
             var ownsLifecycle = false;
+            if (args != null && args.Length == 1 && string.Equals(args[0], ResetLocalTokenArgument, StringComparison.Ordinal))
+            {
+                if (runtime.ResetCommand == null)
+                {
+                    runtime.ErrorWriter.Write(ErrorCodes.HelperInputValidationFailed, "Reset command is not wired in this runtime.");
+                    return 1;
+                }
+                return runtime.ResetCommand.Run();
+            }
             if (args != null && args.Length > 0)
             {
                 runtime.ErrorWriter.Write(ErrorCodes.HelperInputValidationFailed, "Unsupported helper startup arguments.");
@@ -3050,6 +3096,626 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                 }
                 return JsonConvert.DeserializeObject<T>(body);
             }
+        }
+    }
+
+    public interface IResetLocalTokenCommand
+    {
+        int Run();
+    }
+
+    public interface IResetInvocationContext
+    {
+        bool IsInputRedirected { get; }
+        bool IsUserInteractive { get; }
+        string GetEnvironmentVariable(string name);
+        IReadOnlyCollection<string> CollectLauncherProcessImageNames();
+    }
+
+    public sealed class DefaultResetInvocationContext : IResetInvocationContext
+    {
+        public const int MaxAncestryDepth = 8;
+
+        public bool IsInputRedirected
+        {
+            get
+            {
+                try
+                {
+                    return Console.IsInputRedirected;
+                }
+                catch (Exception)
+                {
+                    return true;
+                }
+            }
+        }
+
+        public bool IsUserInteractive
+        {
+            get
+            {
+                try
+                {
+                    return Environment.UserInteractive;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            }
+        }
+
+        public string GetEnvironmentVariable(string name)
+        {
+            try
+            {
+                return Environment.GetEnvironmentVariable(name);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        public IReadOnlyCollection<string> CollectLauncherProcessImageNames()
+        {
+            var names = new List<string>();
+            var visited = new HashSet<int>();
+            int currentPid;
+            try
+            {
+                using (var current = Process.GetCurrentProcess())
+                {
+                    currentPid = current.Id;
+                    visited.Add(currentPid);
+                    AppendImageName(names, current);
+                }
+            }
+            catch (Exception)
+            {
+                return names;
+            }
+
+            var pid = currentPid;
+            for (var depth = 0; depth < MaxAncestryDepth; depth++)
+            {
+                int parentPid;
+                if (!TryGetParentProcessId(pid, out parentPid))
+                {
+                    break;
+                }
+                if (parentPid <= 0 || !visited.Add(parentPid))
+                {
+                    break;
+                }
+                try
+                {
+                    using (var parent = Process.GetProcessById(parentPid))
+                    {
+                        AppendImageName(names, parent);
+                        pid = parentPid;
+                    }
+                }
+                catch (Exception)
+                {
+                    break;
+                }
+            }
+
+            return names;
+        }
+
+        private static void AppendImageName(List<string> names, Process process)
+        {
+            try
+            {
+                if (process == null)
+                {
+                    return;
+                }
+                if (process.MainModule != null && !string.IsNullOrWhiteSpace(process.MainModule.FileName))
+                {
+                    names.Add(Path.GetFileName(process.MainModule.FileName));
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private static bool TryGetParentProcessId(int pid, out int parentPid)
+        {
+            parentPid = 0;
+            try
+            {
+                using (var process = Process.GetProcessById(pid))
+                {
+                    var info = default(PROCESS_BASIC_INFORMATION);
+                    int returnLength;
+                    var status = NtQueryInformationProcess(process.Handle, 0, ref info, Marshal.SizeOf(typeof(PROCESS_BASIC_INFORMATION)), out returnLength);
+                    if (status != 0)
+                    {
+                        return false;
+                    }
+                    parentPid = info.InheritedFromUniqueProcessId.ToInt32();
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        private static extern int NtQueryInformationProcess(
+            IntPtr processHandle,
+            int processInformationClass,
+            ref PROCESS_BASIC_INFORMATION processInformation,
+            int processInformationLength,
+            out int returnLength);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_BASIC_INFORMATION
+        {
+            public IntPtr ExitStatus;
+            public IntPtr PebBaseAddress;
+            public IntPtr AffinityMask;
+            public IntPtr BasePriority;
+            public IntPtr UniqueProcessId;
+            public IntPtr InheritedFromUniqueProcessId;
+        }
+    }
+
+    public interface IResetConsole
+    {
+        string ReadLine();
+        void WriteLine(string message);
+    }
+
+    public sealed class SystemResetConsole : IResetConsole
+    {
+        public string ReadLine()
+        {
+            return Console.ReadLine();
+        }
+
+        public void WriteLine(string message)
+        {
+            Console.WriteLine(message);
+        }
+    }
+
+    public sealed class HelperSessionFileRecord
+    {
+        public HelperSessionFileRecord(string filePath, int pid, string imagePath)
+        {
+            FilePath = filePath;
+            Pid = pid;
+            ImagePath = imagePath;
+        }
+
+        public string FilePath { get; private set; }
+        public int Pid { get; private set; }
+        public string ImagePath { get; private set; }
+    }
+
+    public interface IHelperSessionFileScanner
+    {
+        IReadOnlyList<HelperSessionFileRecord> Scan();
+    }
+
+    public sealed class FileSystemHelperSessionFileScanner : IHelperSessionFileScanner
+    {
+        private readonly IHelperPaths _paths;
+
+        public FileSystemHelperSessionFileScanner(IHelperPaths paths)
+        {
+            _paths = paths;
+        }
+
+        public IReadOnlyList<HelperSessionFileRecord> Scan()
+        {
+            var records = new List<HelperSessionFileRecord>();
+            try
+            {
+                if (!Directory.Exists(_paths.RootDirectory))
+                {
+                    return records;
+                }
+                foreach (var file in Directory.EnumerateFiles(_paths.RootDirectory, "helper-session-*.json"))
+                {
+                    var record = TryRead(file);
+                    if (record != null)
+                    {
+                        records.Add(record);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return records;
+        }
+
+        private static HelperSessionFileRecord TryRead(string file)
+        {
+            try
+            {
+                var json = File.ReadAllText(file);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return null;
+                }
+                var document = JObject.Parse(json);
+                var pid = document.Value<int?>("pid") ?? 0;
+                var imagePath = document.Value<string>("image_path") ?? string.Empty;
+                if (pid <= 0)
+                {
+                    return null;
+                }
+                return new HelperSessionFileRecord(file, pid, imagePath);
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return null;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+    }
+
+    public sealed class ActiveHelperDetection
+    {
+        private ActiveHelperDetection(bool active, string reason)
+        {
+            Active = active;
+            Reason = reason;
+        }
+
+        public bool Active { get; private set; }
+        public string Reason { get; private set; }
+
+        public static ActiveHelperDetection NotActive()
+        {
+            return new ActiveHelperDetection(false, null);
+        }
+
+        public static ActiveHelperDetection ActiveDetected(string reason)
+        {
+            return new ActiveHelperDetection(true, reason);
+        }
+    }
+
+    public interface IActiveHelperDetector
+    {
+        ActiveHelperDetection Detect();
+    }
+
+    public sealed class DefaultActiveHelperDetector : IActiveHelperDetector
+    {
+        private readonly IInstallIdProvider _installIds;
+        private readonly INamedMutexFactory _mutexFactory;
+        private readonly IHelperSessionFileScanner _sessionFiles;
+        private readonly IProcessInspector _processInspector;
+
+        public DefaultActiveHelperDetector(
+            IInstallIdProvider installIds,
+            INamedMutexFactory mutexFactory,
+            IHelperSessionFileScanner sessionFiles,
+            IProcessInspector processInspector)
+        {
+            _installIds = installIds;
+            _mutexFactory = mutexFactory;
+            _sessionFiles = sessionFiles;
+            _processInspector = processInspector;
+        }
+
+        public ActiveHelperDetection Detect()
+        {
+            Guid installId;
+            try
+            {
+                installId = _installIds.GetOrCreate();
+            }
+            catch (HelperException)
+            {
+                return ActiveHelperDetection.ActiveDetected("install id unavailable");
+            }
+
+            var mutexName = SingleInstanceCoordinator.MutexName(installId);
+            var lease = _mutexFactory.TryAcquire(mutexName);
+            try
+            {
+                if (!lease.Acquired)
+                {
+                    return ActiveHelperDetection.ActiveDetected("current session mutex is held");
+                }
+            }
+            finally
+            {
+                lease.Dispose();
+            }
+
+            foreach (var record in _sessionFiles.Scan())
+            {
+                var process = _processInspector.Inspect(record.Pid);
+                if (process.Exists &&
+                    string.Equals(process.ImagePath, record.ImagePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return ActiveHelperDetection.ActiveDetected("cross-session helper detected");
+                }
+            }
+
+            return ActiveHelperDetection.NotActive();
+        }
+    }
+
+    public sealed class ResetLocalTokenCommand : IResetLocalTokenCommand
+    {
+        public const string AuditEndpoint = "internal:reset-local-token";
+
+        public const string ConfirmationPrompt =
+            "此操作将作废当前本地配对密钥，所有 CAD 内运行中的会话需要重新调用 helper 才能继续。是否继续？[y/N]";
+
+        private static readonly string[] SshEnvironmentSignals =
+        {
+            "SSH_CLIENT",
+            "SSH_CONNECTION",
+            "SSH_TTY"
+        };
+
+        private static readonly string[] RemoteLauncherProcessImageNames =
+        {
+            "wsmprovhost.exe",
+            "winrshost.exe",
+            "sshd.exe"
+        };
+
+        private readonly ILocalTokenStore _tokenStore;
+        private readonly IRandomBytes _randomBytes;
+        private readonly IActiveHelperDetector _activeHelperDetector;
+        private readonly IAuditEventStore _audit;
+        private readonly IAuditWarningWriter _warnings;
+        private readonly IResetConsole _console;
+        private readonly IResetInvocationContext _invocation;
+        private readonly IClock _clock;
+        private readonly IErrorWriter _errorWriter;
+
+        public ResetLocalTokenCommand(
+            ILocalTokenStore tokenStore,
+            IRandomBytes randomBytes,
+            IActiveHelperDetector activeHelperDetector,
+            IAuditEventStore audit,
+            IAuditWarningWriter warnings,
+            IResetConsole console,
+            IResetInvocationContext invocation,
+            IClock clock,
+            IErrorWriter errorWriter)
+        {
+            _tokenStore = tokenStore;
+            _randomBytes = randomBytes;
+            _activeHelperDetector = activeHelperDetector;
+            _audit = audit;
+            _warnings = warnings;
+            _console = console;
+            _invocation = invocation;
+            _clock = clock;
+            _errorWriter = errorWriter;
+        }
+
+        public int Run()
+        {
+            var started = _clock.UtcNow;
+            var traceId = Guid.NewGuid().ToString("N");
+
+            if (_invocation.IsInputRedirected)
+            {
+                return Refuse(
+                    ErrorCodes.HelperResetRequiresInteractive,
+                    "Reset must run from an interactive local console (standard input is redirected).",
+                    traceId,
+                    started);
+            }
+            if (!_invocation.IsUserInteractive)
+            {
+                return Refuse(
+                    ErrorCodes.HelperResetRequiresInteractive,
+                    "Reset must run from an interactive local console (no user-interactive session).",
+                    traceId,
+                    started);
+            }
+            if (HasSshSignal())
+            {
+                return Refuse(
+                    ErrorCodes.HelperResetRequiresInteractive,
+                    "Reset must not be invoked from an SSH remote session.",
+                    traceId,
+                    started);
+            }
+            if (HasRdpSessionName())
+            {
+                return Refuse(
+                    ErrorCodes.HelperResetRequiresInteractive,
+                    "Reset must not be invoked from a Remote Desktop session.",
+                    traceId,
+                    started);
+            }
+            if (HasRemoteLauncherProcess())
+            {
+                return Refuse(
+                    ErrorCodes.HelperResetRequiresInteractive,
+                    "Reset must not be invoked from a WinRM or remote-shell launcher.",
+                    traceId,
+                    started);
+            }
+
+            _console.WriteLine(ConfirmationPrompt);
+            var response = _console.ReadLine();
+            if (!IsConfirmed(response))
+            {
+                return Refuse(
+                    ErrorCodes.HelperResetCancelled,
+                    "Reset cancelled at confirmation prompt.",
+                    traceId,
+                    started);
+            }
+
+            var detection = _activeHelperDetector.Detect();
+            if (detection.Active)
+            {
+                return Refuse(
+                    ErrorCodes.HelperResetHelperRunning,
+                    "An active helper is still running; close it or wait for idle shutdown before retrying reset.",
+                    traceId,
+                    started);
+            }
+
+            string token;
+            try
+            {
+                token = ToLowerHex(_randomBytes.GetBytes(32));
+                _tokenStore.Write(token);
+            }
+            catch (HelperException ex)
+            {
+                return Refuse(ex.Code, ex.Message, traceId, started);
+            }
+            catch (Exception ex)
+            {
+                return Refuse(ErrorCodes.HelperLocalTokenBootstrapFailed, ShortReason(ex), traceId, started);
+            }
+
+            _console.WriteLine(
+                "Local helper token reset complete. token_length=" + token.Length +
+                ". 下次 CAD 调用时会自动重新拉取新密钥。");
+
+            var auditEvent = new AuditEvent
+            {
+                Timestamp = _clock.UtcNow,
+                Endpoint = AuditEndpoint,
+                Outcome = "ok",
+                ErrorCode = null,
+                DurationMs = ElapsedMs(started),
+                TraceId = traceId
+            };
+            try
+            {
+                _audit.Write(auditEvent);
+            }
+            catch (Exception ex)
+            {
+                _warnings.WriteAuditFailure(AuditEndpoint, traceId, ShortReason(ex));
+            }
+
+            return 0;
+        }
+
+        private int Refuse(string code, string message, string traceId, DateTimeOffset started)
+        {
+            _errorWriter.Write(code, message);
+            var auditEvent = new AuditEvent
+            {
+                Timestamp = _clock.UtcNow,
+                Endpoint = AuditEndpoint,
+                Outcome = "error",
+                ErrorCode = code,
+                DurationMs = ElapsedMs(started),
+                TraceId = traceId
+            };
+            try
+            {
+                _audit.Write(auditEvent);
+            }
+            catch (Exception ex)
+            {
+                _warnings.WriteAuditFailure(AuditEndpoint, traceId, ShortReason(ex));
+            }
+            return 1;
+        }
+
+        private bool HasSshSignal()
+        {
+            for (var i = 0; i < SshEnvironmentSignals.Length; i++)
+            {
+                var value = _invocation.GetEnvironmentVariable(SshEnvironmentSignals[i]);
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private bool HasRdpSessionName()
+        {
+            var sessionName = _invocation.GetEnvironmentVariable("SESSIONNAME");
+            if (string.IsNullOrWhiteSpace(sessionName))
+            {
+                return false;
+            }
+            return sessionName.StartsWith("RDP-Tcp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool HasRemoteLauncherProcess()
+        {
+            var names = _invocation.CollectLauncherProcessImageNames();
+            if (names == null)
+            {
+                return false;
+            }
+            foreach (var name in names)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+                for (var i = 0; i < RemoteLauncherProcessImageNames.Length; i++)
+                {
+                    if (string.Equals(name, RemoteLauncherProcessImageNames[i], StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private static bool IsConfirmed(string response)
+        {
+            if (response == null)
+            {
+                return false;
+            }
+            return string.Equals(response, "y", StringComparison.Ordinal) ||
+                   string.Equals(response, "Y", StringComparison.Ordinal);
+        }
+
+        private static string ToLowerHex(byte[] bytes)
+        {
+            var builder = new StringBuilder(bytes.Length * 2);
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                builder.Append(bytes[i].ToString("x2"));
+            }
+            return builder.ToString();
+        }
+
+        private int ElapsedMs(DateTimeOffset started)
+        {
+            return Math.Max(0, (int)(_clock.UtcNow - started).TotalMilliseconds);
+        }
+
+        private static string ShortReason(Exception ex)
+        {
+            return ex == null ? "unknown" : ex.GetType().Name;
         }
     }
 }

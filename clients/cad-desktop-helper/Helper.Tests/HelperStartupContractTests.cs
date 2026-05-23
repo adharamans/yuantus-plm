@@ -361,7 +361,7 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_no_s7_s8_scope_leak_after_s6_business_audit_routes()
+        public void test_no_s8_scope_leak_after_s7_reset_token()
         {
             var sources = ReadHelperSources();
 
@@ -369,9 +369,9 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("/sync/inbound", sources);
             Assert.Contains("/sync/outbound", sources);
             Assert.Contains("/audit/apply-result", sources);
+            Assert.Contains("--reset-local-token", sources);
             Assert.DoesNotContain("/dedup/check", sources);
             Assert.DoesNotContain("/shell/notify", sources);
-            Assert.DoesNotContain("--reset-local-token", sources);
             Assert.DoesNotContain("CADDedupPlugin", sources);
         }
 
