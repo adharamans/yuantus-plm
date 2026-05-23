@@ -279,6 +279,8 @@ namespace Yuantus.Cad.Helper.Tests
 
             Assert.DoesNotContain("a.dwg", config.Serialized);
             Assert.DoesNotContain("audit_events", JsonConvert.SerializeObject(service.SetCurrentDrawing(new CurrentDrawingRequest { Drawing = new CurrentDrawingPayload { Filename = "b.dwg" } })));
+            Assert.DoesNotContain("AuditSessionResult(\"/cad/current-drawing\"", ReadHelperSources());
+            Assert.DoesNotContain("WriteAuditAfterBusiness(\"/cad/current-drawing\"", ReadHelperSources());
         }
 
         [Fact]

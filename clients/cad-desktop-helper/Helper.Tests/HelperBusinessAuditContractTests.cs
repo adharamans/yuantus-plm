@@ -104,7 +104,8 @@ namespace Yuantus.Cad.Helper.Tests
         [Fact]
         public async Task test_diff_preview_wraps_server_response_and_generates_pull_id()
         {
-            var service = CreateService(new RecordingBusinessClient
+            var audit = new RecordingAuditStore();
+            var service = CreateService(null, null, null, audit, null, null, new RecordingBusinessClient
             {
                 Response = PlmBusinessResponse.Success(new JObject
                 {
@@ -119,6 +120,7 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.True(result.Ok);
             Assert.Matches("^PULL-[0-9a-f]{32}$", data.Value<string>("pull_id"));
             Assert.Equal("AL6061", data["server_response"]["write_cad_fields"].Value<string>("MAT"));
+            Assert.Equal(data.Value<string>("pull_id"), audit.Events.Last().PullId);
         }
 
         [Fact]
@@ -152,6 +154,13 @@ namespace Yuantus.Cad.Helper.Tests
             var expiredPull = await CreatePullAsync(expiredService);
             clock.Advance(TimeSpan.FromMinutes(10));
             Assert.Equal(ErrorCodes.AuditPullIdExpired, expiredService.ApplyResult(new JObject { ["pull_id"] = expiredPull, ["outcome"] = "ok" }).Code);
+
+            var cache = new PullCache();
+            var entry = cache.Create(new JObject { ["item_id"] = "item-1" }, new JObject(), clock.UtcNow);
+            Assert.Equal(PullCacheLookupStatus.Ready, cache.ClaimForReport(entry.PullId, clock.UtcNow).Status);
+            Assert.Equal(PullCacheLookupStatus.AlreadyReported, cache.ClaimForReport(entry.PullId, clock.UtcNow).Status);
+            cache.ReleaseReportClaim(entry.PullId);
+            Assert.Equal(PullCacheLookupStatus.Ready, cache.ClaimForReport(entry.PullId, clock.UtcNow).Status);
         }
 
         [Fact]
@@ -249,13 +258,40 @@ namespace Yuantus.Cad.Helper.Tests
             var audit = new RecordingAuditStore();
             var service = CreateService(null, null, null, audit, null, null);
 
-            service.AuditSessionResult("/session/login", HelperRouteResult.Success(new SessionLoginResponse { LoggedIn = true }));
-            service.AuditSessionResult("/session/logout", HelperRouteResult.Success(new SessionLogoutResponse { LoggedIn = false }));
+            var login = HelperRouteResult.Success(new SessionLoginResponse
+            {
+                LoggedIn = true,
+                ServerUrl = "https://plm.example.com/api/v1",
+                TenantId = "tenant-a",
+                OrgId = "org-a",
+                DefaultProfileId = "profile-a",
+                Username = "admin"
+            });
+            var logout = HelperRouteResult.Success(new SessionLogoutResponse { LoggedIn = false });
+
+            Assert.Equal(
+                "{\"ok\":true,\"data\":{\"logged_in\":true,\"server_url\":\"https://plm.example.com/api/v1\",\"tenant_id\":\"tenant-a\",\"org_id\":\"org-a\",\"default_profile_id\":\"profile-a\",\"username\":\"admin\"},\"error\":null}",
+                HelperRouteResponse.ToJson(login));
+            Assert.Equal(
+                "{\"ok\":true,\"data\":{\"logged_in\":false},\"error\":null}",
+                HelperRouteResponse.ToJson(logout));
+
+            var started = DateTimeOffset.Parse("2026-05-22T09:59:59Z");
+            service.AuditSessionResult("/session/login", login, started);
+            service.AuditSessionResult("/session/logout", logout, started);
 
             Assert.Equal(new[] { "/session/login", "/session/logout" }, audit.Events.Select(item => item.Endpoint).ToArray());
             Assert.All(audit.Events, item => Assert.Equal("ok", item.Outcome));
+            Assert.All(audit.Events, item => Assert.True(item.DurationMs >= 1000));
             Assert.Contains("businessAuditService.AuditSessionResult(\"/session/login\"", ReadHelperSources());
             Assert.Contains("businessAuditService.AuditSessionResult(\"/session/logout\"", ReadHelperSources());
+
+            var warnings = new RecordingAuditWarnings();
+            var failingAudit = CreateService(null, null, null, new RecordingAuditStore { ThrowOnWrite = true }, null, warnings);
+            failingAudit.AuditSessionResult("/session/login", login, started);
+            Assert.Single(warnings.Lines);
+            Assert.DoesNotContain("trace_id=session", warnings.Lines.Single());
+            Assert.Matches("trace_id=[0-9a-f]{32}", warnings.Lines.Single());
         }
 
         [Fact]

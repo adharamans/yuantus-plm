@@ -182,3 +182,23 @@ Review should focus on:
 - the SQLite schema matching R3.2 exactly;
 - the old S4/S5 tests being relaxed only where S6 made their former negative
   assertions stale.
+
+## 7. Review Round 1 Fixes
+
+Post-review fixes applied before merge readiness:
+
+- `/diff/preview` now passes the created `PullCacheEntry` into the audit writer,
+  so the local `/diff/preview` audit row carries the same `pull_id` returned to
+  the caller.
+- `test_diff_preview_wraps_server_response_and_generates_pull_id` now asserts
+  the audit row `PullId` matches the response `pull_id`.
+- `PullCache.ClaimForReport(...)` atomically claims `/audit/apply-result`
+  reporting under the cache lock, preventing concurrent duplicate audit writes
+  for the same `pull_id`.
+- session audit warnings now use the generated trace id instead of the literal
+  `session`.
+- session audit rows can receive a route-level start timestamp, preserving
+  login/logout duration when Kestrel calls the audit seam.
+- the S5 response-shape guard now snapshots the login/logout helper envelopes.
+- the current-drawing memory-only guard now also asserts the S6 audit seams are
+  not wired to `/cad/current-drawing`.

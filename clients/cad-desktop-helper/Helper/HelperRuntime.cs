@@ -2278,14 +2278,36 @@ namespace Yuantus.Cad.Helper
             }
         }
 
-        public void MarkReported(string pullId)
+        public PullCacheLookup ClaimForReport(string pullId, DateTimeOffset now)
+        {
+            lock (_lock)
+            {
+                PullCacheEntry entry;
+                if (!_entries.TryGetValue(pullId ?? string.Empty, out entry))
+                {
+                    return PullCacheLookup.Unknown();
+                }
+                if (entry.Reported)
+                {
+                    return PullCacheLookup.AlreadyReported(entry);
+                }
+                if (now - entry.CreatedAt >= Ttl)
+                {
+                    return PullCacheLookup.Expired(entry);
+                }
+                entry.Reported = true;
+                return PullCacheLookup.Ready(entry);
+            }
+        }
+
+        public void ReleaseReportClaim(string pullId)
         {
             lock (_lock)
             {
                 PullCacheEntry entry;
                 if (_entries.TryGetValue(pullId ?? string.Empty, out entry))
                 {
-                    entry.Reported = true;
+                    entry.Reported = false;
                 }
             }
         }
@@ -2517,16 +2539,17 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             var started = _clock.UtcNow;
             var response = await _plm.PostAsync(serverUri, DiffPreviewEndpoint, bearer, traceId, request, cancellationToken).ConfigureAwait(false);
             var result = ToRouteResult(response);
+            PullCacheEntry pull = null;
             if (response.Ok)
             {
-                var pull = _pullCache.Create(request, response.Data, _clock.UtcNow);
+                pull = _pullCache.Create(request, response.Data, _clock.UtcNow);
                 result = HelperRouteResult.Success(new JObject
                 {
                     ["pull_id"] = pull.PullId,
                     ["server_response"] = response.Data == null ? new JObject() : response.Data.DeepClone()
                 });
             }
-            return WriteAuditAfterBusiness("/diff/preview", request, result, null, traceId, started);
+            return WriteAuditAfterBusiness("/diff/preview", request, result, pull, traceId, started);
         }
 
         public Task<HelperRouteResult> SyncInboundAsync(JObject request, CancellationToken cancellationToken)
@@ -2551,7 +2574,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                 return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "pull_id and a valid outcome are required.");
             }
 
-            var lookup = _pullCache.Lookup(pullId, _clock.UtcNow);
+            var lookup = _pullCache.ClaimForReport(pullId, _clock.UtcNow);
             if (lookup.Status == PullCacheLookupStatus.Unknown)
             {
                 return HelperRouteResult.Error(ErrorCodes.AuditPullIdUnknown, "pull_id is unknown.");
@@ -2577,7 +2600,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                     started,
                     JsonObjectString(request["applied_fields"]),
                     JsonObjectString(request["failed_fields"])));
-                _pullCache.MarkReported(pullId);
                 return HelperRouteResult.Success(new JObject
                 {
                     ["reported"] = true,
@@ -2586,27 +2608,30 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             }
             catch (Exception)
             {
+                _pullCache.ReleaseReportClaim(pullId);
                 return HelperRouteResult.Error(ErrorCodes.AuditWriteFailed, "Unable to write local audit row.");
             }
         }
 
-        public void AuditSessionResult(string endpoint, HelperRouteResult result)
+        public void AuditSessionResult(string endpoint, HelperRouteResult result, DateTimeOffset? startedAt = null)
         {
+            var traceId = NewTraceId();
+            var now = _clock.UtcNow;
             try
             {
                 _audit.Write(new AuditEvent
                 {
-                    Timestamp = _clock.UtcNow,
+                    Timestamp = now,
                     Endpoint = endpoint,
                     Outcome = result != null && result.Ok ? "ok" : "failed",
                     ErrorCode = result == null || result.Ok ? null : result.Code,
-                    DurationMs = 0,
-                    TraceId = NewTraceId()
+                    DurationMs = startedAt.HasValue ? Math.Max(0, (int)(now - startedAt.Value).TotalMilliseconds) : 0,
+                    TraceId = traceId
                 });
             }
             catch (Exception ex)
             {
-                _warnings.WriteAuditFailure(endpoint, "session", ShortReason(ex));
+                _warnings.WriteAuditFailure(endpoint, traceId, ShortReason(ex));
             }
         }
 
@@ -2899,9 +2924,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             app.MapPost("/session/login", async context =>
             {
                 idle.Touch(clock.UtcNow);
+                var started = clock.UtcNow;
                 var request = await ReadJsonAsync<SessionLoginRequest>(context).ConfigureAwait(false);
                 var result = await sessionService.LoginAsync(request, cancellationToken).ConfigureAwait(false);
-                businessAuditService.AuditSessionResult("/session/login", result);
+                businessAuditService.AuditSessionResult("/session/login", result, started);
                 await HelperRouteResponse
                     .WriteAsync(context, result, cancellationToken)
                     .ConfigureAwait(false);
@@ -2910,8 +2936,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             app.MapPost("/session/logout", async context =>
             {
                 idle.Touch(clock.UtcNow);
+                var started = clock.UtcNow;
                 var result = sessionService.Logout();
-                businessAuditService.AuditSessionResult("/session/logout", result);
+                businessAuditService.AuditSessionResult("/session/logout", result, started);
                 await HelperRouteResponse
                     .WriteAsync(context, result, cancellationToken)
                     .ConfigureAwait(false);
