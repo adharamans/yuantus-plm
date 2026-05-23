@@ -180,14 +180,27 @@ R1:
 - reject when WinRM / remote-management process signals such as
   `wsmprovhost.exe`, `winrshost.exe`, or `sshd.exe` are found in the available
   launcher/parent-process evidence;
+- reject when `SESSIONNAME` starts with `RDP-Tcp` / `rdp-tcp` (case-insensitive),
+  because RDP-launched `cmd.exe` / PowerShell can otherwise satisfy both stable
+  console predicates while still being remote-admin initiated;
 - if parent-process inspection is unavailable but the invocation is otherwise a
   normal local interactive terminal, do not fail closed solely because that
   optional inspection failed.
 
+Grounding for the RDP signal:
+
+- Microsoft Learn's Remote Desktop Protocol page states that environment
+  variables in a Remote Desktop session are determined by the RDP-Tcp connection
+  settings:
+  <https://learn.microsoft.com/en-us/windows/win32/termserv/remote-desktop-protocol>.
+- Microsoft Learn's `query session` page shows active Remote Desktop sessions
+  named `rdp-tcp#1` and defines `SESSIONNAME` as the assigned session name:
+  <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/query-session>.
+
 Rationale: R3.2 requires SSH/WinRM rejection, but process-parent evidence is
-Windows-host dependent. S7 must enforce the two stable console predicates and
-reject known remote signals; the implementation PR must report the exact Windows
-signals it covers and the manual SSH/WinRM evidence result.
+Windows-host dependent. S7 must enforce the two stable console predicates,
+reject known remote signals including RDP `SESSIONNAME`, and report the exact
+Windows signals it covers plus manual SSH/WinRM/RDP evidence results.
 
 ### 3.C Confirmation prompt
 
@@ -226,6 +239,11 @@ user while helper instances are per user session, S7 R1 extends the guard to:
 4. For each session file, use S3-style PID + image-path evidence to decide
    whether a helper instance is still active.
 
+The S7 stale definition is exactly the S3 `SingleInstanceCoordinator` rule:
+active means the process exists **and** the process image path matches the helper
+exe path recorded in the session file; otherwise the record is stale for S7's
+guard decision.
+
 If any active helper is detected:
 
 - exit code `1`;
@@ -239,6 +257,13 @@ stale records for the purpose of allowing reset, but it must not delete
 session files unless the implementation can prove it is reusing the existing S3
 cleanup rule exactly. The preferred R1 behavior is **ignore stale, do not
 delete**.
+
+Race note: there is an unavoidable small window between active-helper scan and
+the DPAPI write where another current-user session could start a helper. The
+R1 consequence is bounded: that new helper may hold the old in-memory token
+until idle/restart, matching the no-live-reload behavior in §3.H. S7 does not
+attempt a cross-session global lock beyond the existing per-install-id mutex and
+session-file evidence.
 
 ### 3.E Token generation and DPAPI write
 
@@ -283,8 +308,8 @@ Required fields:
 - `outcome`: `ok` for successful token write, `error` for refusal/failure;
 - `error_code`: null on success, stable error code on refusal/failure;
 - `duration_ms`: elapsed command duration;
-- `trace_id`: generated 32-character lowercase hex or equivalent stable
-  request-local id.
+- `trace_id`: `Guid.NewGuid().ToString("N")`, matching S6's 32-character
+  lowercase hex audit trace format.
 
 Fields that must remain null for reset rows:
 
@@ -392,7 +417,7 @@ S7 implementation must add these exactly named tests:
 
 1. `test_s7_cli_argument_is_program_only_and_service_args_stay_rejected`
 2. `test_reset_local_token_requires_interactive_local_console`
-3. `test_reset_local_token_rejects_ssh_or_winrm_remote_invocation`
+3. `test_reset_local_token_rejects_ssh_winrm_or_rdp_remote_invocation`
 4. `test_reset_local_token_prompts_and_cancels_unless_user_confirms_y`
 5. `test_reset_local_token_rejects_when_helper_mutex_or_active_session_exists`
 6. `test_reset_local_token_ignores_stale_session_records_without_deleting_them`
@@ -455,7 +480,7 @@ Manual Windows evidence expected before or during implementation review:
   code `0`, no token printed;
 - interactive PowerShell: enter `n`, token unchanged, exit code `1`;
 - running helper active: reset refuses, token unchanged, exit code `1`;
-- SSH/WinRM or equivalent remote shell: reset refuses, token unchanged, exit
+- SSH/WinRM/RDP or equivalent remote shell: reset refuses, token unchanged, exit
   code `1`;
 - after reset, next CAD/Shared call rereads DPAPI and can authenticate against a
   newly spawned helper.
@@ -471,7 +496,8 @@ docs/DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_S7_RESET_LOCAL_TOKEN_R1_20260522.md
 The DEV MD must document:
 
 - CLI parsing shape;
-- interactive and remote-signal rejection predicates;
+- interactive and remote-signal rejection predicates, including the
+  `SESSIONNAME=RDP-Tcp#...` signal;
 - active-helper detector behavior, including current-session mutex and
   cross-session session-file scan;
 - token generation/write path and DPAPI primitive reuse;
@@ -518,7 +544,8 @@ Each later slice remains separately gated:
 ## 10. Reviewer Focus
 
 - Confirm §3.B remote-shell rejection is acceptable as positive-signal rejection
-  for R1, with manual SSH/WinRM evidence required before merge.
+  for R1, with `SESSIONNAME=RDP-Tcp#...` included and manual SSH/WinRM/RDP
+  evidence required before merge.
 - Confirm §3.D intentionally extends the R3.2 mutex-only text with a
   cross-session active-helper scan, because the token is per user while helper
   instances are per session.
