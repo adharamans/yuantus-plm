@@ -3114,6 +3114,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
 
     public sealed class DefaultResetInvocationContext : IResetInvocationContext
     {
+        public const int MaxAncestryDepth = 8;
+
         public bool IsInputRedirected
         {
             get
@@ -3159,20 +3161,52 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
         public IReadOnlyCollection<string> CollectLauncherProcessImageNames()
         {
             var names = new List<string>();
+            var visited = new HashSet<int>();
+            int currentPid;
             try
             {
                 using (var current = Process.GetCurrentProcess())
                 {
-                    AppendLauncherName(names, current);
+                    currentPid = current.Id;
+                    visited.Add(currentPid);
+                    AppendImageName(names, current);
                 }
             }
             catch (Exception)
             {
+                return names;
             }
+
+            var pid = currentPid;
+            for (var depth = 0; depth < MaxAncestryDepth; depth++)
+            {
+                int parentPid;
+                if (!TryGetParentProcessId(pid, out parentPid))
+                {
+                    break;
+                }
+                if (parentPid <= 0 || !visited.Add(parentPid))
+                {
+                    break;
+                }
+                try
+                {
+                    using (var parent = Process.GetProcessById(parentPid))
+                    {
+                        AppendImageName(names, parent);
+                        pid = parentPid;
+                    }
+                }
+                catch (Exception)
+                {
+                    break;
+                }
+            }
+
             return names;
         }
 
-        private static void AppendLauncherName(List<string> names, Process process)
+        private static void AppendImageName(List<string> names, Process process)
         {
             try
             {
@@ -3188,6 +3222,49 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             catch (Exception)
             {
             }
+        }
+
+        private static bool TryGetParentProcessId(int pid, out int parentPid)
+        {
+            parentPid = 0;
+            try
+            {
+                using (var process = Process.GetProcessById(pid))
+                {
+                    var info = default(PROCESS_BASIC_INFORMATION);
+                    int returnLength;
+                    var status = NtQueryInformationProcess(process.Handle, 0, ref info, Marshal.SizeOf(typeof(PROCESS_BASIC_INFORMATION)), out returnLength);
+                    if (status != 0)
+                    {
+                        return false;
+                    }
+                    parentPid = info.InheritedFromUniqueProcessId.ToInt32();
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        private static extern int NtQueryInformationProcess(
+            IntPtr processHandle,
+            int processInformationClass,
+            ref PROCESS_BASIC_INFORMATION processInformation,
+            int processInformationLength,
+            out int returnLength);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_BASIC_INFORMATION
+        {
+            public IntPtr ExitStatus;
+            public IntPtr PebBaseAddress;
+            public IntPtr AffinityMask;
+            public IntPtr BasePriority;
+            public IntPtr UniqueProcessId;
+            public IntPtr InheritedFromUniqueProcessId;
         }
     }
 

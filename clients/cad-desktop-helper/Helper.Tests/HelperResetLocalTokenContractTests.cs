@@ -325,6 +325,24 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
+        public void test_reset_invocation_context_walks_real_parent_ancestry()
+        {
+            var invocation = new DefaultResetInvocationContext();
+
+            var ancestry = invocation.CollectLauncherProcessImageNames();
+
+            Assert.NotNull(ancestry);
+            Assert.True(
+                ancestry.Count >= 2,
+                "DefaultResetInvocationContext must walk at least one parent process so wsmprovhost/winrshost/sshd detection is wired; got [" + string.Join(", ", ancestry) + "].");
+
+            var sources = ReadHelperSources();
+            Assert.Contains("NtQueryInformationProcess", sources);
+            Assert.Contains("InheritedFromUniqueProcessId", sources);
+            Assert.Contains("MaxAncestryDepth", sources);
+        }
+
+        [Fact]
         public void test_s7_keeps_cad_helper_dotnet_workflow_covering_helper_tests()
         {
             var workflow = File.ReadAllText(Path.Combine(FindRepoRoot(), ".github", "workflows", "cad-helper-shared-dotnet.yml"));

@@ -68,7 +68,10 @@ The S7 implementation adds the following classes to
 - `IResetLocalTokenCommand` / `ResetLocalTokenCommand` — orchestrator;
 - `IResetInvocationContext` / `DefaultResetInvocationContext` — wraps
   `Console.IsInputRedirected`, `Environment.UserInteractive`,
-  environment variables, and best-effort launcher-process image names;
+  environment variables, and launcher-process image names collected by
+  walking the parent-process chain via `NtQueryInformationProcess`
+  (`PROCESS_BASIC_INFORMATION.InheritedFromUniqueProcessId`) up to
+  `MaxAncestryDepth = 8` levels with cycle detection;
 - `IResetConsole` / `SystemResetConsole` — prompt and info output;
 - `IHelperSessionFileScanner` / `FileSystemHelperSessionFileScanner` —
   enumerates `%APPDATA%\YuantusPLM\helper-session-*.json` files;
@@ -102,7 +105,9 @@ circuits and returns exit code 1 after attempting an `outcome=error` audit row.
    (case-insensitive), covering the Microsoft Learn / `query session`
    convention for Remote Desktop sessions;
 6. reject when any of `wsmprovhost.exe`, `winrshost.exe`, or `sshd.exe` appears
-   in the available launcher-process image names (best-effort positive signal);
+   in the walked parent-process image names (`Process.GetCurrentProcess` plus
+   ancestry via `NtQueryInformationProcess` →
+   `InheritedFromUniqueProcessId`, depth-bounded and cycle-guarded);
 7. write the exact confirmation prompt text from R3.2 design `:443` to the
    reset console and read one input line;
 8. reject anything other than ordinal `y` or `Y` (including `null`/EOF, empty
@@ -201,6 +206,18 @@ endpoint label and a `reason=<exception-type-name>` short reason.
 13. `test_reset_local_token_does_not_start_kestrel_or_publish_session_file`
 14. `test_s7_preserves_s6_route_count_and_business_audit_contracts`
 15. `test_s7_keeps_cad_helper_dotnet_workflow_covering_helper_tests`
+
+Additional hardening test (caught a real review finding that the WinRM /
+launcher process-name check was test-only because the production seam was
+not walking parent ancestry):
+
+- `test_reset_invocation_context_walks_real_parent_ancestry` — exercises the
+  production `DefaultResetInvocationContext.CollectLauncherProcessImageNames()`
+  directly (not via `FakeInvocationContext`), asserts the returned ancestry
+  has at least two entries on the Windows runner (current process plus at
+  least one parent), and pins the `NtQueryInformationProcess` /
+  `InheritedFromUniqueProcessId` / `MaxAncestryDepth` source references so a
+  future refactor cannot silently remove the parent walk.
 
 Existing scope-leak guards narrowed to allow the new CLI literal while
 preserving S8+ exclusions:
