@@ -123,8 +123,7 @@ workflow.
 
 ## 5. Deferred Operational Signoff
 
-Windows AutoCAD build/load/smoke was not run locally. This remains deferred
-operational signoff, not a substitute for evidence.
+Windows AutoCAD build/load/smoke was not run locally. This remains deferred operational signoff, not a substitute for evidence.
 
 Deferred evidence:
 
