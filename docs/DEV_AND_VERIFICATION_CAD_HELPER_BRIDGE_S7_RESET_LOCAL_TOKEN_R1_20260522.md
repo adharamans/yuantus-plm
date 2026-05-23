@@ -277,9 +277,9 @@ dotnet test  clients/cad-desktop-helper/Helper.Tests/Yuantus.Cad.Helper.Tests.cs
 as the authoritative merge gate. The PR body cites the workflow run id for the
 implementation SHA.
 
-### 4.1 Manual Windows evidence
+### 4.1 Deferred Windows operational signoff
 
-The taskbook §6 manual evidence still requires:
+The taskbook §6 manual evidence originally required the following before merge:
 
 - interactive PowerShell confirm path (`y` → DPAPI rotated, token never
   printed, exit code 0);
@@ -289,8 +289,23 @@ The taskbook §6 manual evidence still requires:
 - post-reset CAD/Shared call rereads DPAPI and authenticates with a freshly
   spawned helper.
 
-Manual evidence is collected outside this PR and must be appended before the PR
-merges. Do not merge this PR before the manual evidence is recorded.
+Risk-deviation decision for this PR:
+
+- Manual Windows evidence is **not available** in the current development
+  environment. This workstation does not have a Windows host, real CAD runtime,
+  RDP/WinRM/SSH Windows sessions, or a local .NET SDK.
+- The PR is code-review clean and the dedicated Windows `cad-helper-shared-dotnet`
+  build/test workflow is the merge-time technical gate.
+- The five manual Windows checks above are deferred to **operational signoff**,
+  not claimed complete by this PR.
+- S7 must be treated as **implementation merged, manual Windows signoff pending**
+  until that evidence is recorded in a later S11 / manual-evidence packet or
+  equivalent owner-attached evidence.
+
+This is an explicit owner-accepted deviation from the taskbook §6 merge gate,
+not a substitute for the missing evidence. The PR body records the same
+deferred-signoff posture so future readers do not interpret the merge as
+Windows operational validation.
 
 ## 5. Explicit Non-Goals
 
