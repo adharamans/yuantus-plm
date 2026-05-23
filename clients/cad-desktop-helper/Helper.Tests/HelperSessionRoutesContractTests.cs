@@ -278,11 +278,13 @@ namespace Yuantus.Cad.Helper.Tests
             service.SetCurrentDrawing(new CurrentDrawingRequest { Drawing = new CurrentDrawingPayload { Filename = "a.dwg" } });
 
             Assert.DoesNotContain("a.dwg", config.Serialized);
-            Assert.DoesNotContain("SQLite", ReadHelperSources());
+            Assert.DoesNotContain("audit_events", JsonConvert.SerializeObject(service.SetCurrentDrawing(new CurrentDrawingRequest { Drawing = new CurrentDrawingPayload { Filename = "b.dwg" } })));
+            Assert.DoesNotContain("AuditSessionResult(\"/cad/current-drawing\"", ReadHelperSources());
+            Assert.DoesNotContain("WriteAuditAfterBusiness(\"/cad/current-drawing\"", ReadHelperSources());
         }
 
         [Fact]
-        public void test_s5_adds_exactly_version_session_and_current_drawing_routes()
+        public void test_s6_adds_exactly_version_session_current_drawing_and_business_routes()
         {
             var sources = ReadHelperSources();
 
@@ -292,21 +294,25 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/session/logout\"", sources);
             Assert.Contains("MapGet(\"/session/status\"", sources);
             Assert.Contains("MapPost(\"/cad/current-drawing\"", sources);
-            Assert.Equal(6, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Contains("MapPost(\"/diff/preview\"", sources);
+            Assert.Contains("MapPost(\"/sync/inbound\"", sources);
+            Assert.Contains("MapPost(\"/sync/outbound\"", sources);
+            Assert.Contains("MapPost(\"/audit/apply-result\"", sources);
+            Assert.Equal(10, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
             Assert.DoesNotContain("MapPatch(", sources);
         }
 
         [Fact]
-        public void test_s5_does_not_add_s6_s7_s8_routes_or_sqlite_or_reset_token()
+        public void test_s5_s6_do_not_add_s7_s8_routes_or_reset_token()
         {
             var sources = ReadHelperSources();
 
-            Assert.DoesNotContain("/diff/preview", sources);
-            Assert.DoesNotContain("/sync/inbound", sources);
-            Assert.DoesNotContain("/sync/outbound", sources);
-            Assert.DoesNotContain("/audit/apply-result", sources);
+            Assert.Contains("/diff/preview", sources);
+            Assert.Contains("/sync/inbound", sources);
+            Assert.Contains("/sync/outbound", sources);
+            Assert.Contains("/audit/apply-result", sources);
             Assert.DoesNotContain("/dedup/check", sources);
             Assert.DoesNotContain("/shell/notify", sources);
             Assert.DoesNotContain("/compose", sources);
@@ -314,7 +320,6 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.DoesNotContain("/tasks", sources);
             Assert.DoesNotContain("/diagnostics/snapshot", sources);
             Assert.DoesNotContain("--reset-local-token", sources);
-            Assert.DoesNotContain("SQLite", sources);
             Assert.DoesNotContain("UseCors", sources);
         }
 

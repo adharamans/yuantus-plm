@@ -48,7 +48,7 @@ namespace Yuantus.Cad.Helper.Tests
 
             Assert.Contains("MapGet(\"/healthz\"", sources);
             Assert.Contains("{\\\"ok\\\":true}", sources);
-            Assert.DoesNotContain("Authorization", sources);
+            Assert.DoesNotContain("UseCors", sources);
         }
 
         [Fact]
@@ -361,19 +361,17 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_no_s6_s7_s8_scope_leak_after_s5_session_routes()
+        public void test_no_s7_s8_scope_leak_after_s6_business_audit_routes()
         {
             var sources = ReadHelperSources();
 
-            Assert.DoesNotContain("Authorization", sources);
-            Assert.DoesNotContain("/diff/preview", sources);
-            Assert.DoesNotContain("/sync/inbound", sources);
-            Assert.DoesNotContain("/sync/outbound", sources);
-            Assert.DoesNotContain("/audit/apply-result", sources);
+            Assert.Contains("/diff/preview", sources);
+            Assert.Contains("/sync/inbound", sources);
+            Assert.Contains("/sync/outbound", sources);
+            Assert.Contains("/audit/apply-result", sources);
             Assert.DoesNotContain("/dedup/check", sources);
             Assert.DoesNotContain("/shell/notify", sources);
             Assert.DoesNotContain("--reset-local-token", sources);
-            Assert.DoesNotContain("SQLite", sources);
             Assert.DoesNotContain("CADDedupPlugin", sources);
         }
 

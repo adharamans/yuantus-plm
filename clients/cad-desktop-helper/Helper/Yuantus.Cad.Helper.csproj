@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Shared\Yuantus.Cad.Shared.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="7.0.20" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 </Project>
