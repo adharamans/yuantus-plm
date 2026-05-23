@@ -54,20 +54,20 @@ namespace Yuantus.Cad.Helper.Tests
         public async Task test_s6_requires_logged_in_session_before_plm_forwarding()
         {
             var plm = new RecordingBusinessClient();
-            var service = CreateService(new InMemoryConfigStore(), new InMemoryBearerStore(), plm, null, null, null);
+            var service = CreateService(new InMemoryConfigStore(), new InMemoryBearerStore(), null, null, null, null, plm);
 
             var result = await service.SyncInboundAsync(new JObject(), CancellationToken.None);
 
             Assert.False(result.Ok);
             Assert.Equal(ErrorCodes.AuthTenantMissing, result.Code);
-            Assert.Equal(0, plm.Calls.Count);
+            Assert.Empty(plm.Calls);
 
-            service = CreateService(new InMemoryConfigStore { ServerUrl = "https://plm.example.com/api/v1", TenantId = "tenant-a" }, new InMemoryBearerStore(), plm, null, null, null);
+            service = CreateService(new InMemoryConfigStore { ServerUrl = "https://plm.example.com/api/v1", TenantId = "tenant-a" }, new InMemoryBearerStore(), null, null, null, null, plm);
             result = await service.SyncInboundAsync(new JObject(), CancellationToken.None);
 
             Assert.False(result.Ok);
             Assert.Equal(ErrorCodes.AuthPlmNotLoggedIn, result.Code);
-            Assert.Equal(0, plm.Calls.Count);
+            Assert.Empty(plm.Calls);
         }
 
         [Fact]
@@ -80,7 +80,7 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Equal(ErrorCodes.HelperInputValidationFailed, (await service.DiffPreviewAsync(new JObject { ["item_id"] = "item-1", ["values"] = new JObject { ["name"] = "x" } }, CancellationToken.None)).Code);
             Assert.Equal(ErrorCodes.HelperInputValidationFailed, (await service.DiffPreviewAsync(new JObject { ["item_id"] = "item-1", ["target_properties"] = new JObject { ["name"] = "x" } }, CancellationToken.None)).Code);
             Assert.Equal(ErrorCodes.HelperInputValidationFailed, (await service.DiffPreviewAsync(new JObject { ["item_id"] = "item-1", ["target_cad_fields"] = new JObject { ["MAT"] = "x" } }, CancellationToken.None)).Code);
-            Assert.Equal(0, plm.Calls.Count);
+            Assert.Empty(plm.Calls);
         }
 
         [Fact]
