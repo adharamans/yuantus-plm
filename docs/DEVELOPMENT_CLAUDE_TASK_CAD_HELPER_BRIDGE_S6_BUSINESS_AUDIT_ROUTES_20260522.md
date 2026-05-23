@@ -201,6 +201,8 @@ reported
 Rules:
 
 - `pull_id` is generated only after a successful `/diff/preview` PLM response;
+- `pull_id` format is `PULL-` + `Guid.NewGuid().ToString("N")`
+  (32 lowercase hexadecimal characters; no ULID dependency in S6 R1);
 - TTL expiry returns `AUDIT_PULL_ID_EXPIRED`;
 - unknown `pull_id` returns `AUDIT_PULL_ID_UNKNOWN`;
 - a second `/audit/apply-result` for the same `pull_id` returns
@@ -256,19 +258,38 @@ S6 implementation may need to route S5 login/logout through an audit seam. That
 is allowed only for local audit writes and must not change S5 response shapes or
 session semantics.
 
+For `/diff/preview`, `/sync/inbound`, and `/sync/outbound`, the audit row must
+be written **after** the PLM response has been received and the helper-visible
+outcome has been determined. S6 records the actual outcome, not pre-call intent.
+If the helper crashes after PLM success but before SQLite write, that is an
+audit gap; it is more recoverable than persisting a pre-PLM row with the wrong
+outcome.
+
 S6 must not audit `/healthz`, `/version`, or `/session/status`.
+
+S8 implementation must extend the audited endpoint set to include
+`/dedup/check` per R3.2 design line 695. S6 must not add that route or audit it.
 
 ### 3.H Audit failure policy
 
-Open for reviewer ratification before implementation:
+Ratified:
 
-- **H1 fail-closed**: if audit write fails for audited endpoints, return
-  `ok=false` with `AUDIT_WRITE_FAILED` and do not report success.
-- **H2 fail-open with local warning**: preserve business response success and
-  record/log audit failure best-effort.
+- **H1 fail-closed** for `/audit/apply-result`: if audit write fails, return
+  helper envelope `ok=false` with `AUDIT_WRITE_FAILED` and do not report
+  success.
+- **H2 fail-open** for `/diff/preview`, `/sync/inbound`, and `/sync/outbound`:
+  after PLM success and on audit write failure, preserve the PLM-success
+  response to the caller.
 
-Author recommendation: **H1 fail-closed for `/audit/apply-result` only; H2
-fail-open for PLM-forwarding routes**.
+Under H2, the helper must emit exactly one minimal stderr line:
+
+```text
+[AUDIT_WRITE_FAILED] endpoint=<path> trace_id=<id> reason=<short>
+```
+
+The bearer token, request bodies, and PII must not appear in this line. This is
+the minimum operator-visibility seam until S6.5+ adds Serilog file logging per
+R3.2 design §5.6.
 
 Rationale:
 
@@ -276,8 +297,8 @@ Rationale:
   when audit persistence failed is incorrect.
 - `/diff/preview`, `/sync/inbound`, and `/sync/outbound` are PLM business calls;
   a local audit failure after a successful PLM response should not necessarily
-  mask the PLM result. However, the failure must be surfaced in a future logging
-  seam. Since S6 has no logging slice, reviewer ratification is required.
+  mask the PLM result. The stderr line prevents the failure from being invisible
+  before the later logging slice exists.
 
 ### 3.I Current drawing coupling
 
@@ -322,8 +343,33 @@ Existing constants used by S6:
 - `PLM_INBOUND_CONFLICT`;
 - `PLM_VALIDATION_FAILED`.
 
-No new HTTP status policy: S6 business errors remain helper envelope
-`200 OK` + `ok=false`. S4 HTTP-layer auth/origin errors remain 4xx.
+Ratified HTTP status policy: **Option B, the general helper-envelope rule wins
+for S6 business errors**.
+
+R3.2 design line 486 says business exceptions return helper envelope `200 OK` +
+`ok=false`, while HTTP-layer auth/origin errors use 4xx. R3.2 design line 633
+also names audit-specific 404/409 statuses for unknown or duplicate `pull_id`.
+S6 R1 intentionally resolves that contradiction in favor of the unified helper
+envelope:
+
+- `AUDIT_PULL_ID_UNKNOWN` -> HTTP 200 + `ok=false`;
+- `AUDIT_ALREADY_REPORTED` -> HTTP 200 + `ok=false`;
+- `AUDIT_PULL_ID_EXPIRED` -> HTTP 200 + `ok=false`;
+- `AUDIT_WRITE_FAILED` under H1 fail-closed -> HTTP 200 + `ok=false`.
+
+The 404/409 wording at design line 633 is obsolete for S6 R1. S4 HTTP-layer
+auth/origin errors remain 4xx.
+
+Accepted `/audit/apply-result` request outcome values:
+
+- `ok`;
+- `partial`;
+- `failed`;
+- `not-applied-display-only`.
+
+The SQLite `audit_events.outcome` column also permits `error` for helper-created
+audit-failure rows such as `AUDIT_WRITE_FAILED`; callers must not submit
+`outcome=error` to `/audit/apply-result`.
 
 ## 4. R1 Target Output
 
@@ -371,6 +417,13 @@ Source/drift guards:
   `/diagnostics/snapshot`, or `--reset-local-token`;
 - no server Python or AutoCAD plugin edits;
 - no token string in audit rows or helper responses.
+
+Test 15 must cover both arms of §3.H:
+
+- `/audit/apply-result` audit-write failure returns HTTP 200 + `ok=false` with
+  `AUDIT_WRITE_FAILED`;
+- a post-PLM audit-write failure for each H2 route returns the PLM-success
+  response and emits one sanitized `[AUDIT_WRITE_FAILED] ...` stderr line.
 
 ## 6. Verification Plan
 
