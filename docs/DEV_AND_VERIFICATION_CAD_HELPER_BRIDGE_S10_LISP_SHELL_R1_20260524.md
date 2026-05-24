@@ -77,7 +77,11 @@ correlation.
 sequence ratified in taskbook §3.C:
 
 1. prompt the user for `item_id` via `(getstring T "\nPLM item id: ")`;
-   empty input cancels and exits silently;
+   empty input cancels and writes one sanitized notice
+   `[YUANTUS_DIFF_PREVIEW] cancelled (no item id).` before returning
+   (intentional deviation from a fully-silent cancel: the brief notice
+   confirms the command actually executed so the operator does not
+   think the typed command was lost or misspelled);
 2. optionally prompt for `profile_id` via `(getstring T "\nProfile id
    (optional, blank to skip): ")`; empty input is permitted;
 3. read drawing context: `(getvar "DWGNAME")` + `(getvar "DWGPREFIX")`,

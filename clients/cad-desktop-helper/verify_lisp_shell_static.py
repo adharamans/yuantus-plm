@@ -457,6 +457,54 @@ def check_no_shell_out(source: str) -> None:
         )
 
 
+def check_json_escape_uses_loop_based_replace_all(source: str, source_no_comments: str) -> None:
+    # vl-string-subst replaces only the first occurrence per the Autodesk
+    # AutoLISP reference. A naive escape that called vl-string-subst twice
+    # would mishandle multi-backslash Windows DWGPREFIX paths. The .lsp
+    # must define a loop-based replace-all helper AND yuantus--json-escape
+    # must use it (not call vl-string-subst directly).
+    require(
+        "(defun yuantus--replace-all" in source_no_comments,
+        "Lisp shell must define a loop-based yuantus--replace-all helper for JSON escaping",
+    )
+    # The helper itself must use a (while ...) loop (or equivalent) — a
+    # one-shot vl-string-subst inside replace-all would defeat the point.
+    replace_all_match = re.search(
+        r"\(defun\s+yuantus--replace-all[^(]*?\((.*?)\n\)\s*$",
+        source_no_comments,
+        re.DOTALL | re.MULTILINE,
+    )
+    if replace_all_match is None:
+        # Fallback: look from defun header to next top-level defun.
+        start = source_no_comments.find("(defun yuantus--replace-all")
+        end = source_no_comments.find("(defun ", start + 1)
+        body = source_no_comments[start:end] if start >= 0 and end > start else ""
+    else:
+        body = replace_all_match.group(0)
+    require(
+        "(while" in body,
+        "yuantus--replace-all must use a (while ...) loop to handle every occurrence",
+    )
+    require(
+        "(vl-string-search" in body,
+        "yuantus--replace-all must advance via vl-string-search to avoid infinite loops on overlapping replacements",
+    )
+    # yuantus--json-escape must delegate to yuantus--replace-all and must
+    # NOT call vl-string-subst directly (which would mishandle multi-
+    # backslash paths).
+    escape_start = source_no_comments.find("(defun yuantus--json-escape")
+    escape_end = source_no_comments.find("(defun ", escape_start + 1)
+    escape_body = source_no_comments[escape_start:escape_end] if escape_start >= 0 else ""
+    require(
+        "yuantus--replace-all" in escape_body,
+        "yuantus--json-escape must delegate to yuantus--replace-all (not call vl-string-subst directly)",
+    )
+    require(
+        "(vl-string-subst" not in escape_body,
+        "yuantus--json-escape must not call (vl-string-subst ...) directly; vl-string-subst only replaces the first occurrence",
+    )
+
+
 def check_bridge_sources_unchanged_assumption() -> None:
     # Assertion-style: if the S9 bridge directory does not exist, we
     # cannot verify integrity. Otherwise the bridge SharedBridgeLocator
@@ -500,6 +548,7 @@ def main() -> int:
         ("no (open ... \"w\") / \"a\" write-mode in lsp", lambda: check_no_open_for_write(source)),
         ("no (startapp / (command shell-out in lsp", lambda: check_no_shell_out(source)),
         ("S9 bridge wiring files unchanged (SharedBridgeLocator / Transport)", check_bridge_sources_unchanged_assumption),
+        ("json escape uses loop-based replace-all (not one-shot vl-string-subst)", lambda: check_json_escape_uses_loop_based_replace_all(source, source_no_comments)),
     ]
 
     failures = []

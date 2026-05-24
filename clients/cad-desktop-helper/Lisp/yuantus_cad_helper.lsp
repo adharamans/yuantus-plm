@@ -42,16 +42,41 @@
 ;;; helper functions (yuantus--*)
 ;;; ============================================================
 
+;;; yuantus--replace-all: return s with EVERY occurrence of old replaced
+;;; by new. AutoLISP's vl-string-subst replaces only the first match
+;;; per the Autodesk AutoLISP reference, so a Windows DWGPREFIX like
+;;; "C:\\Users\\demo\\project\\" with multiple backslashes would only
+;;; have the first character escaped — producing invalid JSON. This
+;;; walks the source string from left to right with vl-string-search
+;;; advancing past each match, so it (a) replaces every occurrence and
+;;; (b) cannot infinite-loop when new contains old as a substring (the
+;;; cursor advances over the new copy, not the original old).
+(defun yuantus--replace-all (new old s / out start idx)
+  (setq out "")
+  (setq start 0)
+  (setq idx (vl-string-search old s start))
+  (while (not (null idx))
+    (setq out (strcat out (substr s (1+ start) (- idx start)) new))
+    (setq start (+ idx (strlen old)))
+    (setq idx (vl-string-search old s start))
+  )
+  (setq out (strcat out (substr s (1+ start))))
+  out
+)
+
+
 ;;; yuantus--json-escape: escape backslashes and double quotes in a string
 ;;; so it can be embedded inside a JSON string literal. Order matters:
-;;; backslashes first, then quotes.
+;;; backslashes first (so quote escapes added after are not themselves
+;;; re-escaped), then quotes. Uses yuantus--replace-all to handle every
+;;; occurrence; the one-shot vl-string-subst is insufficient.
 (defun yuantus--json-escape (s / out)
   (if (or (null s) (= (type s) 'INT) (= (type s) 'REAL))
     (setq out "")
     (setq out s)
   )
-  (setq out (vl-string-subst "\\\\" "\\" out))
-  (setq out (vl-string-subst "\\\"" "\"" out))
+  (setq out (yuantus--replace-all "\\\\" "\\" out))
+  (setq out (yuantus--replace-all "\\\"" "\"" out))
   out
 )
 
