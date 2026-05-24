@@ -175,8 +175,10 @@ S6 ratified contract. Static guard rejects any other outcome
 ## 3. Test Coverage
 
 `clients/cad-desktop-helper/verify_lisp_shell_static.py` implements the
-16 mandatory §5 checks plus the recommended drift guards. All 19
-checks pass locally:
+16 mandatory §5 checks plus the recommended drift guards (one extra
+guard `check_json_escape_uses_loop_based_replace_all` was added during
+the post-#634 external-review convergence to source-pin the
+loop-based escape helper). All 20 checks pass locally:
 
 1. lsp file exists at canonical path
 2. defines exactly one command c:yuantus_diff_preview
@@ -200,6 +202,11 @@ Plus recommended drift guards:
 17. no (open ... "w") / "a" write-mode in lsp
 18. no (startapp / (command shell-out in lsp
 19. S9 bridge wiring files unchanged (SharedBridgeLocator / Transport)
+20. json escape uses loop-based replace-all (not one-shot vl-string-subst)
+    — added post-#634 to source-pin the `yuantus--replace-all` loop helper
+    and reject bare `(vl-string-subst` inside `yuantus--json-escape`,
+    after the external reviewer caught that one-shot `vl-string-subst`
+    would mishandle multi-backslash Windows DWGPREFIX paths.
 
 The verifier is Lisp-aware: it strips line comments respecting string
 literals before counting structural tokens (so `(defun c:` in a
@@ -216,7 +223,7 @@ Local commands run on this workstation:
 python3 clients/cad-desktop-helper/verify_lisp_shell_static.py
 ```
 
-Result: `All 19 S10 Lisp shell static guards passed.`
+Result: `All 20 S10 Lisp shell static guards passed.`
 
 ```bash
 git diff --check
