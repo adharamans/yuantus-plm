@@ -226,6 +226,20 @@ rejected (loopback-only binding).
    point of this row is NOT to bypass the token gate — both headers
    are intentionally valid so the request reaches the origin gate.
 
+**Secret-handling (mandatory):**
+The `X-Yuantus-Local-Token` is a live DPAPI-protected credential.
+Never archive it. Specifically:
+- `curl -v` echoes the **request** headers it sends, so its raw output
+  contains the token. Before saving
+  `05_curl_rejected_origin_process_not_allowed.txt`, redact the header
+  value to `X-Yuantus-Local-Token: <REDACTED>`.
+- Discard the packet trace / debug-log capture used to obtain the
+  token in step 3 as soon as the value has been extracted; do not
+  include it in the evidence archive.
+- If the token may have been written to a shared location during
+  capture, rotate it afterward with the S7
+  `--reset-local-token` recovery path (§ Row 11 / install runbook §2).
+
 **Execution steps:**
 1. From an interactive `curl.exe` invocation on the same machine
    (Windows `cmd.exe` quoting shown; PowerShell users should adapt):
@@ -258,8 +272,10 @@ Simulate non-allowlisted process (use `curl.exe` to send the request
 directly) → `403 ORIGIN_PROCESS_NOT_ALLOWED`.
 
 **Evidence artifact:**
-- `05_curl_rejected_origin_process_not_allowed.txt` — full `curl -v`
-  output showing 403 + the structured error code.
+- `05_curl_rejected_origin_process_not_allowed.txt` — `curl -v` output
+  showing 403 + the structured error code, **with the
+  `X-Yuantus-Local-Token` header value redacted** per the
+  secret-handling note above.
 
 **Signoff:** operator: _____  date: _____  archive path: _____
 
@@ -474,9 +490,14 @@ S7.
 - Remote Desktop enabled on the workstation (for RDP leg).
 - All three transports must be exercised. The R3.2 design row
   enumerates only SSH and WinRM (design `:824`), but the S7 §4.1
-  deferred-signoff packet explicitly covers RDP as well (the S7
-  parent-process ancestry walk detects RDP-launched shells via the
-  `mstsc` / `RDPClip` ancestry + `RDP-Tcp#<n>` session-name prefix).
+  deferred-signoff packet explicitly covers RDP as well. Detection
+  differs per transport (verified against
+  `clients/cad-desktop-helper/Helper/HelperRuntime.cs`): SSH is caught
+  by the `SSH_CLIENT` / `SSH_CONNECTION` / `SSH_TTY` env signals plus
+  the `sshd.exe` parent-launcher walk; WinRM by the `wsmprovhost.exe` /
+  `winrshost.exe` parent-launcher walk; **RDP solely by the
+  `SESSIONNAME` prefix `RDP-Tcp` check (`HasRdpSessionName`)** — there
+  is no `mstsc` / `RDPClip` parent-process predicate.
 
 **Setup steps:**
 1. Confirm SSH, WinRM, and RDP are each configured to reach the
@@ -509,9 +530,9 @@ S7.
    %APPDATA%\YuantusPLM\helper\yuantus-cad-helper.exe --reset-local-token
    ```
 
-   Observe: same exit code 1 + same structured error. S7 detects RDP
-   by walking the parent-process chain (`mstsc` / `RDPClip` ancestor)
-   and by the `RDP-Tcp#<n>` `SESSIONNAME` prefix.
+   Observe: same exit code 1 + same structured error. S7 detects this
+   RDP session via the `SESSIONNAME` prefix `RDP-Tcp`
+   (`HasRdpSessionName`) — not via parent-process ancestry.
 
 **Expected observable outcome (verbatim from §2.3 row 11, extended to
 include RDP per S7 §4.1):**
