@@ -10,6 +10,23 @@ R3.2 ships a **documented install procedure only**; a real installer
 (MSI / signed bundle) is a separate future slice and is explicitly
 out of S11 scope.
 
+> **Automated install (installer slice).** A per-user, no-admin Inno
+> Setup installer now automates the manual steps below. Its source lives
+> at `clients/cad-desktop-helper/Installer/` (`YuantusCadHelper.iss` +
+> `pack.ps1`); the contract is the taskbook
+> `docs/DEVELOPMENT_CLAUDE_TASK_CAD_HELPER_BRIDGE_INSTALLER_20260524.md`
+> and the implementation record is
+> `docs/DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_INSTALLER_R1_20260524.md`.
+> The installer lays the same files to the same `%APPDATA%` paths this
+> runbook describes, writes a Yuantus Lisp startup stub (with a
+> `--skip-cad-config` opt-out) that a CAD host loads once the cad-bridge
+> folder is on its Support File Search Path, and supports uninstall/repair
+> that preserve the DPAPI token + `audit.db` + `install-id.json`. The
+> signed release is an owner-local build; CI produces an unsigned build.
+> **This manual runbook remains the fallback** — in particular, adding
+> the cad-bridge folder to each CAD host's Support path (step 3 below) is
+> still an operator step in R1; the installer does not auto-register it.
+
 ## 0. Required state on the workstation
 
 - Windows 10 or Windows 11 (x64). Acceptance evidence host baseline

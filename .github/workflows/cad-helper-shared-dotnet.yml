@@ -15,6 +15,7 @@ on:
       - "clients/cad-desktop-helper/verify_bridge_static.py"
       - "clients/cad-desktop-helper/Lisp/**"
       - "clients/cad-desktop-helper/verify_lisp_shell_static.py"
+      - "clients/cad-desktop-helper/Installer/**"
       - "clients/autocad-material-sync/**"
   push:
     branches:
@@ -32,6 +33,7 @@ on:
       - "clients/cad-desktop-helper/verify_bridge_static.py"
       - "clients/cad-desktop-helper/Lisp/**"
       - "clients/cad-desktop-helper/verify_lisp_shell_static.py"
+      - "clients/cad-desktop-helper/Installer/**"
       - "clients/autocad-material-sync/**"
   workflow_dispatch: {}
 
@@ -103,6 +105,9 @@ jobs:
 
       - name: Verify CAD helper Lisp shell static contracts
         run: python clients/cad-desktop-helper/verify_lisp_shell_static.py
+
+      - name: Verify CAD helper installer static contracts
+        run: python clients/cad-desktop-helper/Installer/verify_installer_static.py
 
       - name: Test AutoCAD material sync client contracts
         run: dotnet test clients/autocad-material-sync/CADDedupPlugin.Client.Tests/CADDedupPlugin.Client.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=cad-helper-material-sync-client.trx"
