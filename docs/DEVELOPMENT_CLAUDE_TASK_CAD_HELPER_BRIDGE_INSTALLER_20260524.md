@@ -90,11 +90,21 @@ helper / detector / bridge follow the same per-user pattern under
 ### 2.2 Runtime semantics the installer must respect
 
 - **DPAPI token bootstrap (S3):** the local-helper-token is written by
-  `LocalTokenBootstrapper` on the helper's **first launch**, under
-  `%APPDATA%\YuantusPLM\helper\`. The design `:1044` acceptance test 7
-  pins *"全新机器首次安装 helper，第一次 `PLMMATPULL` 不卡住，DPAPI
-  中 token 正确生成"*. The installer must NOT pre-create or pre-seed
-  this envelope.
+  `LocalTokenBootstrapper` on the helper's **first launch** to
+  `%APPDATA%\YuantusPLM\local-helper-token.dat` — at the **root** of
+  `%APPDATA%\YuantusPLM\`, NOT under the `helper\` subdir (see
+  `clients/cad-desktop-helper/Shared/Identity/Paths.cs:23`,
+  `LocalTokenFile = RootDirectory \ "local-helper-token.dat"`). The
+  design `:1044` acceptance test 7 pins *"全新机器首次安装 helper，第一次
+  `PLMMATPULL` 不卡住，DPAPI 中 token 正确生成"*. The installer must NOT
+  pre-create or pre-seed this envelope.
+- **Runtime-created files all sit at the `%APPDATA%\YuantusPLM\` root**
+  (per `Paths.cs`): `local-helper-token.dat` (`:23`), `audit.db`
+  (`HelperRuntime.cs:97`), `install-id.json` (`:18`), and
+  `helper-session-{sessionId}.json` (`:38`). Only the **binaries** live
+  in subdirs (`helper\` for the two `.exe`s, `cad-bridge\` for the
+  bridge DLL + `.lsp`). The §3.F preserve set names the root-level files
+  explicitly so the installer protects the correct paths.
 - **Spawn-on-demand + idle exit (S3):** the helper is started by a
   CAD-side caller (plugin / Lisp bridge), discovered via
   `%APPDATA%\YuantusPLM\helper-session-{sessionId}.json`, single-instance
@@ -167,9 +177,24 @@ introduce a dual-track install location.
 
 ### 3.B Signing — owner-local release; CI builds unsigned
 
-- The release installer must Authenticode-sign the three signable
-  binaries (`yuantus-cad-helper.exe`, `yuantus-cad-detector.exe`,
-  `YuantusCadHelperBridge.dll`) **and** the installer `.exe` itself.
+- The release installer must Authenticode-sign **every first-party
+  signable `.exe` / `.dll` the installer lays down**, **and** the
+  installer `.exe` itself. This is broader than the four top-level ship
+  artifacts: the CADDedup bundle's `Contents\` ships first-party
+  `CADDedupPlugin.dll` + `Yuantus.Cad.Shared.dll` (net46/net48 copies —
+  see `clients/autocad-material-sync/CADDedupPlugin/CADDedupPlugin.csproj:148-150`),
+  and a net6.0 self-contained helper/detector lays first-party managed
+  DLLs (e.g. the `Yuantus.Cad.Shared.dll` net6.0 copy) next to the
+  apphost `.exe`. All of these must be signed. The contract is
+  expressed as *"sign every first-party signable binary the installer
+  delivers"*, not an enumerated whitelist that drifts as the build
+  output changes.
+- **Third-party DLLs** the installer carries (e.g. `Newtonsoft.Json.dll`
+  in the bundle `Contents\`, the .NET runtime DLLs inside a
+  self-contained publish) are handled by **explicit owner policy** —
+  typically left with their upstream signatures, not re-signed. The
+  impl must state which third-party binaries it ships and whether they
+  are re-signed; this is an owner decision, not a default.
 - `yuantus_cad_helper.lsp` is plain-text AutoLISP and is **not**
   Authenticode-signable; the taskbook notes this explicitly so the
   impl does not attempt it. (Its integrity is covered by the signed
@@ -304,11 +329,16 @@ On uninstall (default) and repair (always), the installer must
 must treat everything else it did not itself lay down as
 preserve-by-default (default-deny on deletion of un-owned files):
 
-1. the DPAPI local-helper-token envelope (S3, under `helper\`);
-2. `audit.db` (S6 SQLite audit store);
-3. `install-id.json` (per-user-per-machine atomic id, design `:133`);
-4. `helper-session-{sessionId}.json` — never touched by the installer
-   at all (S3-owned lifecycle), neither created nor removed;
+1. `%APPDATA%\YuantusPLM\local-helper-token.dat` — the DPAPI
+   local-helper-token envelope (S3), at the **root**, not under
+   `helper\` (`Paths.cs:23`);
+2. `%APPDATA%\YuantusPLM\audit.db` — S6 SQLite audit store, at the
+   **root** (`HelperRuntime.cs:97`);
+3. `%APPDATA%\YuantusPLM\install-id.json` — per-user-per-machine atomic
+   id, at the **root** (design `:133`, `Paths.cs:18`);
+4. `%APPDATA%\YuantusPLM\helper-session-{sessionId}.json` — at the
+   **root** (`Paths.cs:38`); never touched by the installer at all
+   (S3-owned lifecycle), neither created nor removed;
 5. any `%APPDATA%\YuantusPLM\` file or subdirectory the installer did
    not itself create (forward-compatibility: a future slice may add
    user-side state such as a persisted `server_allowlist`; the
@@ -434,9 +464,17 @@ and pack scripts) at minimum:
 1. `PrivilegesRequired=lowest` is present (per-user, no-admin);
 2. no `HKLM` / `HKEY_LOCAL_MACHINE` write directive anywhere in the
    script;
-3. the helper / detector / bridge / lsp / bundle install paths exactly
-   match the §2.1 `%APPDATA%` targets (no Program Files, no
-   user-chosen `DefaultDirName` that relocates the helper);
+3. the helper / detector / bridge / lsp / bundle install paths are
+   pinned to the **Inno per-user constants** that expand to the §2.1
+   targets — i.e. `{userappdata}\YuantusPLM\...` for helper/detector
+   (`helper\`) + bridge/lsp (`cad-bridge\`), and
+   `{userappdata}\Autodesk\ApplicationPlugins\CADDedup.bundle\...` for
+   the bundle (or an explicitly equivalent Inno expansion). The guard
+   must **reject** a literal `%APPDATA%` string (Inno does not expand
+   env vars in `[Files]` destinations) and **reject** a relocatable
+   `DefaultDirName` / `{app}`-rooted layout that would move the helper
+   off its fixed spawn path (no Program Files, no `{commonpf}`, no
+   user-chosen install dir);
 4. the signing step is present **and** is guarded so it is skipped when
    no cert/`SignTool` is configured (CI builds unsigned) — pin both the
    presence of the sign step and the graceful-skip guard;
