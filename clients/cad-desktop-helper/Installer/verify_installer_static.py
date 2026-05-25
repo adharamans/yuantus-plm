@@ -331,6 +331,10 @@ def check_running_helper_uses_session_pid(code: str) -> None:
     require("taskkill" in code.lower(), "running-helper handling must taskkill the read pid")
     require('IMAGENAME eq yuantus-cad-helper.exe' in code,
             "taskkill must add an IMAGENAME filter so a reused pid with a different image is not killed")
+    require("tasklist" in code.lower() and "find /I" in code,
+            "running-helper handling must verify the pid against the live process table")
+    require("IsManagedHelperPidLive(Pid)" in code,
+            "running-helper post-kill verification must not re-read a stale session file as still-running")
     require("still running and could not be stopped" in code,
             "install must abort (not proceed) if a managed helper cannot be stopped")
     # source-pin: the session schema really carries pid (no runtime change needed)

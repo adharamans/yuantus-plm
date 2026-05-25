@@ -59,7 +59,10 @@ Plus:
   (the existing `HelperSessionDocument` schema —
   `clients/cad-desktop-helper/Helper/HelperRuntime.cs:410-453`,
   `[JsonProperty("pid")]` at `:421`), confirm the image path is the
-  helper we manage, prompt, then `taskkill /PID <pid> /F`. It never
+  helper we manage, verify that `pid` is still live via `tasklist`, prompt,
+  then `taskkill /PID <pid> /F`. Post-kill verification checks the live
+  process table again instead of re-reading the session file, because
+  `taskkill /F` can leave the S3-owned session file behind. It never
   blind-kills by image name and never deletes the session file (S3
   stale-clean owns it). **No runtime change was needed** — the schema
   already carries `pid`.

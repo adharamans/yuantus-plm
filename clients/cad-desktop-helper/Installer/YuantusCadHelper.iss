@@ -119,8 +119,9 @@ Type: filesandordirs; Name: "{userappdata}\Autodesk\ApplicationPlugins\CADDedup.
 { ----------------------------------------------------------------------- }
 { Running-helper handling (taskbook §3.E): read pid + image_path from the }
 { S3 session file at the %APPDATA%\YuantusPLM root, confirm the image_path }
-{ is the helper we manage, then prompt + taskkill that pid. We never      }
-{ delete the session file itself -- S3 stale-clean owns it.               }
+{ is the helper we manage, verify the pid is live, then prompt + taskkill  }
+{ that pid. We never delete the session file itself -- S3 stale-clean owns }
+{ it, and stale session files must not block install after a forced kill.  }
 { ----------------------------------------------------------------------- }
 
 function RootDir(): String;
@@ -190,8 +191,25 @@ begin
     Result := StrToIntDef(Digits, -1);
 end;
 
+function IsManagedHelperPidLive(Pid: Integer): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := False;
+  if Pid <= 0 then exit;
+
+  { Validate against the LIVE process table. This avoids treating a stale
+    helper-session-*.json as still-running after taskkill /F, while keeping
+    the same image-name guard used for the actual kill command. }
+  Exec(ExpandConstant('{sys}\cmd.exe'),
+       '/C tasklist /FI "PID eq ' + IntToStr(Pid) + '" /FI "IMAGENAME eq yuantus-cad-helper.exe" /NH | find /I "yuantus-cad-helper.exe" >NUL',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := (ResultCode = 0);
+end;
+
 { Find a running helper via any helper-session-*.json at the root whose
-  image_path matches the helper we manage; return its pid, else -1. }
+  image_path matches the helper we manage AND whose pid is live; return its
+  pid, else -1. }
 function FindRunningHelperPid(): Integer;
 var
   FindRec: TFindRec;
@@ -214,7 +232,7 @@ begin
           if (ImagePath <> '') and (CompareText(ImagePath, ManagedHelperExe()) = 0) then
           begin
             Pid := JsonInt(Content, 'pid');
-            if Pid > 0 then
+            if (Pid > 0) and IsManagedHelperPidLive(Pid) then
             begin
               Result := Pid;
               exit;
@@ -256,7 +274,7 @@ begin
        '/FI "PID eq ' + IntToStr(Pid) + '" /FI "IMAGENAME eq yuantus-cad-helper.exe" /F',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(500);
-  Result := (FindRunningHelperPid() <= 0);
+  Result := not IsManagedHelperPidLive(Pid);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
