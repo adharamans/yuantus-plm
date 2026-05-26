@@ -2184,6 +2184,7 @@ namespace Yuantus.Cad.Helper
             string traceId,
             byte[] fileContent,
             string fileName,
+            IDictionary<string, string> formFields,
             CancellationToken cancellationToken);
     }
 
@@ -2268,6 +2269,7 @@ namespace Yuantus.Cad.Helper
             string traceId,
             byte[] fileContent,
             string fileName,
+            IDictionary<string, string> formFields,
             CancellationToken cancellationToken)
         {
             var endpoint = new Uri(serverUri.ToString().TrimEnd('/') + endpointPath);
@@ -2282,6 +2284,13 @@ namespace Yuantus.Cad.Helper
                     var fileField = new ByteArrayContent(fileContent ?? new byte[0]);
                     fileField.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
                     content.Add(fileField, "file", string.IsNullOrEmpty(fileName) ? "upload.bin" : fileName);
+                    if (formFields != null)
+                    {
+                        foreach (var field in formFields)
+                        {
+                            content.Add(new StringContent(field.Value ?? string.Empty), field.Key);
+                        }
+                    }
                     request.Content = content;
 
                     using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
@@ -2854,7 +2863,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             }
 
             var endpointPath = "/cad/" + Uri.EscapeDataString(itemId) + "/checkin";
-            var response = await _plm.PostMultipartAsync(serverUri, endpointPath, bearer, NewTraceId(), fileContent, fileName, cancellationToken).ConfigureAwait(false);
+            var response = await _plm.PostMultipartAsync(serverUri, endpointPath, bearer, NewTraceId(), fileContent, fileName, null, cancellationToken).ConfigureAwait(false);
 
             if (!response.Ok && string.Equals(response.Code, ErrorCodes.QuotaExceeded, StringComparison.Ordinal))
             {
@@ -2872,6 +2881,84 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                 data["quota_warning"] = response.QuotaWarning;
             }
             return HelperRouteResult.Success(data);
+        }
+
+        // G1-C: BOM-from-assembly via Path A — forward the saved file to the async
+        // backend /cad/import with create_bom_job=true; the server extracts the BOM
+        // (no client tree/walker). Returns file_id + the cad_bom job handle so the
+        // client polls GET /api/v1/cad/files/{file_id}/bom. Root-item policy (§4.A):
+        // forward item_id when present, else auto_create_part=true.
+        public async Task<HelperRouteResult> DocumentBomImportAsync(
+            string itemId, byte[] fileContent, string fileName, CancellationToken cancellationToken)
+        {
+            if (fileContent == null || fileContent.Length == 0)
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "file is required.");
+            }
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "filename is required.");
+            }
+
+            Uri serverUri;
+            string bearer;
+            var sessionError = TryReadSession(out serverUri, out bearer);
+            if (sessionError != null)
+            {
+                return sessionError;
+            }
+
+            var formFields = new Dictionary<string, string> { ["create_bom_job"] = "true" };
+            if (!string.IsNullOrWhiteSpace(itemId))
+            {
+                formFields["item_id"] = itemId;
+            }
+            else
+            {
+                formFields["auto_create_part"] = "true";
+            }
+
+            var response = await _plm.PostMultipartAsync(serverUri, "/cad/import", bearer, NewTraceId(), fileContent, fileName, formFields, cancellationToken).ConfigureAwait(false);
+            if (!response.Ok)
+            {
+                return ToRouteResult(response);
+            }
+
+            var importData = response.Data as JObject ?? new JObject();
+            var cadBomJob = SelectCadBomJob(importData["jobs"] as JArray);
+            if (cadBomJob == null)
+            {
+                return HelperRouteResult.Error(ErrorCodes.PlmValidationFailed, "PLM /cad/import did not return a cad_bom job.");
+            }
+
+            var data = new JObject
+            {
+                ["file_id"] = importData.Value<string>("file_id"),
+                ["job"] = cadBomJob
+            };
+            var cadBomUrl = importData["cad_bom_url"];
+            if (cadBomUrl != null && cadBomUrl.Type != JTokenType.Null)
+            {
+                data["cad_bom_url"] = cadBomUrl;
+            }
+            return HelperRouteResult.Success(data);
+        }
+
+        private static JObject SelectCadBomJob(JArray jobs)
+        {
+            if (jobs == null)
+            {
+                return null;
+            }
+            foreach (var job in jobs)
+            {
+                var jobObj = job as JObject;
+                if (jobObj != null && string.Equals(jobObj.Value<string>("task_type"), "cad_bom", StringComparison.Ordinal))
+                {
+                    return (JObject)jobObj.DeepClone();
+                }
+            }
+            return null;
         }
 
         public HelperRouteResult ApplyResult(JObject request)
@@ -3362,6 +3449,35 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                 }
                 await HelperRouteResponse
                     .WriteAsync(context, await businessAuditService.DocumentCheckinAsync(itemId, fileContent, fileName, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/document/bom-import", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                if (!context.Request.HasFormContentType)
+                {
+                    await HelperRouteResponse
+                        .WriteAsync(context, HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "multipart/form-data is required."), cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                }
+                var form = await context.Request.ReadFormAsync(cancellationToken).ConfigureAwait(false);
+                var itemId = form["item_id"].ToString();
+                var file = form.Files.GetFile("file") ?? (form.Files.Count > 0 ? form.Files[0] : null);
+                byte[] fileContent = null;
+                string fileName = null;
+                if (file != null)
+                {
+                    using (var ms = new MemoryStream())
+                    {
+                        await file.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+                        fileContent = ms.ToArray();
+                    }
+                    fileName = file.FileName;
+                }
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.DocumentBomImportAsync(itemId, fileContent, fileName, cancellationToken).ConfigureAwait(false), cancellationToken)
                     .ConfigureAwait(false);
             });
 

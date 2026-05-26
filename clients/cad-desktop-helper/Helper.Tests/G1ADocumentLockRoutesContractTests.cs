@@ -166,7 +166,7 @@ namespace Yuantus.Cad.Helper.Tests
                 return Task.FromResult(Response);
             }
 
-            public Task<PlmBusinessResponse> PostMultipartAsync(Uri serverUri, string endpointPath, string bearerToken, string traceId, byte[] fileContent, string fileName, CancellationToken cancellationToken)
+            public Task<PlmBusinessResponse> PostMultipartAsync(Uri serverUri, string endpointPath, string bearerToken, string traceId, byte[] fileContent, string fileName, IDictionary<string, string> formFields, CancellationToken cancellationToken)
             {
                 return Task.FromResult(Response);
             }

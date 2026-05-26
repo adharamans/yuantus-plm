@@ -308,7 +308,7 @@ namespace Yuantus.Cad.Helper.Tests
         {
             var sources = ReadHelperSources();
 
-            Assert.Equal(14, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Equal(15, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.Contains("MapGet(\"/healthz\"", sources);
             Assert.Contains("MapGet(\"/version\"", sources);
             Assert.Contains("MapPost(\"/session/login\"", sources);
@@ -323,6 +323,7 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/document/undo-checkout\"", sources);
             Assert.Contains("MapPost(\"/document/status\"", sources);
             Assert.Contains("MapPost(\"/document/checkin\"", sources);
+            Assert.Contains("MapPost(\"/document/bom-import\"", sources);
             Assert.Contains("audit_events", sources);
             Assert.Contains("SqliteAuditEventStore", sources);
             Assert.Contains("HelperBusinessAuditService", sources);
