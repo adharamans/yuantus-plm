@@ -35,7 +35,8 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/document/checkout\"", sources);
             Assert.Contains("MapPost(\"/document/undo-checkout\"", sources);
             Assert.Contains("MapPost(\"/document/status\"", sources);
-            Assert.Equal(13, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Contains("MapPost(\"/document/checkin\"", sources);
+            Assert.Equal(14, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
             Assert.DoesNotContain("MapPatch(", sources);
@@ -604,6 +605,11 @@ namespace Yuantus.Cad.Helper.Tests
                     ProtocolVersion = Paths.ProtocolVersion,
                     Payload = new JObject()
                 });
+                return Task.FromResult(Response);
+            }
+
+            public Task<PlmBusinessResponse> PostMultipartAsync(Uri serverUri, string endpointPath, string bearerToken, string traceId, byte[] fileContent, string fileName, CancellationToken cancellationToken)
+            {
                 return Task.FromResult(Response);
             }
         }

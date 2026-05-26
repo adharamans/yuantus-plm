@@ -19,10 +19,11 @@ namespace CADDedupPlugin.Client.Tests
         {
             var helper = ReadRepoFile("clients/cad-desktop-helper/Helper/HelperRuntime.cs");
 
-            Assert.Equal(13, Count(helper, "MapGet(") + Count(helper, "MapPost("));
+            Assert.Equal(14, Count(helper, "MapGet(") + Count(helper, "MapPost("));
             Assert.Contains("MapPost(\"/document/checkout\"", helper);
             Assert.Contains("MapPost(\"/document/undo-checkout\"", helper);
             Assert.Contains("MapPost(\"/document/status\"", helper);
+            Assert.Contains("MapPost(\"/document/checkin\"", helper);
             Assert.DoesNotContain("MapPost(\"/dedup/check\"", helper);
         }
 

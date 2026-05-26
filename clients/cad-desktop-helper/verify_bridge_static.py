@@ -160,16 +160,47 @@ def check_no_business_logic(bridge_sources: str) -> None:
         )
 
 
-def check_helper_route_count_after_g1a() -> None:
+def check_helper_route_count_after_g1b() -> None:
     helper_sources = gather_sources(HELPER)
     map_count = helper_sources.count("MapGet(") + helper_sources.count("MapPost(")
     require(
-        map_count == 13,
-        f"Helper production routes must be exactly 13 after G1-A (10 base + 3 document lock routes); got {map_count}",
+        map_count == 14,
+        f"Helper production routes must be exactly 14 after G1-B (G1-A 13 + /document/checkin); got {map_count}",
     )
     bridge_sources = gather_sources(BRIDGE)
     for verb in ("MapGet(", "MapPost(", "MapPut(", "MapDelete("):
         require(verb not in bridge_sources, f"Bridge must not declare {verb} routes")
+
+
+def check_g1b_document_checkin_does_not_read_local_filesystem() -> None:
+    helper = read(HELPER / "HelperRuntime.cs")
+    marker = 'app.MapPost("/document/checkin"'
+    start = helper.find(marker)
+    require(start >= 0, "G1-B helper route /document/checkin must be registered")
+    end = helper.find("\n            });", start)
+    require(end >= 0, "G1-B helper route /document/checkin block must be parseable")
+    route_block = helper[start:end]
+
+    require("ReadFormAsync" in route_block, "G1-B checkin route must read multipart form bytes")
+    require("CopyToAsync" in route_block, "G1-B checkin route must copy uploaded file bytes")
+    forbidden = (
+        "File.OpenRead",
+        "File.ReadAllBytes",
+        "File.ReadAllText",
+        "File.Open(",
+        "new FileStream",
+        "Path.GetFullPath",
+        "Path.Combine",
+        "Directory.",
+        "FileInfo",
+        'form["path"]',
+        'form["file_path"]',
+    )
+    for token in forbidden:
+        require(
+            token not in route_block,
+            f"G1-B /document/checkin must not read local filesystem or accept a file path; found {token!r}",
+        )
 
 
 def check_no_s10_lisp_command_files() -> None:
@@ -212,7 +243,8 @@ def main() -> int:
         ("EndpointValidator rejects absolute schemes / network paths / backslash / percent / control chars", lambda: check_no_absolute_scheme_forwarding(bridge_sources)),
         ("production wiring reaches Shared HelperLocator / HelperTransport (M1 convergence)", check_wiring_reaches_shared_helper_locator_and_transport),
         ("no business / UI / DWG-mutation logic in bridge", lambda: check_no_business_logic(bridge_sources)),
-        ("helper route count is 13 after G1-A", check_helper_route_count_after_g1a),
+        ("helper route count is 14 after G1-B", check_helper_route_count_after_g1b),
+        ("G1-B document checkin uses multipart bytes, not local file reads", check_g1b_document_checkin_does_not_read_local_filesystem),
         ("no S10 Lisp shell command files", check_no_s10_lisp_command_files),
         ("sync wrapper uses .GetAwaiter().GetResult()", lambda: check_sync_wrapper_pattern(bridge_sources)),
         ("DEV/Verification MD records deferred NETLOAD / CAD writer signoff", check_deferred_signoff_recorded),

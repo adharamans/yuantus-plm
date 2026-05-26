@@ -1302,12 +1302,13 @@ namespace Yuantus.Cad.Helper
 
     public sealed class HelperRouteResult
     {
-        private HelperRouteResult(bool ok, object data, string code, string message)
+        private HelperRouteResult(bool ok, object data, string code, string message, Dictionary<string, object> details)
         {
             Ok = ok;
             Data = data;
             Code = code;
             Message = message;
+            Details = details;
         }
 
         public bool Ok { get; private set; }
@@ -1315,14 +1316,23 @@ namespace Yuantus.Cad.Helper
         public string Code { get; private set; }
         public string Message { get; private set; }
 
+        // G1-B: optional error details (e.g. {"quota": ...}). Null for existing
+        // errors, which keeps error.details serialized as {} (HelperRouteResponse).
+        public Dictionary<string, object> Details { get; private set; }
+
         public static HelperRouteResult Success(object data)
         {
-            return new HelperRouteResult(true, data, null, null);
+            return new HelperRouteResult(true, data, null, null, null);
         }
 
         public static HelperRouteResult Error(string code, string message)
         {
-            return new HelperRouteResult(false, null, code, message);
+            return new HelperRouteResult(false, null, code, message, null);
+        }
+
+        public static HelperRouteResult Error(string code, string message, Dictionary<string, object> details)
+        {
+            return new HelperRouteResult(false, null, code, message, details);
         }
     }
 
@@ -1341,7 +1351,7 @@ namespace Yuantus.Cad.Helper
                     Code = result.Code,
                     Message = result.Message,
                     Retryable = false,
-                    Details = new Dictionary<string, object>()
+                    Details = result.Details ?? new Dictionary<string, object>()
                 }
             };
             return context.Response.WriteAsync(JsonConvert.SerializeObject(envelope), cancellationToken);
@@ -1358,7 +1368,7 @@ namespace Yuantus.Cad.Helper
                     Code = result.Code,
                     Message = result.Message,
                     Retryable = false,
-                    Details = new Dictionary<string, object>()
+                    Details = result.Details ?? new Dictionary<string, object>()
                 }
             };
             return JsonConvert.SerializeObject(envelope);
@@ -2104,12 +2114,14 @@ namespace Yuantus.Cad.Helper
 
     public sealed class PlmBusinessResponse
     {
-        private PlmBusinessResponse(bool ok, JToken data, string code, string message)
+        private PlmBusinessResponse(bool ok, JToken data, string code, string message, JToken details, string quotaWarning)
         {
             Ok = ok;
             Data = data;
             Code = code;
             Message = message;
+            Details = details;
+            QuotaWarning = quotaWarning;
         }
 
         public bool Ok { get; private set; }
@@ -2117,14 +2129,30 @@ namespace Yuantus.Cad.Helper
         public string Code { get; private set; }
         public string Message { get; private set; }
 
+        // G1-B quota metadata: Details carries the hard-quota payload (429),
+        // QuotaWarning carries the soft-quota X-Quota-Warning header. Both null
+        // for all non-checkin responses.
+        public JToken Details { get; private set; }
+        public string QuotaWarning { get; private set; }
+
         public static PlmBusinessResponse Success(JToken data)
         {
-            return new PlmBusinessResponse(true, data, null, null);
+            return new PlmBusinessResponse(true, data, null, null, null, null);
+        }
+
+        public static PlmBusinessResponse Success(JToken data, string quotaWarning)
+        {
+            return new PlmBusinessResponse(true, data, null, null, null, quotaWarning);
         }
 
         public static PlmBusinessResponse Error(string code, string message)
         {
-            return new PlmBusinessResponse(false, null, code, message);
+            return new PlmBusinessResponse(false, null, code, message, null, null);
+        }
+
+        public static PlmBusinessResponse Error(string code, string message, JToken details)
+        {
+            return new PlmBusinessResponse(false, null, code, message, details, null);
         }
     }
 
@@ -2145,6 +2173,17 @@ namespace Yuantus.Cad.Helper
             string endpointPath,
             string bearerToken,
             string traceId,
+            CancellationToken cancellationToken);
+
+        // G1-B: multipart upload seam (PostAsync/GetAsync cannot carry a file)
+        // so /document/checkin can forward the already-saved file to the backend.
+        Task<PlmBusinessResponse> PostMultipartAsync(
+            Uri serverUri,
+            string endpointPath,
+            string bearerToken,
+            string traceId,
+            byte[] fileContent,
+            string fileName,
             CancellationToken cancellationToken);
     }
 
@@ -2220,6 +2259,84 @@ namespace Yuantus.Cad.Helper
                     return ParsePlmBody(endpointPath, body);
                 }
             }
+        }
+
+        public async Task<PlmBusinessResponse> PostMultipartAsync(
+            Uri serverUri,
+            string endpointPath,
+            string bearerToken,
+            string traceId,
+            byte[] fileContent,
+            string fileName,
+            CancellationToken cancellationToken)
+        {
+            var endpoint = new Uri(serverUri.ToString().TrimEnd('/') + endpointPath);
+            using (var request = new HttpRequestMessage(HttpMethod.Post, endpoint))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+                request.Headers.TryAddWithoutValidation("X-Yuantus-Protocol", Paths.ProtocolVersion);
+                request.Headers.TryAddWithoutValidation("X-Yuantus-Trace-Id", traceId);
+
+                using (var content = new MultipartFormDataContent())
+                {
+                    var fileField = new ByteArrayContent(fileContent ?? new byte[0]);
+                    fileField.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                    content.Add(fileField, "file", string.IsNullOrEmpty(fileName) ? "upload.bin" : fileName);
+                    request.Content = content;
+
+                    using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+                    {
+                        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+                        {
+                            return PlmBusinessResponse.Error(ErrorCodes.AuthPlmNotLoggedIn, "PLM session is not authorized.");
+                        }
+                        if ((int)response.StatusCode == 429)
+                        {
+                            JToken detail = null;
+                            try
+                            {
+                                detail = JObject.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body)["detail"];
+                            }
+                            catch (JsonException)
+                            {
+                                detail = null;
+                            }
+                            var detailObj = detail as JObject;
+                            if (detailObj != null && string.Equals(detailObj.Value<string>("code"), ErrorCodes.QuotaExceeded, StringComparison.Ordinal))
+                            {
+                                return PlmBusinessResponse.Error(ErrorCodes.QuotaExceeded, "PLM checkin denied by quota.", detailObj);
+                            }
+                            return PlmBusinessResponse.Error(ErrorCodes.PlmValidationFailed, "PLM request failed with HTTP 429.");
+                        }
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            return PlmBusinessResponse.Error(ErrorCodes.PlmValidationFailed, "PLM request failed with HTTP " + (int)response.StatusCode + ".");
+                        }
+                        var parsed = ParsePlmBody(endpointPath, body);
+                        var warning = ReadQuotaWarning(response);
+                        if (parsed.Ok && warning != null)
+                        {
+                            return PlmBusinessResponse.Success(parsed.Data, warning);
+                        }
+                        return parsed;
+                    }
+                }
+            }
+        }
+
+        private static string ReadQuotaWarning(HttpResponseMessage response)
+        {
+            IEnumerable<string> values;
+            if (response.Headers.TryGetValues("X-Quota-Warning", out values) && values != null)
+            {
+                return string.Join("; ", values);
+            }
+            if (response.Content != null && response.Content.Headers.TryGetValues("X-Quota-Warning", out values) && values != null)
+            {
+                return string.Join("; ", values);
+            }
+            return null;
         }
 
         private static PlmBusinessResponse ParsePlmBody(string endpointPath, string body)
@@ -2707,6 +2824,56 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             return ToRouteResult(response);
         }
 
+        // G1-B: multipart checkin proxy. Uploads the already-saved file bytes to
+        // the backend; validation + uniform session gate + error mapping only (no
+        // audit, taskbook 3.B). Quota rides inside the fixed-200 envelope: hard
+        // 429 QUOTA_EXCEEDED -> ok=false + error.details.quota; soft
+        // X-Quota-Warning -> ok=true + data.quota_warning.
+        public async Task<HelperRouteResult> DocumentCheckinAsync(
+            string itemId, byte[] fileContent, string fileName, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "item_id is required.");
+            }
+            if (fileContent == null || fileContent.Length == 0)
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "file is required.");
+            }
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "filename is required.");
+            }
+
+            Uri serverUri;
+            string bearer;
+            var sessionError = TryReadSession(out serverUri, out bearer);
+            if (sessionError != null)
+            {
+                return sessionError;
+            }
+
+            var endpointPath = "/cad/" + Uri.EscapeDataString(itemId) + "/checkin";
+            var response = await _plm.PostMultipartAsync(serverUri, endpointPath, bearer, NewTraceId(), fileContent, fileName, cancellationToken).ConfigureAwait(false);
+
+            if (!response.Ok && string.Equals(response.Code, ErrorCodes.QuotaExceeded, StringComparison.Ordinal))
+            {
+                var details = new Dictionary<string, object> { ["quota"] = response.Details };
+                return HelperRouteResult.Error(ErrorCodes.QuotaExceeded, response.Message, details);
+            }
+            if (!response.Ok)
+            {
+                return ToRouteResult(response);
+            }
+
+            var data = response.Data as JObject ?? new JObject();
+            if (!string.IsNullOrEmpty(response.QuotaWarning))
+            {
+                data["quota_warning"] = response.QuotaWarning;
+            }
+            return HelperRouteResult.Success(data);
+        }
+
         public HelperRouteResult ApplyResult(JObject request)
         {
             var traceId = NewTraceId();
@@ -3166,6 +3333,35 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                 var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
                 await HelperRouteResponse
                     .WriteAsync(context, await businessAuditService.DocumentStatusAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/document/checkin", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                if (!context.Request.HasFormContentType)
+                {
+                    await HelperRouteResponse
+                        .WriteAsync(context, HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "multipart/form-data is required."), cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                }
+                var form = await context.Request.ReadFormAsync(cancellationToken).ConfigureAwait(false);
+                var itemId = form["item_id"].ToString();
+                var file = form.Files.GetFile("file") ?? (form.Files.Count > 0 ? form.Files[0] : null);
+                byte[] fileContent = null;
+                string fileName = null;
+                if (file != null)
+                {
+                    using (var ms = new MemoryStream())
+                    {
+                        await file.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+                        fileContent = ms.ToArray();
+                    }
+                    fileName = file.FileName;
+                }
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.DocumentCheckinAsync(itemId, fileContent, fileName, cancellationToken).ConfigureAwait(false), cancellationToken)
                     .ConfigureAwait(false);
             });
 

@@ -27,5 +27,6 @@ namespace Yuantus.Cad.Shared.Transport
         public const string PlmInboundConflict = "PLM_INBOUND_CONFLICT";
         public const string ProtoVersionUnsupported = "PROTO_VERSION_UNSUPPORTED";
         public const string HelperInputValidationFailed = "HELPER_INPUT_VALIDATION_FAILED";
+        public const string QuotaExceeded = "QUOTA_EXCEEDED";
     }
 }

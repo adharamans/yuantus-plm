@@ -301,7 +301,8 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/document/checkout\"", sources);
             Assert.Contains("MapPost(\"/document/undo-checkout\"", sources);
             Assert.Contains("MapPost(\"/document/status\"", sources);
-            Assert.Equal(13, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Contains("MapPost(\"/document/checkin\"", sources);
+            Assert.Equal(14, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
             Assert.DoesNotContain("MapPatch(", sources);

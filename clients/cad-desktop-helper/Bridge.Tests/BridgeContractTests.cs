@@ -310,10 +310,11 @@ namespace Yuantus.Cad.Bridge.Tests
             var bridgeSources = ReadBridgeSources();
 
             var mapCount = CountOccurrences(helperSources, "MapGet(") + CountOccurrences(helperSources, "MapPost(");
-            Assert.Equal(13, mapCount);
+            Assert.Equal(14, mapCount);
             Assert.Contains("MapPost(\"/document/checkout\"", helperSources);
             Assert.Contains("MapPost(\"/document/undo-checkout\"", helperSources);
             Assert.Contains("MapPost(\"/document/status\"", helperSources);
+            Assert.Contains("MapPost(\"/document/checkin\"", helperSources);
 
             Assert.DoesNotContain("MapGet(", bridgeSources);
             Assert.DoesNotContain("MapPost(", bridgeSources);
