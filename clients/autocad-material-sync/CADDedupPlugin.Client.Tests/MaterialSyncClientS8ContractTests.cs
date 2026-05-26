@@ -15,11 +15,14 @@ namespace CADDedupPlugin.Client.Tests
     public sealed class MaterialSyncClientS8ContractTests
     {
         [Fact]
-        public void test_s8_preserves_helper_route_count_at_ten_and_adds_no_dedup_route()
+        public void test_s8_preserves_no_dedup_route_while_helper_has_g1a_document_routes()
         {
             var helper = ReadRepoFile("clients/cad-desktop-helper/Helper/HelperRuntime.cs");
 
-            Assert.Equal(10, Count(helper, "MapGet(") + Count(helper, "MapPost("));
+            Assert.Equal(13, Count(helper, "MapGet(") + Count(helper, "MapPost("));
+            Assert.Contains("MapPost(\"/document/checkout\"", helper);
+            Assert.Contains("MapPost(\"/document/undo-checkout\"", helper);
+            Assert.Contains("MapPost(\"/document/status\"", helper);
             Assert.DoesNotContain("MapPost(\"/dedup/check\"", helper);
         }
 

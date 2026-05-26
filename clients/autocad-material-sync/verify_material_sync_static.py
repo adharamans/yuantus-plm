@@ -231,7 +231,9 @@ def check_s8_helper_bridge_contract() -> None:
     require("/api/dedup/check" in dedup, "DedupApiClient.CheckDuplicateAsync should remain legacy direct in S8-R1")
     require("HelperTransport" not in dedup, "DedupApiClient should not migrate to helper in S8-R1")
     require('MapPost("/dedup/check"' not in helper, "S8-R1 must not add helper /dedup/check")
-    require(helper.count("MapGet(") + helper.count("MapPost(") == 10, "helper route count should remain 10 after S8-R1")
+    require(helper.count("MapGet(") + helper.count("MapPost(") == 13, "helper route count should be 13 after G1-A (10 base + 3 document lock routes)")
+    for _doc_route in ('MapPost("/document/checkout"', 'MapPost("/document/undo-checkout"', 'MapPost("/document/status"'):
+        require(_doc_route in helper, f"G1-A helper must register {_doc_route}")
 
     require("ReportApplyResultSafely" in plugin, "PLMMATPULL should report apply-result after write attempt")
     require('"ok"' in plugin and '"failed"' in plugin, "PLMMATPULL should report both ok and failed apply-result outcomes")

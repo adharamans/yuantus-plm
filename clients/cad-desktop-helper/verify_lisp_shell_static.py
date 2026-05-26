@@ -334,7 +334,7 @@ def check_supports_zwcad_and_gstarcad_via_program_sniff_or_shared_source(source:
     )
 
 
-def check_does_not_add_helper_server_routes_route_count_stays_ten() -> None:
+def check_helper_server_route_count_after_g1a() -> None:
     if not HELPER.exists():
         return
     helper_sources = []
@@ -345,8 +345,8 @@ def check_does_not_add_helper_server_routes_route_count_stays_ten() -> None:
     helper_text = "\n".join(helper_sources)
     map_count = helper_text.count("MapGet(") + helper_text.count("MapPost(")
     require(
-        map_count == 10,
-        f"Helper production routes must remain exactly 10 after S10; got {map_count}",
+        map_count == 13,
+        f"Helper production routes must be exactly 13 after G1-A (10 base + 3 document lock routes); got {map_count}",
     )
 
 
@@ -538,7 +538,7 @@ def main() -> int:
         ("user output uses (princ) only; no modal dialogs", lambda: check_lsp_user_output_uses_princ_only_no_modal_dialogs(source)),
         ("(null response) guards /audit/apply-result after /diff/preview", lambda: check_lsp_handles_nil_from_helper_call_without_calling_audit_apply_result(source, source_no_comments)),
         ("supports ZWCAD + GstarCAD via PROGRAM sniff in shared source", lambda: check_supports_zwcad_and_gstarcad_via_program_sniff_or_shared_source(source)),
-        ("helper production routes still exactly 10", check_does_not_add_helper_server_routes_route_count_stays_ten),
+        ("helper production routes are exactly 13 after G1-A", check_helper_server_route_count_after_g1a),
         ("no S11 integration or other Lisp commands", lambda: check_does_not_add_s11_integration_or_other_lisp_commands(source)),
         ("workflow runs verify_lisp_shell_static.py", check_workflow_runs_lisp_shell_static_verifier),
         ("static verifier mentions DWG mutation + direct HTTP danger tokens", check_static_verifier_rejects_dwg_mutation_and_direct_http_intent),

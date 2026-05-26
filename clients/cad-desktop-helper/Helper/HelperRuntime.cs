@@ -2137,6 +2137,15 @@ namespace Yuantus.Cad.Helper
             string traceId,
             JObject payload,
             CancellationToken cancellationToken);
+
+        // G1-A: GET forwarding seam (no body) so /document/status can proxy the
+        // backend GET /cad/{item_id}/checkin-status without verb/body drift.
+        Task<PlmBusinessResponse> GetAsync(
+            Uri serverUri,
+            string endpointPath,
+            string bearerToken,
+            string traceId,
+            CancellationToken cancellationToken);
     }
 
     public sealed class HttpPlmBusinessClient : IPlmBusinessClient
@@ -2166,6 +2175,36 @@ namespace Yuantus.Cad.Helper
                     JsonConvert.SerializeObject(payload ?? new JObject()),
                     Encoding.UTF8,
                     "application/json");
+
+                using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+                {
+                    var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+                    {
+                        return PlmBusinessResponse.Error(ErrorCodes.AuthPlmNotLoggedIn, "PLM session is not authorized.");
+                    }
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        return PlmBusinessResponse.Error(ErrorCodes.PlmValidationFailed, "PLM request failed with HTTP " + (int)response.StatusCode + ".");
+                    }
+                    return ParsePlmBody(endpointPath, body);
+                }
+            }
+        }
+
+        public async Task<PlmBusinessResponse> GetAsync(
+            Uri serverUri,
+            string endpointPath,
+            string bearerToken,
+            string traceId,
+            CancellationToken cancellationToken)
+        {
+            var endpoint = new Uri(serverUri.ToString().TrimEnd('/') + endpointPath);
+            using (var request = new HttpRequestMessage(HttpMethod.Get, endpoint))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+                request.Headers.TryAddWithoutValidation("X-Yuantus-Protocol", Paths.ProtocolVersion);
+                request.Headers.TryAddWithoutValidation("X-Yuantus-Trace-Id", traceId);
 
                 using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
                 {
@@ -2608,6 +2647,66 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
             return ForwardBusinessAsync("/sync/outbound", SyncOutboundEndpoint, request, cancellationToken);
         }
 
+        // G1-A document lock routes. Pure proxy to existing backend primitives:
+        // request shaping + the existing error mapping only (taskbook 3.B). No
+        // audit (intentionally out of G1-A scope per 3.B; lock-audit vocabulary is
+        // a separate follow-up). All three require an active PLM session via
+        // TryReadSession, which short-circuits BEFORE any backend call when the
+        // session/bearer is missing.
+        public async Task<HelperRouteResult> DocumentCheckoutAsync(JObject request, CancellationToken cancellationToken)
+        {
+            return await ProxyDocumentLockAsync(request, "checkout", cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<HelperRouteResult> DocumentUndoCheckoutAsync(JObject request, CancellationToken cancellationToken)
+        {
+            return await ProxyDocumentLockAsync(request, "undo-checkout", cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<HelperRouteResult> DocumentStatusAsync(JObject request, CancellationToken cancellationToken)
+        {
+            var itemId = request == null ? null : request.Value<string>("item_id");
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "item_id is required.");
+            }
+
+            Uri serverUri;
+            string bearer;
+            var sessionError = TryReadSession(out serverUri, out bearer);
+            if (sessionError != null)
+            {
+                return sessionError;
+            }
+
+            // GET (no body) via the G1-A seam → backend GET /cad/{item_id}/checkin-status.
+            var endpointPath = "/cad/" + Uri.EscapeDataString(itemId) + "/checkin-status";
+            var response = await _plm.GetAsync(serverUri, endpointPath, bearer, NewTraceId(), cancellationToken).ConfigureAwait(false);
+            return ToRouteResult(response);
+        }
+
+        private async Task<HelperRouteResult> ProxyDocumentLockAsync(JObject request, string action, CancellationToken cancellationToken)
+        {
+            var itemId = request == null ? null : request.Value<string>("item_id");
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return HelperRouteResult.Error(ErrorCodes.HelperInputValidationFailed, "item_id is required.");
+            }
+
+            Uri serverUri;
+            string bearer;
+            var sessionError = TryReadSession(out serverUri, out bearer);
+            if (sessionError != null)
+            {
+                return sessionError;
+            }
+
+            // POST (empty body) → backend POST /cad/{item_id}/{checkout|undo-checkout}.
+            var endpointPath = "/cad/" + Uri.EscapeDataString(itemId) + "/" + action;
+            var response = await _plm.PostAsync(serverUri, endpointPath, bearer, NewTraceId(), new JObject(), cancellationToken).ConfigureAwait(false);
+            return ToRouteResult(response);
+        }
+
         public HelperRouteResult ApplyResult(JObject request)
         {
             var traceId = NewTraceId();
@@ -3040,6 +3139,33 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                 var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
                 await HelperRouteResponse
                     .WriteAsync(context, businessAuditService.ApplyResult(request), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/document/checkout", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.DocumentCheckoutAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/document/undo-checkout", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.DocumentUndoCheckoutAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/document/status", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.DocumentStatusAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
                     .ConfigureAwait(false);
             });
 

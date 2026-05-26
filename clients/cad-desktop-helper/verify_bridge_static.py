@@ -160,12 +160,12 @@ def check_no_business_logic(bridge_sources: str) -> None:
         )
 
 
-def check_no_helper_route_additions() -> None:
+def check_helper_route_count_after_g1a() -> None:
     helper_sources = gather_sources(HELPER)
     map_count = helper_sources.count("MapGet(") + helper_sources.count("MapPost(")
     require(
-        map_count == 10,
-        f"Helper production routes must remain exactly 10 after S9; got {map_count}",
+        map_count == 13,
+        f"Helper production routes must be exactly 13 after G1-A (10 base + 3 document lock routes); got {map_count}",
     )
     bridge_sources = gather_sources(BRIDGE)
     for verb in ("MapGet(", "MapPost(", "MapPut(", "MapDelete("):
@@ -212,7 +212,7 @@ def main() -> int:
         ("EndpointValidator rejects absolute schemes / network paths / backslash / percent / control chars", lambda: check_no_absolute_scheme_forwarding(bridge_sources)),
         ("production wiring reaches Shared HelperLocator / HelperTransport (M1 convergence)", check_wiring_reaches_shared_helper_locator_and_transport),
         ("no business / UI / DWG-mutation logic in bridge", lambda: check_no_business_logic(bridge_sources)),
-        ("no helper route additions; route count stays 10", check_no_helper_route_additions),
+        ("helper route count is 13 after G1-A", check_helper_route_count_after_g1a),
         ("no S10 Lisp shell command files", check_no_s10_lisp_command_files),
         ("sync wrapper uses .GetAwaiter().GetResult()", lambda: check_sync_wrapper_pattern(bridge_sources)),
         ("DEV/Verification MD records deferred NETLOAD / CAD writer signoff", check_deferred_signoff_recorded),

@@ -18,7 +18,7 @@ namespace Yuantus.Cad.Helper.Tests
     public sealed class HelperBusinessAuditContractTests
     {
         [Fact]
-        public void test_s6_adds_exactly_diff_sync_and_audit_routes()
+        public void test_s6_business_routes_plus_g1a_document_routes_have_expected_count()
         {
             var sources = ReadHelperSources();
 
@@ -32,7 +32,10 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/sync/inbound\"", sources);
             Assert.Contains("MapPost(\"/sync/outbound\"", sources);
             Assert.Contains("MapPost(\"/audit/apply-result\"", sources);
-            Assert.Equal(10, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Contains("MapPost(\"/document/checkout\"", sources);
+            Assert.Contains("MapPost(\"/document/undo-checkout\"", sources);
+            Assert.Contains("MapPost(\"/document/status\"", sources);
+            Assert.Equal(13, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
             Assert.DoesNotContain("MapPatch(", sources);
@@ -583,6 +586,23 @@ namespace Yuantus.Cad.Helper.Tests
                     TraceId = traceId,
                     ProtocolVersion = Paths.ProtocolVersion,
                     Payload = payload == null ? new JObject() : (JObject)payload.DeepClone()
+                });
+                return Task.FromResult(Response);
+            }
+
+            // G1-A added GetAsync to IPlmBusinessClient; this fake must implement it
+            // to keep compiling. Existing tests never invoke GET, so Calls is
+            // unaffected for them.
+            public Task<PlmBusinessResponse> GetAsync(Uri serverUri, string endpointPath, string bearerToken, string traceId, CancellationToken cancellationToken)
+            {
+                Calls.Add(new BusinessCall
+                {
+                    ServerUri = serverUri,
+                    EndpointPath = endpointPath,
+                    BearerToken = bearerToken,
+                    TraceId = traceId,
+                    ProtocolVersion = Paths.ProtocolVersion,
+                    Payload = new JObject()
                 });
                 return Task.FromResult(Response);
             }

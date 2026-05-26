@@ -304,13 +304,16 @@ namespace Yuantus.Cad.Bridge.Tests
         }
 
         [Fact]
-        public void test_s9_adds_no_helper_server_routes_and_preserves_route_count_ten()
+        public void test_s9_bridge_still_adds_no_routes_while_helper_has_g1a_document_routes()
         {
             var helperSources = ReadHelperSources();
             var bridgeSources = ReadBridgeSources();
 
             var mapCount = CountOccurrences(helperSources, "MapGet(") + CountOccurrences(helperSources, "MapPost(");
-            Assert.Equal(10, mapCount);
+            Assert.Equal(13, mapCount);
+            Assert.Contains("MapPost(\"/document/checkout\"", helperSources);
+            Assert.Contains("MapPost(\"/document/undo-checkout\"", helperSources);
+            Assert.Contains("MapPost(\"/document/status\"", helperSources);
 
             Assert.DoesNotContain("MapGet(", bridgeSources);
             Assert.DoesNotContain("MapPost(", bridgeSources);

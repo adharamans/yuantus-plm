@@ -284,7 +284,7 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_s6_adds_exactly_version_session_current_drawing_and_business_routes()
+        public void test_s6_session_routes_plus_g1a_document_routes_have_expected_count()
         {
             var sources = ReadHelperSources();
 
@@ -298,7 +298,10 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/sync/inbound\"", sources);
             Assert.Contains("MapPost(\"/sync/outbound\"", sources);
             Assert.Contains("MapPost(\"/audit/apply-result\"", sources);
-            Assert.Equal(10, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Contains("MapPost(\"/document/checkout\"", sources);
+            Assert.Contains("MapPost(\"/document/undo-checkout\"", sources);
+            Assert.Contains("MapPost(\"/document/status\"", sources);
+            Assert.Equal(13, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
             Assert.DoesNotContain("MapPatch(", sources);

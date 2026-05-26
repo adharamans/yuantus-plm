@@ -304,11 +304,11 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
-        public void test_s7_preserves_s6_route_count_and_business_audit_contracts()
+        public void test_s7_preserves_s6_contracts_with_g1a_document_routes()
         {
             var sources = ReadHelperSources();
 
-            Assert.Equal(10, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Equal(13, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.Contains("MapGet(\"/healthz\"", sources);
             Assert.Contains("MapGet(\"/version\"", sources);
             Assert.Contains("MapPost(\"/session/login\"", sources);
@@ -319,6 +319,9 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/sync/inbound\"", sources);
             Assert.Contains("MapPost(\"/sync/outbound\"", sources);
             Assert.Contains("MapPost(\"/audit/apply-result\"", sources);
+            Assert.Contains("MapPost(\"/document/checkout\"", sources);
+            Assert.Contains("MapPost(\"/document/undo-checkout\"", sources);
+            Assert.Contains("MapPost(\"/document/status\"", sources);
             Assert.Contains("audit_events", sources);
             Assert.Contains("SqliteAuditEventStore", sources);
             Assert.Contains("HelperBusinessAuditService", sources);
