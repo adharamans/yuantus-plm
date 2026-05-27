@@ -3,11 +3,14 @@
 ;;; CAD Helper Bridge S10-R1 — single AutoLISP-compatible source shared
 ;;; across ZWCAD and GstarCAD per merged taskbook #633 (de365c01).
 ;;;
-;;; Defines exactly one Lisp command:
+;;; Defines four Lisp commands:
 ;;;
 ;;;   (defun c:yuantus_diff_preview ...) -> typeable as YUANTUS_DIFF_PREVIEW
+;;;   (defun c:yuantus_checkout ...) -> typeable as YUANTUS_CHECKOUT
+;;;   (defun c:yuantus_undo_checkout ...) -> typeable as YUANTUS_UNDO_CHECKOUT
+;;;   (defun c:yuantus_status ...) -> typeable as YUANTUS_STATUS
 ;;;
-;;; The command is DISPLAY-ONLY:
+;;; The diff-preview command is DISPLAY-ONLY:
 ;;;   - prompts the user for a PLM item_id (required) and an optional
 ;;;     profile_id;
 ;;;   - reads the current drawing filename / path from CAD built-ins;
@@ -28,9 +31,9 @@
 ;;;     design :724;
 ;;;   - never opens modal dialogs (alert/getfiled/initdia) — only (princ).
 ;;;
-;;; No other commands. No direct HTTP. No direct DPAPI access. No other
+;;; No commands beyond the four listed above. No direct HTTP. No direct DPAPI access. No other
 ;;; native-CAD .NET DLL loads. No new helper Kestrel routes (helper route
-;;; count stays exactly 10).
+;;; count stays exactly 15).
 ;;;
 ;;; The S9 bridge primitive (yuantus-helper-call ...) is the single
 ;;; external-interaction surface.
@@ -171,7 +174,7 @@
 ;;; ============================================================
 ;;;
 ;;; Strict step order per §3.C. Failure handling:
-;;;   - user cancels at item_id prompt -> silent return, no helper calls;
+;;;   - user cancels at item_id prompt -> one notice, no helper calls;
 ;;;   - (yuantus-helper-call "/diff/preview" ...) returns nil
 ;;;     -> write one sanitized notice, do NOT call /audit/apply-result;
 ;;;   - response missing pull_id -> write one sanitized notice, do NOT
@@ -253,7 +256,130 @@
 )
 
 
+;;; ============================================================
+;;; Slice A (R1) — JSON workflow commands
+;;; ============================================================
+;;;
+;;; Three display-only commands wired to the merged G1-A JSON helper
+;;; routes through the same S9 (yuantus-helper-call ENDPOINT json) bridge
+;;; primitive used by diff-preview. Each command:
+;;;   - prompts for a required PLM item_id (empty / cancel -> one notice,
+;;;     no helper call);
+;;;   - sends {"item_id":"..."} to the helper route via the bridge;
+;;;   - on nil (bridge already wrote its sanitized error) -> one notice,
+;;;     stop (no retry, no /audit/apply-result);
+;;;   - on a response -> (princ) the bridge-returned helper data JSON
+;;;     string verbatim. Per BridgeCallService.SerializeDataPayload(data)
+;;;     the Lisp surface receives the helper DATA payload as a JSON
+;;;     string, NOT the full fixed-200 helper envelope; the command does
+;;;     not extract or act on any returned business field.
+;;;
+;;; These commands do NOT call /audit/apply-result (they are workflow
+;;; lock / status ops, not the display-confirm-writeback flow diff-preview
+;;; uses); no new outcome string is introduced.
+;;;
+;;; "Display-only" here means the CAD / DWG is never written or modified
+;;; (no entmake/entmod/command entity ops, no modal dialogs). The
+;;; server-side lock-state change performed by the checkout / undo-checkout
+;;; routes is the intended behavior of those routes and is NOT a DWG
+;;; mutation.
+;;;
+;;; Defined AFTER c:yuantus_diff_preview on purpose: the
+;;; verify_lisp_shell_static.py :302 ordering guard resolves the FIRST
+;;; "/diff/preview" -> (null response) -> "/audit/apply-result" sequence,
+;;; which must remain the diff-preview block.
+
+;;; yuantus--build-item-request: the {"item_id":"<escaped>"} request body
+;;; shared by the three Slice A commands. Reuses yuantus--json-escape so
+;;; Windows paths / quotes inside item_id are escaped the same way as
+;;; diff-preview; no direct vl-string-subst.
+(defun yuantus--build-item-request (item-id)
+  (strcat "{\"item_id\":\"" (yuantus--json-escape item-id) "\"}")
+)
+
+
+(defun c:yuantus_checkout (/ item-id request response)
+  (setq item-id (getstring T "\nPLM item id: "))
+  (if (or (null item-id) (= (strlen item-id) 0))
+    (progn
+      (princ "\n[YUANTUS_CHECKOUT] cancelled (no item id).")
+      (princ)
+    )
+    (progn
+      (setq request (yuantus--build-item-request item-id))
+      (setq response (yuantus-helper-call "/document/checkout" request))
+      (if (null response)
+        (progn
+          (princ "\n[YUANTUS_CHECKOUT] checkout failed (bridge already logged error).")
+          (princ)
+        )
+        (progn
+          (princ (strcat "\n[YUANTUS_CHECKOUT] item=" item-id))
+          (princ (strcat "\n" response))
+          (princ "\n[YUANTUS_CHECKOUT] display only; no DWG write.")
+          (princ)
+        )
+      )
+    )
+  )
+)
+
+
+(defun c:yuantus_undo_checkout (/ item-id request response)
+  (setq item-id (getstring T "\nPLM item id: "))
+  (if (or (null item-id) (= (strlen item-id) 0))
+    (progn
+      (princ "\n[YUANTUS_UNDO_CHECKOUT] cancelled (no item id).")
+      (princ)
+    )
+    (progn
+      (setq request (yuantus--build-item-request item-id))
+      (setq response (yuantus-helper-call "/document/undo-checkout" request))
+      (if (null response)
+        (progn
+          (princ "\n[YUANTUS_UNDO_CHECKOUT] undo-checkout failed (bridge already logged error).")
+          (princ)
+        )
+        (progn
+          (princ (strcat "\n[YUANTUS_UNDO_CHECKOUT] item=" item-id))
+          (princ (strcat "\n" response))
+          (princ "\n[YUANTUS_UNDO_CHECKOUT] display only; no DWG write.")
+          (princ)
+        )
+      )
+    )
+  )
+)
+
+
+(defun c:yuantus_status (/ item-id request response)
+  (setq item-id (getstring T "\nPLM item id: "))
+  (if (or (null item-id) (= (strlen item-id) 0))
+    (progn
+      (princ "\n[YUANTUS_STATUS] cancelled (no item id).")
+      (princ)
+    )
+    (progn
+      (setq request (yuantus--build-item-request item-id))
+      (setq response (yuantus-helper-call "/document/status" request))
+      (if (null response)
+        (progn
+          (princ "\n[YUANTUS_STATUS] status failed (bridge already logged error).")
+          (princ)
+        )
+        (progn
+          (princ (strcat "\n[YUANTUS_STATUS] item=" item-id))
+          (princ (strcat "\n" response))
+          (princ "\n[YUANTUS_STATUS] display only; no DWG write.")
+          (princ)
+        )
+      )
+    )
+  )
+)
+
+
 ;;; Load-time confirmation. Single princ so loading the file leaves
 ;;; exactly one short line on the CAD command line.
-(princ "\n[YUANTUS_CAD_HELPER] yuantus_cad_helper.lsp loaded; command YUANTUS_DIFF_PREVIEW available.")
+(princ "\n[YUANTUS_CAD_HELPER] yuantus_cad_helper.lsp loaded; commands YUANTUS_DIFF_PREVIEW, YUANTUS_CHECKOUT, YUANTUS_UNDO_CHECKOUT, YUANTUS_STATUS available.")
 (princ)

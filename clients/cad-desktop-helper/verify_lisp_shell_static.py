@@ -2,16 +2,19 @@
 """Static verification for the S10 CAD helper Lisp shell.
 
 The S10 slice (`Yuantus.Cad.Bridge` consumer / ZWCAD + GstarCAD Lisp
-shell) registers exactly one display-only Lisp command,
+shell) registers the display-only Lisp command
 `C:YUANTUS_DIFF_PREVIEW`, that calls the S9 NETLOAD bridge primitive
-`(yuantus-helper-call ...)`. The .lsp file cannot be loaded or executed
+`(yuantus-helper-call ...)`. Slice A (G1-A command wiring) adds three
+more JSON workflow commands through the same bridge primitive —
+`C:YUANTUS_CHECKOUT`, `C:YUANTUS_UNDO_CHECKOUT`, `C:YUANTUS_STATUS` —
+for a fixed four-command set. The .lsp file cannot be loaded or executed
 on the GitHub Windows runner because there is no real ZWCAD / GstarCAD
 host installed. This static verifier catches drift that does not
-require a CAD host: it implements the 16 mandatory static-verifier
-checks from S10 taskbook §5 (merged at #633 / de365c01) plus the
-recommended source/drift guards in the same section, with Lisp-aware
-parenthesis + string handling and an explicit arity check on every
-`(yuantus-helper-call ...)` invocation.
+require a CAD host: it implements the mandatory static-verifier checks
+from S10 taskbook §5 (merged at #633 / de365c01), extended by the Slice A
+command-wiring guards, plus the recommended source/drift guards in the
+same section, with Lisp-aware parenthesis + string handling and an
+explicit arity check on every `(yuantus-helper-call ...)` invocation.
 
 Usage:
     python3 clients/cad-desktop-helper/verify_lisp_shell_static.py
@@ -34,6 +37,7 @@ HELPER = ROOT / "Helper"
 BRIDGE = ROOT / "Bridge"
 REPO_ROOT = ROOT.parent.parent
 DEV_MD = REPO_ROOT / "docs" / "DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_S10_LISP_SHELL_R1_20260524.md"
+SLICE_A_DEV_MD = REPO_ROOT / "docs" / "DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_SLICE_A_JSON_COMMAND_WIRING_R1_20260526.md"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "cad-helper-shared-dotnet.yml"
 
 
@@ -205,17 +209,28 @@ def check_lsp_file_exists_at_canonical_path() -> None:
     require(LISP_FILE.exists(), f"Lisp file must exist at canonical path {LISP_FILE}")
 
 
-def check_defines_exactly_one_command_yuantus_diff_preview(source_no_comments: str) -> None:
+SLICE_A_COMMAND_SET = {
+    "yuantus_diff_preview",
+    "yuantus_checkout",
+    "yuantus_undo_checkout",
+    "yuantus_status",
+}
+
+
+def check_defines_exactly_the_slice_a_command_set(source_no_comments: str) -> None:
     # Strip line comments first so a literal "(defun c:" inside a
-    # docstring header doesn't get counted as a real definition.
-    matches = re.findall(r"\(defun\s+c:", source_no_comments, re.IGNORECASE)
+    # docstring header doesn't get counted as a real definition. After
+    # Slice A the file defines exactly four c: commands: the original
+    # display-only diff-preview plus the three G1-A JSON workflow commands.
+    matches = re.findall(r"\(defun\s+c:([a-z0-9_]+)", source_no_comments, re.IGNORECASE)
     require(
-        len(matches) == 1,
-        f"Lisp file must define exactly one (defun c:...) command; found {len(matches)}",
+        len(matches) == 4,
+        f"Lisp file must define exactly four (defun c:...) commands after Slice A; found {len(matches)}: {matches}",
     )
+    found = {m.lower() for m in matches}
     require(
-        re.search(r"\(defun\s+c:yuantus_diff_preview\b", source_no_comments) is not None,
-        "the single command must be c:yuantus_diff_preview (typeable as YUANTUS_DIFF_PREVIEW)",
+        found == SLICE_A_COMMAND_SET,
+        f"Lisp commands must be exactly {sorted(SLICE_A_COMMAND_SET)}; found {sorted(found)}",
     )
 
 
@@ -231,6 +246,43 @@ def check_command_calls_yuantus_helper_call_for_audit_apply_result(endpoints: li
         "/audit/apply-result" in endpoints,
         "Lisp shell must call (yuantus-helper-call \"/audit/apply-result\" ...) at least once",
     )
+
+
+def check_slice_a_commands_call_document_json_routes(endpoints: list[str]) -> None:
+    # Slice A wires the three merged G1-A JSON helper routes; each must be
+    # reached through the (yuantus-helper-call "ENDPOINT" json) bridge.
+    for route in ("/document/checkout", "/document/undo-checkout", "/document/status"):
+        require(
+            route in endpoints,
+            f"Slice A must call (yuantus-helper-call \"{route}\" ...) at least once",
+        )
+
+
+def check_each_command_nil_guards_the_bridge_response(source_no_comments: str) -> None:
+    # Each command must (null response)-guard the bridge return before
+    # acting. Checked PER COMMAND (not a global count) so a command missing
+    # its guard cannot hide behind another command's guard. Each command's
+    # body is the span from its (defun c:<name> to the next top-level
+    # (defun ... (or end of file for the last one).
+    for name in sorted(SLICE_A_COMMAND_SET):
+        start = source_no_comments.find("(defun c:" + name)
+        require(start >= 0, f"command c:{name} not found for nil-guard check")
+        nxt = source_no_comments.find("(defun ", start + 1)
+        body = source_no_comments[start:nxt] if nxt > start else source_no_comments[start:]
+        require(
+            "(null response)" in body,
+            f"command c:{name} must (null response)-guard the bridge return before acting",
+        )
+
+
+def check_slice_a_dev_verification_records_deferred_signoff() -> None:
+    require(
+        SLICE_A_DEV_MD.exists(),
+        f"Slice A DEV/Verification MD must exist at {SLICE_A_DEV_MD}",
+    )
+    text = read(SLICE_A_DEV_MD)
+    for token in ("Deferred", "YUANTUS_CHECKOUT", "display-only", "operational signoff"):
+        require(token in text, f"Slice A DEV/Verification MD must record token {token!r}")
 
 
 def check_audit_apply_result_outcome_is_not_applied_display_only(source: str) -> None:
@@ -363,7 +415,7 @@ def check_does_not_add_s11_integration_or_other_lisp_commands(source: str) -> No
     for token in forbidden_commands:
         require(
             f"c:{token}" not in lower,
-            f"S10-R1 must define only c:yuantus_diff_preview; found forbidden command c:{token}",
+            f"the .lsp must define only the Slice A allowed command set; found forbidden command c:{token}",
         )
     # Also check no Lisp shell files exist beyond yuantus_cad_helper.lsp.
     lsp_files = list((ROOT / "Lisp").rglob("*.lsp"))
@@ -530,9 +582,12 @@ def main() -> int:
 
     checks = [
         ("lsp file exists at canonical path", check_lsp_file_exists_at_canonical_path),
-        ("defines exactly one command c:yuantus_diff_preview", lambda: check_defines_exactly_one_command_yuantus_diff_preview(source_no_comments)),
+        ("defines exactly the Slice A four-command set", lambda: check_defines_exactly_the_slice_a_command_set(source_no_comments)),
         ("(yuantus-helper-call \"/diff/preview\" ...) at least once", lambda: check_command_calls_yuantus_helper_call_for_diff_preview(endpoints)),
         ("(yuantus-helper-call \"/audit/apply-result\" ...) at least once", lambda: check_command_calls_yuantus_helper_call_for_audit_apply_result(endpoints)),
+        ("Slice A commands call /document/checkout|undo-checkout|status", lambda: check_slice_a_commands_call_document_json_routes(endpoints)),
+        ("each of the four commands nil-guards the bridge response", lambda: check_each_command_nil_guards_the_bridge_response(source_no_comments)),
+        ("Slice A DEV/Verification MD records deferred operational signoff", check_slice_a_dev_verification_records_deferred_signoff),
         ("/audit/apply-result outcome is \"not-applied-display-only\" only", lambda: check_audit_apply_result_outcome_is_not_applied_display_only(source)),
         ("no DWG mutation / entity creation in lsp", lambda: check_lsp_contains_no_dwg_mutation_or_entity_creation(source)),
         ("user output uses (princ) only; no modal dialogs", lambda: check_lsp_user_output_uses_princ_only_no_modal_dialogs(source)),
