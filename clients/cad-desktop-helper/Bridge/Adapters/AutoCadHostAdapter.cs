@@ -63,6 +63,26 @@ namespace Yuantus.Cad.Bridge.Adapters
             return result.Payload;
         }
 
+        [LispFunction("yuantus-helper-upload")]
+        public static object YuantusHelperUpload(ResultBuffer args)
+        {
+            string endpoint;
+            string itemId;
+            string filePath;
+            if (!TryReadThreeStringArgs(args, out endpoint, out itemId, out filePath))
+            {
+                Writer.WriteFailure("HELPER_INPUT_VALIDATION_FAILED", "arity");
+                return null;
+            }
+
+            var result = Service.Upload(endpoint, itemId, filePath);
+            if (!result.Ok)
+            {
+                return null;
+            }
+            return result.Payload;
+        }
+
         private static bool TryReadStringArgs(ResultBuffer args, out string endpoint, out string json)
         {
             endpoint = null;
@@ -82,6 +102,30 @@ namespace Yuantus.Cad.Bridge.Adapters
             }
             endpoint = (string)values[0].Value;
             json = (string)values[1].Value;
+            return true;
+        }
+
+        private static bool TryReadThreeStringArgs(ResultBuffer args, out string endpoint, out string itemId, out string filePath)
+        {
+            endpoint = null;
+            itemId = null;
+            filePath = null;
+            if (args == null)
+            {
+                return false;
+            }
+            var values = args.AsArray();
+            if (values == null || values.Length != 3)
+            {
+                return false;
+            }
+            if (!IsLispStringValue(values[0]) || !IsLispStringValue(values[1]) || !IsLispStringValue(values[2]))
+            {
+                return false;
+            }
+            endpoint = (string)values[0].Value;
+            itemId = (string)values[1].Value;
+            filePath = (string)values[2].Value;
             return true;
         }
 

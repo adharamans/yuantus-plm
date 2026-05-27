@@ -69,15 +69,45 @@ def check_csproj_targets_net46() -> None:
     require(len(shared_refs) == 1, "Bridge csproj must ProjectReference Shared exactly once")
 
 
-def check_single_lisp_function(bridge_sources: str) -> None:
+def check_lisp_function_set(bridge_sources: str) -> None:
+    # After Slice B the bridge exposes EXACTLY two Lisp primitives: the S9
+    # JSON call and the Slice B multipart upload. Keep the set strict.
+    names = set(re.findall(r'\[LispFunction\("([^"]+)"\)\]', bridge_sources))
     occurrences = re.findall(r"\[LispFunction\(", bridge_sources)
     require(
-        len(occurrences) == 1,
-        f"Bridge must expose exactly one LispFunction; found {len(occurrences)}",
+        len(occurrences) == 2,
+        f"Bridge must expose exactly two LispFunctions; found {len(occurrences)}",
     )
     require(
-        '[LispFunction("yuantus-helper-call")]' in bridge_sources,
-        "Bridge must register exactly the literal Lisp function name yuantus-helper-call",
+        names == {"yuantus-helper-call", "yuantus-helper-upload"},
+        f"Bridge LispFunctions must be exactly {{yuantus-helper-call, yuantus-helper-upload}}; found {sorted(names)}",
+    )
+
+
+def check_upload_endpoint_allowlist(bridge_sources: str) -> None:
+    # Slice B: yuantus-helper-upload is NOT a generic multipart tunnel. The
+    # upload path must enforce an exact two-endpoint allowlist, and that
+    # allowlist must gate the multipart transport (it appears before the
+    # PostMultipartAsync call site in source order).
+    require(
+        '"/document/checkin"' in bridge_sources and '"/document/bom-import"' in bridge_sources,
+        "Bridge upload path must reference both allowlisted endpoints",
+    )
+    require(
+        "UploadEndpointAllowlist" in bridge_sources,
+        "Bridge must define an explicit upload endpoint allowlist (UploadEndpointAllowlist)",
+    )
+    require(
+        "PostMultipartAsync" in bridge_sources,
+        "Bridge must expose the multipart transport seam PostMultipartAsync",
+    )
+    allowlist_idx = bridge_sources.find("Array.IndexOf(UploadEndpointAllowlist")
+    transport_idx = bridge_sources.find("_transport\n                    .PostMultipartAsync")
+    if transport_idx < 0:
+        transport_idx = bridge_sources.find(".PostMultipartAsync(baseUri")
+    require(
+        allowlist_idx >= 0 and transport_idx >= 0 and allowlist_idx < transport_idx,
+        "upload allowlist check must gate (precede) the PostMultipartAsync call site",
     )
 
 
@@ -287,7 +317,8 @@ def main() -> int:
     bridge_sources = gather_sources(BRIDGE)
     checks = [
         ("csproj targets net46 + Shared reference", check_csproj_targets_net46),
-        ("single LispFunction(yuantus-helper-call)", lambda: check_single_lisp_function(bridge_sources)),
+        ("exactly two LispFunctions {yuantus-helper-call, yuantus-helper-upload}", lambda: check_lisp_function_set(bridge_sources)),
+        ("upload endpoint allowlist gates multipart transport", lambda: check_upload_endpoint_allowlist(bridge_sources)),
         ("no direct HttpClient / DPAPI / LocalTokenStore / Process.Start", lambda: check_no_direct_httpclient_or_dpapi(bridge_sources)),
         ("EndpointValidator rejects absolute schemes / network paths / backslash / percent / control chars", lambda: check_no_absolute_scheme_forwarding(bridge_sources)),
         ("production wiring reaches Shared HelperLocator / HelperTransport (M1 convergence)", check_wiring_reaches_shared_helper_locator_and_transport),
