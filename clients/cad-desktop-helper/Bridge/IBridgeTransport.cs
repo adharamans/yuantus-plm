@@ -21,5 +21,24 @@ namespace Yuantus.Cad.Bridge
             string endpoint,
             JObject payload,
             CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Posts the canonical Slice B multipart envelope to a helper upload
+        /// endpoint and returns the helper <c>data</c> payload. The envelope is
+        /// one <c>file</c> part (<c>application/octet-stream</c>, base
+        /// <paramref name="fileName"/>) plus a single <c>item_id</c> text part
+        /// only when <paramref name="itemId"/> is non-empty. Production
+        /// (<see cref="SharedBridgeTransport"/>) reuses Shared
+        /// <c>HelperTransport.PostContentAsync&lt;JToken&gt;</c>; the bridge
+        /// builds no <c>HttpClient</c> and adds no workflow flags
+        /// (<c>create_bom_job</c> / <c>auto_create_part</c> remain helper-side).
+        /// </summary>
+        Task<JToken> PostMultipartAsync(
+            Uri baseUri,
+            string endpoint,
+            string itemId,
+            byte[] fileBytes,
+            string fileName,
+            CancellationToken cancellationToken);
     }
 }

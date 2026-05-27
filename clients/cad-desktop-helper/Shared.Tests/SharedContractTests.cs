@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -326,6 +327,69 @@ namespace Yuantus.Cad.Shared.Tests
             Assert.Equal("ok", result.Value);
             Assert.Equal(2, calls);
             Assert.Equal(2, handler.SendCount);
+        }
+
+        [Fact]
+        public async Task test_helper_transport_post_content_multipart_replays_same_boundary_and_bytes_on_401_retry()
+        {
+            // Slice B relies on PostContentAsync to replay multipart content
+            // unchanged on the single AUTH_LOCAL_TOKEN_INVALID retry. The
+            // BufferedContent path must preserve the multipart boundary (so the
+            // helper's HasFormContentType check still passes) and the exact
+            // bytes across both attempts. Shared production code is unchanged;
+            // this pins the existing buffered-retry behavior for multipart.
+            var capturedContentTypes = new List<string>();
+            var capturedBodies = new List<byte[]>();
+
+            Func<HttpRequestMessage, HttpResponseMessage> capture = request =>
+            {
+                capturedContentTypes.Add(
+                    request.Content.Headers.ContentType == null
+                        ? null
+                        : request.Content.Headers.ContentType.ToString());
+                capturedBodies.Add(request.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult());
+                return null;
+            };
+
+            var handler = new QueueHandler(
+                request =>
+                {
+                    capture(request);
+                    return new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                    {
+                        Content = JsonContent("{\"error\":{\"code\":\"AUTH_LOCAL_TOKEN_INVALID\",\"message\":\"bad\",\"retryable\":false}}")
+                    };
+                },
+                request =>
+                {
+                    capture(request);
+                    return OkEnvelope(new SamplePayload { Value = "ok" });
+                });
+            var transport = new HelperTransport(
+                new Uri("http://127.0.0.1:7959"),
+                new HttpClient(handler),
+                () => "token");
+
+            using (var multipart = new MultipartFormDataContent())
+            {
+                var fileContent = new ByteArrayContent(new byte[] { 1, 2, 3, 4, 5 });
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                multipart.Add(fileContent, "file", "pump.dwg");
+                multipart.Add(new StringContent("ITEM-1", Encoding.UTF8), "item_id");
+
+                var result = await transport.PostContentAsync<SamplePayload>(
+                    "/document/checkin", multipart, CancellationToken.None);
+
+                Assert.Equal("ok", result.Value);
+            }
+
+            Assert.Equal(2, handler.SendCount);
+            Assert.Equal(2, capturedContentTypes.Count);
+            Assert.NotNull(capturedContentTypes[0]);
+            Assert.StartsWith("multipart/form-data; boundary=", capturedContentTypes[0]);
+            // Same boundary on the retry, and byte-for-byte identical body.
+            Assert.Equal(capturedContentTypes[0], capturedContentTypes[1]);
+            Assert.Equal(capturedBodies[0], capturedBodies[1]);
         }
 
         [Fact]

@@ -38,13 +38,14 @@ namespace Yuantus.Cad.Bridge.Tests
         }
 
         [Fact]
-        public void test_s9_bridge_exposes_exactly_one_lisp_function_yuantus_helper_call()
+        public void test_s9_bridge_exposes_exactly_two_lisp_functions_call_and_upload()
         {
             var sources = ReadBridgeSources();
 
             var lispFunctionCount = CountOccurrences(sources, "[LispFunction(");
-            Assert.Equal(1, lispFunctionCount);
+            Assert.Equal(2, lispFunctionCount);
             Assert.Contains("[LispFunction(\"yuantus-helper-call\")]", sources);
+            Assert.Contains("[LispFunction(\"yuantus-helper-upload\")]", sources);
         }
 
         [Fact]
@@ -58,6 +59,176 @@ namespace Yuantus.Cad.Bridge.Tests
             Assert.DoesNotContain("values.Length > 2", sources);
 
             Assert.Contains("public BridgeResult Call(string endpoint, string jsonRequest)", sources);
+        }
+
+        [Fact]
+        public void test_slice_b_upload_lisp_function_accepts_exactly_three_string_arguments()
+        {
+            var sources = ReadBridgeSources();
+
+            Assert.Contains("public static object YuantusHelperUpload(ResultBuffer args)", sources);
+            Assert.Contains("values.Length != 3", sources);
+            Assert.DoesNotContain("values.Length >= 3", sources);
+            Assert.DoesNotContain("values.Length > 3", sources);
+
+            Assert.Contains("public BridgeResult Upload(string endpoint, string itemId, string filePath)", sources);
+        }
+
+        [Fact]
+        public async Task test_slice_b_checkin_upload_forwards_one_multipart_with_item_id_and_returns_data_json()
+        {
+            var locator = new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959"));
+            var fileSource = new RecordingBridgeFileSource { Bytes = new byte[] { 9, 8, 7 } };
+            var transport = new RecordingBridgeTransport { Response = new JObject { ["item_id"] = "ITEM-1" } };
+            var service = new BridgeCallService(locator, transport, new RecordingCommandLineWriter(), fileSource);
+
+            var result = await service.UploadAsync("/document/checkin", "ITEM-1", "C:\\drawings\\pump.dwg", CancellationToken.None);
+
+            Assert.True(result.Ok);
+            Assert.Equal("ITEM-1", JObject.Parse(result.Payload).Value<string>("item_id"));
+            Assert.Equal(1, locator.Calls);
+            Assert.Equal(1, fileSource.Calls);
+            Assert.Equal(1, transport.MultipartCalls);
+            Assert.True(transport.LastItemIdProvided);
+            Assert.Equal("ITEM-1", transport.LastItemId);
+            Assert.Equal("pump.dwg", transport.LastFileName);
+            Assert.Equal(new byte[] { 9, 8, 7 }, transport.LastFileBytes);
+        }
+
+        [Fact]
+        public async Task test_slice_b_bom_import_blank_item_id_uploads_but_omits_item_id_part()
+        {
+            var locator = new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959"));
+            var fileSource = new RecordingBridgeFileSource();
+            var transport = new RecordingBridgeTransport { Response = new JObject { ["file_id"] = "F1" } };
+            var service = new BridgeCallService(locator, transport, new RecordingCommandLineWriter(), fileSource);
+
+            var result = await service.UploadAsync("/document/bom-import", "   ", "C:\\drawings\\asm.dwg", CancellationToken.None);
+
+            Assert.True(result.Ok);
+            Assert.Equal(1, transport.MultipartCalls);
+            // Blank item id -> the bridge passes null so the multipart part is omitted.
+            Assert.False(transport.LastItemIdProvided);
+            Assert.Null(transport.LastItemId);
+        }
+
+        [Fact]
+        public async Task test_slice_b_checkin_blank_item_id_fails_before_locator_file_or_transport()
+        {
+            var locator = new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959"));
+            var fileSource = new RecordingBridgeFileSource();
+            var transport = new RecordingBridgeTransport();
+            var writer = new RecordingCommandLineWriter();
+            var service = new BridgeCallService(locator, transport, writer, fileSource);
+
+            var result = await service.UploadAsync("/document/checkin", "  ", "C:\\drawings\\pump.dwg", CancellationToken.None);
+
+            Assert.False(result.Ok);
+            Assert.Equal(ErrorCodes.HelperInputValidationFailed, result.Code);
+            Assert.Equal(0, locator.Calls);
+            Assert.Equal(0, fileSource.Calls);
+            Assert.Equal(0, transport.MultipartCalls);
+            Assert.Single(writer.Lines);
+        }
+
+        [Fact]
+        public async Task test_slice_b_non_upload_endpoint_rejected_before_locator_file_or_transport()
+        {
+            string[] nonUpload = { "/document/status", "/diff/preview", "/audit/apply-result", "/document/checkout" };
+            foreach (var endpoint in nonUpload)
+            {
+                var locator = new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959"));
+                var fileSource = new RecordingBridgeFileSource();
+                var transport = new RecordingBridgeTransport();
+                var writer = new RecordingCommandLineWriter();
+                var service = new BridgeCallService(locator, transport, writer, fileSource);
+
+                var result = await service.UploadAsync(endpoint, "ITEM-1", "C:\\drawings\\pump.dwg", CancellationToken.None);
+
+                Assert.False(result.Ok);
+                Assert.Equal(ErrorCodes.HelperInputValidationFailed, result.Code);
+                Assert.Equal(0, locator.Calls);
+                Assert.Equal(0, fileSource.Calls);
+                Assert.Equal(0, transport.MultipartCalls);
+                Assert.Single(writer.Lines);
+            }
+        }
+
+        [Fact]
+        public async Task test_slice_b_file_source_failure_returns_fixed_token_and_never_leaks_path()
+        {
+            const string secretPath = "C:\\users\\victim\\SECRET-TOKEN-12345.dwg";
+            var locator = new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959"));
+            var fileSource = new RecordingBridgeFileSource { ReasonToken = "file_missing" };
+            var transport = new RecordingBridgeTransport();
+            var writer = new RecordingCommandLineWriter();
+            var service = new BridgeCallService(locator, transport, writer, fileSource);
+
+            var result = await service.UploadAsync("/document/checkin", "ITEM-1", secretPath, CancellationToken.None);
+
+            Assert.False(result.Ok);
+            Assert.Equal(ErrorCodes.HelperInputValidationFailed, result.Code);
+            Assert.Equal(0, transport.MultipartCalls);
+            var line = Assert.Single(writer.Lines);
+            Assert.Equal("file_missing", line.Reason);
+            // The supplied path must never reach the sanitized writer output.
+            Assert.DoesNotContain("SECRET-TOKEN-12345", line.Reason ?? string.Empty);
+            Assert.DoesNotContain("SECRET-TOKEN-12345", line.Code ?? string.Empty);
+            Assert.DoesNotContain("victim", line.Reason ?? string.Empty);
+        }
+
+        [Fact]
+        public async Task test_slice_b_filename_is_sanitized_to_ascii_basename_via_upload()
+        {
+            // Directory stripped, space + '#' replaced, extension kept.
+            var transport1 = new RecordingBridgeTransport { Response = new JObject() };
+            var s1 = new BridgeCallService(new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959")), transport1, new RecordingCommandLineWriter(), new RecordingBridgeFileSource());
+            await s1.UploadAsync("/document/checkin", "ITEM-1", "C:\\dir\\a b#c.dwg", CancellationToken.None);
+            Assert.Equal("a_b_c.dwg", transport1.LastFileName);
+
+            // Empty basename (trailing separator) -> upload.bin fallback.
+            var transport2 = new RecordingBridgeTransport { Response = new JObject() };
+            var s2 = new BridgeCallService(new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959")), transport2, new RecordingCommandLineWriter(), new RecordingBridgeFileSource());
+            await s2.UploadAsync("/document/checkin", "ITEM-1", "C:\\dir\\", CancellationToken.None);
+            Assert.Equal("upload.bin", transport2.LastFileName);
+        }
+
+        [Fact]
+        public void test_slice_b_production_file_source_maps_conditions_to_fixed_tokens()
+        {
+            var source = new BridgeFileSource();
+            byte[] bytes;
+            string reason;
+
+            // blank path
+            Assert.False(source.TryReadAllBytes("   ", out bytes, out reason));
+            Assert.Equal("file_path_missing", reason);
+            Assert.Null(bytes);
+
+            // directory -> not regular
+            var tempDir = Path.Combine(Path.GetTempPath(), "yuantus_slice_b_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                Assert.False(source.TryReadAllBytes(tempDir, out bytes, out reason));
+                Assert.Equal("file_not_regular", reason);
+
+                // missing file inside an existing dir
+                var missing = Path.Combine(tempDir, "does-not-exist.dwg");
+                Assert.False(source.TryReadAllBytes(missing, out bytes, out reason));
+                Assert.Equal("file_missing", reason);
+
+                // real file -> success with bytes
+                var realFile = Path.Combine(tempDir, "real.dwg");
+                File.WriteAllBytes(realFile, new byte[] { 4, 2 });
+                Assert.True(source.TryReadAllBytes(realFile, out bytes, out reason));
+                Assert.Null(reason);
+                Assert.Equal(new byte[] { 4, 2 }, bytes);
+            }
+            finally
+            {
+                Directory.Delete(tempDir, true);
+            }
         }
 
         [Fact]
@@ -597,6 +768,13 @@ namespace Yuantus.Cad.Bridge.Tests
             public JToken Response { get; set; }
             public HelperException Throw { get; set; }
 
+            // Slice B multipart recording.
+            public int MultipartCalls { get; private set; }
+            public string LastItemId { get; private set; }
+            public bool LastItemIdProvided { get; private set; }
+            public byte[] LastFileBytes { get; private set; }
+            public string LastFileName { get; private set; }
+
             public Task<JToken> PostJsonAsync(
                 Uri baseUri,
                 string endpoint,
@@ -613,6 +791,52 @@ namespace Yuantus.Cad.Bridge.Tests
                     throw Throw;
                 }
                 return Task.FromResult(Response);
+            }
+
+            public Task<JToken> PostMultipartAsync(
+                Uri baseUri,
+                string endpoint,
+                string itemId,
+                byte[] fileBytes,
+                string fileName,
+                CancellationToken cancellationToken)
+            {
+                MultipartCalls++;
+                CallOrder = CallSequence.Next();
+                LastBaseUri = baseUri;
+                LastEndpoint = endpoint;
+                LastItemId = itemId;
+                LastItemIdProvided = itemId != null;
+                LastFileBytes = fileBytes;
+                LastFileName = fileName;
+                if (Throw != null)
+                {
+                    throw Throw;
+                }
+                return Task.FromResult(Response);
+            }
+        }
+
+        private sealed class RecordingBridgeFileSource : IBridgeFileSource
+        {
+            public int Calls { get; private set; }
+            public int CallOrder { get; private set; }
+            public byte[] Bytes { get; set; }
+            public string ReasonToken { get; set; }
+
+            public bool TryReadAllBytes(string path, out byte[] bytes, out string reasonToken)
+            {
+                Calls++;
+                CallOrder = CallSequence.Next();
+                if (ReasonToken != null)
+                {
+                    bytes = null;
+                    reasonToken = ReasonToken;
+                    return false;
+                }
+                bytes = Bytes ?? new byte[] { 1, 2, 3 };
+                reasonToken = null;
+                return true;
             }
         }
 
