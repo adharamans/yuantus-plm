@@ -7,7 +7,9 @@ shell) registers the display-only Lisp command
 `(yuantus-helper-call ...)`. Slice A (G1-A command wiring) adds three
 more JSON workflow commands through the same bridge primitive —
 `C:YUANTUS_CHECKOUT`, `C:YUANTUS_UNDO_CHECKOUT`, `C:YUANTUS_STATUS` —
-for a fixed four-command set. The .lsp file cannot be loaded or executed
+for a fixed four-command set. Slice C adds multipart upload commands
+`C:YUANTUS_CHECKIN` and `C:YUANTUS_BOM_IMPORT` for a strict six-command
+post-state. The .lsp file cannot be loaded or executed
 on the GitHub Windows runner because there is no real ZWCAD / GstarCAD
 host installed. This static verifier catches drift that does not
 require a CAD host: it implements the mandatory static-verifier checks
@@ -38,6 +40,7 @@ BRIDGE = ROOT / "Bridge"
 REPO_ROOT = ROOT.parent.parent
 DEV_MD = REPO_ROOT / "docs" / "DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_S10_LISP_SHELL_R1_20260524.md"
 SLICE_A_DEV_MD = REPO_ROOT / "docs" / "DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_SLICE_A_JSON_COMMAND_WIRING_R1_20260526.md"
+SLICE_C_DEV_MD = REPO_ROOT / "docs" / "DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_SLICE_C_MULTIPART_COMMAND_WIRING_R1_20260527.md"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "cad-helper-shared-dotnet.yml"
 
 
@@ -209,28 +212,30 @@ def check_lsp_file_exists_at_canonical_path() -> None:
     require(LISP_FILE.exists(), f"Lisp file must exist at canonical path {LISP_FILE}")
 
 
-SLICE_A_COMMAND_SET = {
+LISP_COMMAND_SET = {
     "yuantus_diff_preview",
     "yuantus_checkout",
     "yuantus_undo_checkout",
     "yuantus_status",
+    "yuantus_checkin",
+    "yuantus_bom_import",
 }
 
 
-def check_defines_exactly_the_slice_a_command_set(source_no_comments: str) -> None:
-    # Strip line comments first so a literal "(defun c:" inside a
-    # docstring header doesn't get counted as a real definition. After
-    # Slice A the file defines exactly four c: commands: the original
-    # display-only diff-preview plus the three G1-A JSON workflow commands.
+def check_defines_exactly_the_lisp_command_set(source_no_comments: str) -> None:
+    # Strip line comments first so a literal "(defun c:" inside a docstring
+    # header doesn't get counted as a real definition. After Slice C the file
+    # defines exactly six c: commands: diff-preview, the three G1-A JSON
+    # workflow commands, and the two Slice C multipart upload commands.
     matches = re.findall(r"\(defun\s+c:([a-z0-9_]+)", source_no_comments, re.IGNORECASE)
     require(
-        len(matches) == 4,
-        f"Lisp file must define exactly four (defun c:...) commands after Slice A; found {len(matches)}: {matches}",
+        len(matches) == 6,
+        f"Lisp file must define exactly six (defun c:...) commands after Slice C; found {len(matches)}: {matches}",
     )
     found = {m.lower() for m in matches}
     require(
-        found == SLICE_A_COMMAND_SET,
-        f"Lisp commands must be exactly {sorted(SLICE_A_COMMAND_SET)}; found {sorted(found)}",
+        found == LISP_COMMAND_SET,
+        f"Lisp commands must be exactly {sorted(LISP_COMMAND_SET)}; found {sorted(found)}",
     )
 
 
@@ -264,7 +269,7 @@ def check_each_command_nil_guards_the_bridge_response(source_no_comments: str) -
     # its guard cannot hide behind another command's guard. Each command's
     # body is the span from its (defun c:<name> to the next top-level
     # (defun ... (or end of file for the last one).
-    for name in sorted(SLICE_A_COMMAND_SET):
+    for name in sorted(LISP_COMMAND_SET):
         start = source_no_comments.find("(defun c:" + name)
         require(start >= 0, f"command c:{name} not found for nil-guard check")
         nxt = source_no_comments.find("(defun ", start + 1)
@@ -283,6 +288,194 @@ def check_slice_a_dev_verification_records_deferred_signoff() -> None:
     text = read(SLICE_A_DEV_MD)
     for token in ("Deferred", "YUANTUS_CHECKOUT", "display-only", "operational signoff"):
         require(token in text, f"Slice A DEV/Verification MD must record token {token!r}")
+
+
+# ---------- Slice C: yuantus-helper-upload command-wiring guards ----------
+
+def find_helper_upload_arities(source_no_comments: str) -> list[int]:
+    """Argument counts for every (yuantus-helper-upload ...) call, derived from
+    the parsed top-level argument tokens."""
+    return [len(call) for call in find_helper_upload_calls(source_no_comments)]
+
+
+def find_helper_upload_calls(source_no_comments: str) -> list[list[str]]:
+    """Return, for every (yuantus-helper-upload ...) call, the list of its
+    top-level argument tokens (string literals returned with surrounding
+    quotes; barewords as-is; nested forms collapsed to "(...)").
+
+    Scope: the upload calls today are flat — string endpoint + symbol
+    item-id + symbol filepath. The nested-form skip below does NOT track
+    string literals inside a nested form, so a ")" inside a string inside a
+    nested-form argument would mis-balance. If a future upload call gains a
+    nested-form argument containing strings, tighten this scan first.
+    """
+    needle = "(yuantus-helper-upload"
+    calls = []
+    pos = 0
+    n = len(source_no_comments)
+    while True:
+        idx = source_no_comments.find(needle, pos)
+        if idx < 0:
+            break
+        i = idx + len(needle)
+        depth = 1
+        in_string = False
+        args = []
+        token = ""
+        while i < n and depth > 0:
+            ch = source_no_comments[i]
+            if in_string:
+                token += ch
+                if ch == "\\" and i + 1 < n:
+                    token += source_no_comments[i + 1]
+                    i += 2
+                    continue
+                if ch == '"':
+                    in_string = False
+                    args.append(token)
+                    token = ""
+                i += 1
+                continue
+            if ch == '"':
+                in_string = True
+                token = '"'
+                i += 1
+                continue
+            if ch == '(':
+                depth += 1
+                # Skip a nested form to its matching close, recording a marker.
+                sub_depth = 1
+                i += 1
+                while i < n and sub_depth > 0:
+                    c2 = source_no_comments[i]
+                    if c2 == '(':
+                        sub_depth += 1
+                    elif c2 == ')':
+                        sub_depth -= 1
+                    i += 1
+                depth -= 1
+                args.append("(...)")
+                continue
+            if ch == ')':
+                depth -= 1
+                if token:
+                    args.append(token)
+                    token = ""
+                i += 1
+                continue
+            if ch.isspace():
+                if token:
+                    args.append(token)
+                    token = ""
+                i += 1
+                continue
+            token += ch
+            i += 1
+        calls.append(args)
+        pos = i
+    return calls
+
+
+def check_upload_call_arity_is_three(source_no_comments: str) -> None:
+    arities = find_helper_upload_arities(source_no_comments)
+    require(arities, "Lisp shell must call (yuantus-helper-upload ...) at least once")
+    for n in arities:
+        require(
+            n == 3,
+            f"every (yuantus-helper-upload ...) call must take exactly 3 arguments; found arity {n}",
+        )
+
+
+def check_upload_commands_call_document_multipart_routes(source_no_comments: str) -> None:
+    endpoints = {call[0] for call in find_helper_upload_calls(source_no_comments) if call}
+    for route in ('"/document/checkin"', '"/document/bom-import"'):
+        require(
+            route in endpoints,
+            f"Slice C must call (yuantus-helper-upload {route} ...) at least once",
+        )
+
+
+def check_upload_filepath_is_active_document_path(source: str, source_no_comments: str) -> None:
+    # The upload filepath must be the active document path, never a prompted
+    # one. Pin the canonical derivation and require every upload call's third
+    # argument to be the `filepath` symbol bound to it.
+    normalized = " ".join(source_no_comments.split())
+    canonical = '(setq filepath (strcat (getvar "DWGPREFIX") (getvar "DWGNAME")))'
+    require(
+        canonical in normalized,
+        "Slice C must derive filepath as (strcat (getvar \"DWGPREFIX\") (getvar \"DWGNAME\"))",
+    )
+    upload_call_count = len(find_helper_upload_calls(source_no_comments))
+    filepath_assignment_count = len(re.findall(r"\(setq\s+filepath\b", source_no_comments, re.IGNORECASE))
+    require(
+        filepath_assignment_count == upload_call_count,
+        f"each upload command must bind filepath exactly once; found {filepath_assignment_count} assignments for {upload_call_count} upload calls",
+    )
+    canonical_count = normalized.count(canonical)
+    require(
+        canonical_count == upload_call_count,
+        f"every filepath assignment must be the canonical active-document derivation; found {canonical_count} canonical assignments for {upload_call_count} upload calls",
+    )
+    for call in find_helper_upload_calls(source_no_comments):
+        require(
+            len(call) == 3,
+            f"(yuantus-helper-upload ...) must have 3 args for the filepath check; found {call}",
+        )
+        require(
+            call[2] == "filepath",
+            f"the upload filepath arg must be the `filepath` symbol (active doc path), not {call[2]!r}",
+        )
+    # No upload command may source the path from a file picker.
+    require("(getfiled" not in source.lower(), "Slice C must not use (getfiled ...) for the upload path")
+
+
+def check_header_and_load_line_list_all_commands(source: str) -> None:
+    # Guard against the four->six caption drift: the file header AND the
+    # load-time confirmation (princ ...) must both name all six commands.
+    typeable = (
+        "YUANTUS_DIFF_PREVIEW",
+        "YUANTUS_CHECKOUT",
+        "YUANTUS_UNDO_CHECKOUT",
+        "YUANTUS_STATUS",
+        "YUANTUS_CHECKIN",
+        "YUANTUS_BOM_IMPORT",
+    )
+    header_end = source.find("(vl-load-com)")
+    require(header_end > 0, "Lisp header must precede (vl-load-com)")
+    header = source[:header_end]
+    for name in ("yuantus_diff_preview", "yuantus_checkout", "yuantus_undo_checkout",
+                 "yuantus_status", "yuantus_checkin", "yuantus_bom_import"):
+        require(
+            ("c:" + name) in header,
+            f"Lisp file header must list command c:{name} (four->six caption sync)",
+        )
+    require(
+        "No commands beyond the four" not in header,
+        "Lisp file header must not keep stale four-command wording after Slice C",
+    )
+    require(
+        "yuantus-helper-upload" in header,
+        "Lisp file header must mention the Slice B upload primitive after Slice C",
+    )
+    load_marker = "yuantus_cad_helper.lsp loaded;"
+    load_idx = source.find(load_marker)
+    require(load_idx >= 0, "Lisp file must have a load-time confirmation line")
+    load_line = source[load_idx:source.find("\n", load_idx)] if source.find("\n", load_idx) > 0 else source[load_idx:]
+    for name in typeable:
+        require(
+            name in load_line,
+            f"load-time confirmation must list {name} (four->six caption sync)",
+        )
+
+
+def check_slice_c_dev_verification_records_deferred_signoff() -> None:
+    require(
+        SLICE_C_DEV_MD.exists(),
+        f"Slice C DEV/Verification MD must exist at {SLICE_C_DEV_MD}",
+    )
+    text = read(SLICE_C_DEV_MD)
+    for token in ("Deferred", "YUANTUS_CHECKIN", "YUANTUS_BOM_IMPORT", "display-only", "operational signoff"):
+        require(token in text, f"Slice C DEV/Verification MD must record token {token!r}")
 
 
 def check_audit_apply_result_outcome_is_not_applied_display_only(source: str) -> None:
@@ -415,7 +608,7 @@ def check_does_not_add_s11_integration_or_other_lisp_commands(source: str) -> No
     for token in forbidden_commands:
         require(
             f"c:{token}" not in lower,
-            f"the .lsp must define only the Slice A allowed command set; found forbidden command c:{token}",
+            f"the .lsp must define only the allowed Slice C command set; found forbidden command c:{token}",
         )
     # Also check no Lisp shell files exist beyond yuantus_cad_helper.lsp.
     lsp_files = list((ROOT / "Lisp").rglob("*.lsp"))
@@ -582,12 +775,17 @@ def main() -> int:
 
     checks = [
         ("lsp file exists at canonical path", check_lsp_file_exists_at_canonical_path),
-        ("defines exactly the Slice A four-command set", lambda: check_defines_exactly_the_slice_a_command_set(source_no_comments)),
+        ("defines exactly the six-command Lisp set", lambda: check_defines_exactly_the_lisp_command_set(source_no_comments)),
         ("(yuantus-helper-call \"/diff/preview\" ...) at least once", lambda: check_command_calls_yuantus_helper_call_for_diff_preview(endpoints)),
         ("(yuantus-helper-call \"/audit/apply-result\" ...) at least once", lambda: check_command_calls_yuantus_helper_call_for_audit_apply_result(endpoints)),
         ("Slice A commands call /document/checkout|undo-checkout|status", lambda: check_slice_a_commands_call_document_json_routes(endpoints)),
-        ("each of the four commands nil-guards the bridge response", lambda: check_each_command_nil_guards_the_bridge_response(source_no_comments)),
+        ("each command nil-guards the bridge response", lambda: check_each_command_nil_guards_the_bridge_response(source_no_comments)),
         ("Slice A DEV/Verification MD records deferred operational signoff", check_slice_a_dev_verification_records_deferred_signoff),
+        ("Slice C upload calls are arity 3", lambda: check_upload_call_arity_is_three(source_no_comments)),
+        ("Slice C commands call /document/checkin + /document/bom-import via upload", lambda: check_upload_commands_call_document_multipart_routes(source_no_comments)),
+        ("Slice C upload filepath is the active document path only", lambda: check_upload_filepath_is_active_document_path(source, source_no_comments)),
+        ("header + load-time line list all six commands", lambda: check_header_and_load_line_list_all_commands(source)),
+        ("Slice C DEV/Verification MD records deferred operational signoff", check_slice_c_dev_verification_records_deferred_signoff),
         ("/audit/apply-result outcome is \"not-applied-display-only\" only", lambda: check_audit_apply_result_outcome_is_not_applied_display_only(source)),
         ("no DWG mutation / entity creation in lsp", lambda: check_lsp_contains_no_dwg_mutation_or_entity_creation(source)),
         ("user output uses (princ) only; no modal dialogs", lambda: check_lsp_user_output_uses_princ_only_no_modal_dialogs(source)),

@@ -3,12 +3,14 @@
 ;;; CAD Helper Bridge S10-R1 — single AutoLISP-compatible source shared
 ;;; across ZWCAD and GstarCAD per merged taskbook #633 (de365c01).
 ;;;
-;;; Defines four Lisp commands:
+;;; Defines six Lisp commands:
 ;;;
 ;;;   (defun c:yuantus_diff_preview ...) -> typeable as YUANTUS_DIFF_PREVIEW
 ;;;   (defun c:yuantus_checkout ...) -> typeable as YUANTUS_CHECKOUT
 ;;;   (defun c:yuantus_undo_checkout ...) -> typeable as YUANTUS_UNDO_CHECKOUT
 ;;;   (defun c:yuantus_status ...) -> typeable as YUANTUS_STATUS
+;;;   (defun c:yuantus_checkin ...) -> typeable as YUANTUS_CHECKIN
+;;;   (defun c:yuantus_bom_import ...) -> typeable as YUANTUS_BOM_IMPORT
 ;;;
 ;;; The diff-preview command is DISPLAY-ONLY:
 ;;;   - prompts the user for a PLM item_id (required) and an optional
@@ -31,12 +33,13 @@
 ;;;     design :724;
 ;;;   - never opens modal dialogs (alert/getfiled/initdia) — only (princ).
 ;;;
-;;; No commands beyond the four listed above. No direct HTTP. No direct DPAPI access. No other
+;;; No commands beyond the six listed above. No direct HTTP. No direct DPAPI access. No other
 ;;; native-CAD .NET DLL loads. No new helper Kestrel routes (helper route
 ;;; count stays exactly 15).
 ;;;
-;;; The S9 bridge primitive (yuantus-helper-call ...) is the single
-;;; external-interaction surface.
+;;; External interaction stays within the S9/Slice-B bridge primitives:
+;;; (yuantus-helper-call ...) for JSON and (yuantus-helper-upload ...) for
+;;; multipart upload.
 
 (vl-load-com)
 
@@ -379,7 +382,102 @@
 )
 
 
+;;; ============================================================
+;;; Slice C (R1) — multipart upload commands
+;;; ============================================================
+;;;
+;;; Two display-only commands wired to the merged G1-B/G1-C multipart
+;;; helper routes through the Slice B bridge primitive
+;;; (yuantus-helper-upload "ENDPOINT" item-id filepath) — arity 3, NOT
+;;; the arity-2 (yuantus-helper-call ...). Defined AFTER the existing
+;;; commands so the :354 first-occurrence (null response) ordering guard
+;;; stays anchored in the diff-preview block.
+;;;
+;;; File source: the upload filepath is ALWAYS the active document path
+;;; (strcat (getvar "DWGPREFIX") (getvar "DWGNAME")) — never a prompted or
+;;; file-picker path. The bridge IBridgeFileSource validates the bytes;
+;;; the helper never reads a path.
+;;;
+;;; Save model (fail-closed, S10-clean): upload only when (getvar "DBMOD")
+;;; is numeric 0 (no unsaved changes). nil (modified-state unavailable) or
+;;; non-zero -> one (princ) notice and abort, so stale bytes are never
+;;; uploaded. The local variable is named dirty-flag (never the bare dbmod
+;;; symbol) so the no-DWG-mutation guard token stays untripped. No save, no
+;;; DWG mutation, no modal — read-only DBMOD/DWGPREFIX/DWGNAME getvars only.
+;;;
+;;; These commands do NOT call /audit/apply-result.
+
+
+(defun c:yuantus_checkin (/ item-id dirty-flag filepath response)
+  (setq item-id (getstring T "\nPLM item id: "))
+  (if (or (null item-id) (= (strlen item-id) 0))
+    (progn
+      (princ "\n[YUANTUS_CHECKIN] cancelled (no item id).")
+      (princ)
+    )
+    (progn
+      (setq dirty-flag (getvar "DBMOD"))
+      (if (and dirty-flag (= dirty-flag 0))
+        (progn
+          (setq filepath (strcat (getvar "DWGPREFIX") (getvar "DWGNAME")))
+          (setq response (yuantus-helper-upload "/document/checkin" item-id filepath))
+          (if (null response)
+            (progn
+              (princ "\n[YUANTUS_CHECKIN] checkin failed (bridge already logged error).")
+              (princ)
+            )
+            (progn
+              (princ (strcat "\n[YUANTUS_CHECKIN] item=" item-id))
+              (princ (strcat "\n" response))
+              (princ "\n[YUANTUS_CHECKIN] display only; no DWG write.")
+              (princ)
+            )
+          )
+        )
+        (progn
+          (princ "\n[YUANTUS_CHECKIN] drawing has unsaved changes or modified-state unavailable; save first. Not uploaded.")
+          (princ)
+        )
+      )
+    )
+  )
+)
+
+
+(defun c:yuantus_bom_import (/ item-id dirty-flag filepath response)
+  ;; item_id is optional; blank is passed through so the bridge omits the
+  ;; item_id part and the helper auto-creates the BOM root.
+  (setq item-id (getstring T "\nPLM item id (optional, blank = auto-create root): "))
+  (if (null item-id)
+    (setq item-id "")
+  )
+  (setq dirty-flag (getvar "DBMOD"))
+  (if (and dirty-flag (= dirty-flag 0))
+    (progn
+      (setq filepath (strcat (getvar "DWGPREFIX") (getvar "DWGNAME")))
+      (setq response (yuantus-helper-upload "/document/bom-import" item-id filepath))
+      (if (null response)
+        (progn
+          (princ "\n[YUANTUS_BOM_IMPORT] bom-import failed (bridge already logged error).")
+          (princ)
+        )
+        (progn
+          (princ (strcat "\n[YUANTUS_BOM_IMPORT] item=" item-id))
+          (princ (strcat "\n" response))
+          (princ "\n[YUANTUS_BOM_IMPORT] display only; no DWG write.")
+          (princ)
+        )
+      )
+    )
+    (progn
+      (princ "\n[YUANTUS_BOM_IMPORT] drawing has unsaved changes or modified-state unavailable; save first. Not uploaded.")
+      (princ)
+    )
+  )
+)
+
+
 ;;; Load-time confirmation. Single princ so loading the file leaves
 ;;; exactly one short line on the CAD command line.
-(princ "\n[YUANTUS_CAD_HELPER] yuantus_cad_helper.lsp loaded; commands YUANTUS_DIFF_PREVIEW, YUANTUS_CHECKOUT, YUANTUS_UNDO_CHECKOUT, YUANTUS_STATUS available.")
+(princ "\n[YUANTUS_CAD_HELPER] yuantus_cad_helper.lsp loaded; commands YUANTUS_DIFF_PREVIEW, YUANTUS_CHECKOUT, YUANTUS_UNDO_CHECKOUT, YUANTUS_STATUS, YUANTUS_CHECKIN, YUANTUS_BOM_IMPORT available.")
 (princ)
