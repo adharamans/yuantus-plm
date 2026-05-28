@@ -150,7 +150,9 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   (PR #602, breakage state-machine integration §3.1 R1 — the
     #   HTTP seam over `BreakageIncidentService.create_breakage_design_loopback_eco`
     #   shipped by #596).
-    assert len(app.routes) == 677
+    # - 678: + `GET /api/v1/plm-erp/items/{item_id}/publication-readiness`
+    #   (PLM→ERP G2 R1-B publication-readiness API).
+    assert len(app.routes) == 678
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

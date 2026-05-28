@@ -13,7 +13,7 @@ Pinned:
 - §3.D exactly three `yuantus_parallel_breakage_design_loopback_links_*`
   gauges with **no `common_labels`** (Medium 2).
 - §3.E current-state, not `created_at`-windowed.
-- §3.F no new route; `len(app.routes)` stays 677;
+- §3.F no new route; route count follows the current app-level pin;
   `summary()`/`/parallel-ops/summary[/export]` JSON
   byte-identical (Medium 1).
 """
@@ -336,12 +336,12 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
     finally:
         session.close()
 
-    # Route count unchanged. (Heavier app-build is fine here; same
-    # discipline as the §3.4 phase-4 guard.)
+    # This slice still adds no route. Keep this secondary pin aligned with the
+    # current app-level route-count contract.
     from yuantus.api.app import create_app
 
     app = create_app()
-    assert len(app.routes) == 677
+    assert len(app.routes) == 678
 
 
 # ==========================================================================
