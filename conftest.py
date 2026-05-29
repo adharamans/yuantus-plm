@@ -23,6 +23,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_plm_erp_publication_router.py",
     "src/yuantus/meta_engine/tests/test_erp_publication_outbox_service.py",
     "src/yuantus/meta_engine/tests/test_plm_erp_publication_outbox_router.py",
+    "src/yuantus/meta_engine/tests/test_plm_erp_publication_outbox_worker.py",
     "src/yuantus/meta_engine/tests/test_parallel_tasks_services.py",
     "src/yuantus/meta_engine/tests/test_bom_delta_preview.py",
     "src/yuantus/meta_engine/tests/test_eco_parallel_flow_hooks.py",

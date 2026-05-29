@@ -88,6 +88,16 @@ class ErpPublicationOutbox(Base):
     error_message = Column(Text, nullable=True)
     dispatched_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Worker/scheduling (R2 worker daemon, additive — orthogonal to the state
+    # machine: a row stays `pending` while claimed). next_attempt_at defaults to
+    # now() so a never-failed pending row is immediately due; a retry reschedule
+    # pushes it into the future. worker_id/claimed_at are the claim markers.
+    next_attempt_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    worker_id = Column(String, nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+
     # Extensible / audit.
     properties = Column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
     created_at = Column(

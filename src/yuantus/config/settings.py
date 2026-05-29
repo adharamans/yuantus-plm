@@ -432,6 +432,21 @@ class Settings(BaseSettings):
     JOB_STALE_TIMEOUT_SECONDS: int = Field(
         default=900, description="Requeue processing jobs after this timeout (seconds)"
     )
+    # PLM->ERP publication outbox worker (G2 R2 worker daemon)
+    PUBLICATION_OUTBOX_POLL_INTERVAL_SECONDS: int = Field(
+        default=10, description="PLM->ERP publication worker poll interval (seconds)"
+    )
+    PUBLICATION_OUTBOX_BATCH_SIZE: int = Field(
+        default=20, description="Max publication-outbox rows claimed per worker tick"
+    )
+    PUBLICATION_OUTBOX_RETRY_BACKOFF_SECONDS: int = Field(
+        default=30,
+        description="PLM->ERP publication retry backoff seconds (linear * attempt_count)",
+    )
+    PUBLICATION_OUTBOX_STALE_TIMEOUT_SECONDS: int = Field(
+        default=900,
+        description="Reclaim publication-outbox rows claimed but unprocessed beyond this (seconds)",
+    )
     METRICS_ENABLED: bool = Field(
         default=True,
         description="Serve `/api/v1/metrics` (Prometheus text format). When False the endpoint returns 404; instrumentation always records in-memory.",

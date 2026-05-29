@@ -138,6 +138,49 @@ def worker(
         typer.echo(f"Worker '{w.worker_id}' stopped.", err=True)
 
 
+@app.command(name="publication-worker")
+def publication_worker(
+    worker_id: Optional[str] = typer.Option(None, help="Worker id"),
+    poll_interval: Optional[int] = typer.Option(
+        None, help="Poll interval seconds (default from settings)"
+    ),
+    once: bool = typer.Option(False, help="Drain one batch then exit"),
+    tenant: Optional[str] = typer.Option(None, "--tenant", help="Tenant id"),
+    org: Optional[str] = typer.Option(None, "--org", help="Org id"),
+) -> None:
+    """Run the PLM->ERP publication outbox worker (auto-drains due pending rows).
+
+    R2: the only adapter is the no-I/O Null adapter, so a `send` reaches `sent`
+    via Null (no real ERP). The real connector is a later slice.
+    """
+    if tenant is not None:
+        tenant_id_var.set(tenant)
+    if org is not None:
+        org_id_var.set(org)
+
+    from yuantus.meta_engine.bootstrap import import_all_models
+    from yuantus.meta_engine.erp_publication.worker import PublicationOutboxWorker
+
+    import_all_models()
+
+    w = PublicationOutboxWorker(
+        worker_id or "publication-worker-1", poll_interval_seconds=poll_interval
+    )
+    if once:
+        processed = w.run_once()
+        typer.echo(f"Processed {processed} publication outbox row(s).")
+        return
+
+    typer.echo(
+        f"Publication worker '{w.worker_id}' started. Press Ctrl+C to stop.", err=True
+    )
+    try:
+        w.run_forever()
+    except KeyboardInterrupt:
+        w.stop()
+        typer.echo(f"Publication worker '{w.worker_id}' stopped.", err=True)
+
+
 @app.command()
 def scheduler(
     poll_interval: Optional[int] = typer.Option(

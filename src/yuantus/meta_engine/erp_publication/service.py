@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from yuantus.meta_engine.erp_publication.adapter import ErpPublicationAdapter
@@ -417,3 +417,57 @@ class ErpPublicationOutboxService:
         raise PublicationReplayError(
             f"state {row.state!r} is not replayable (only failed / skipped)"
         )
+
+    # -- worker-side deferred retry (distinct from synchronous replay) --
+    def reschedule_retry(
+        self,
+        row: ErpPublicationOutbox,
+        *,
+        attempt_count_before: int,
+        backoff_seconds: int,
+        now: Optional[datetime] = None,
+    ) -> ErpPublicationOutbox:
+        """DEFERRED retry of a just-`process()`-ed failed row, for the worker.
+
+        Distinct from `replay()` (which re-processes synchronously): this only
+        sets the schedule and lets the next poll re-claim the row.
+
+        Retries ONLY `remote_error`/`adapter_error` (the locked reason rule);
+        leaves `validation_error`/`not_eligible` terminal. GUARD: `process()`
+        increments `attempt_count` only right before `adapter.send()`, so a
+        build/validate `adapter_error` that failed earlier left the count
+        unchanged — count this attempt once here (detected via
+        `attempt_count_before`) so such failures cannot retry forever at attempt
+        0. At `max_attempts` the row stays `failed` (dead-letter); otherwise it
+        returns to `pending` with the claim cleared and
+        `next_attempt_at = now + backoff * attempt_count`.
+        """
+        if row.state != ErpPublicationState.FAILED.value:
+            return row
+        if row.reason not in (
+            ErpPublicationReason.REMOTE_ERROR.value,
+            ErpPublicationReason.ADAPTER_ERROR.value,
+        ):
+            return row  # not retryable -> stays terminal failed
+
+        if (row.attempt_count or 0) == (attempt_count_before or 0):
+            # process() failed before its pre-send increment -> count it now.
+            row.attempt_count = (row.attempt_count or 0) + 1
+
+        if (row.attempt_count or 0) >= (row.max_attempts or 0):
+            # dead-letter: stays failed; release the claim for cleanliness.
+            row.worker_id = None
+            row.claimed_at = None
+            self.session.flush()
+            return row
+
+        now = now or datetime.now(timezone.utc)
+        backoff = max(int(backoff_seconds), 0) * max(row.attempt_count or 1, 1)
+        row.state = ErpPublicationState.PENDING.value
+        row.reason = None
+        row.error_message = None
+        row.worker_id = None
+        row.claimed_at = None
+        row.next_attempt_at = now + timedelta(seconds=backoff)
+        self.session.flush()
+        return row
