@@ -33,6 +33,7 @@ from yuantus.api.dependencies.auth import (
     require_admin_permission,
 )
 from yuantus.database import get_db
+from yuantus.meta_engine.erp_publication.service import build_snapshot
 from yuantus.meta_engine.models.item import Item
 from yuantus.meta_engine.services.latest_released_guard import (
     LatestReleasedGuardService,
@@ -114,6 +115,16 @@ class PublicationReadinessResponse(BaseModel):
     blocking_reasons: List[BlockingReason] = Field(default_factory=list)
 
 
+class PublicationExportResponse(BaseModel):
+    item_id: str
+    eligible: bool
+    generated_at: Optional[datetime] = None
+    blocking_reasons: List[BlockingReason] = Field(default_factory=list)
+    # The canonical, target-agnostic publishable package (build_snapshot output),
+    # present ONLY when eligible; null otherwise (read-only export).
+    snapshot: Optional[dict] = None
+
+
 @publication_readiness_router.get(
     "/items/{item_id}/publication-readiness",
     response_model=PublicationReadinessResponse,
@@ -145,6 +156,61 @@ def get_publication_readiness(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@publication_readiness_router.get(
+    "/items/{item_id}/publication/export",
+    response_model=PublicationExportResponse,
+)
+def get_publication_export(
+    item_id: str,
+    ruleset_id: str = Query("readiness"),
+    mbom_limit: int = Query(20, ge=0, le=200),
+    routing_limit: int = Query(20, ge=0, le=200),
+    baseline_limit: int = Query(20, ge=0, le=200),
+    publication_kind: str = Query("readiness"),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PublicationExportResponse:
+    """R4 read-only PULL: the publishable package for an item.
+
+    Reuses build_publication_readiness (R1-B) + build_snapshot (R2). Read-only:
+    no enqueue, no POST, no adapter, no write. `snapshot` is the canonical,
+    target-agnostic package (`target_system=""`), present only when eligible; an
+    ineligible item returns 200 with `snapshot=null` + blocking_reasons.
+    """
+    require_admin_permission(user)
+
+    item = db.get(Item, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+
+    try:
+        readiness = build_publication_readiness(
+            db,
+            item,
+            item_id,
+            ruleset_id=ruleset_id,
+            mbom_limit=mbom_limit,
+            routing_limit=routing_limit,
+            baseline_limit=baseline_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    snapshot = None
+    if readiness.eligible:
+        snapshot = build_snapshot(
+            readiness, target_system="", publication_kind=publication_kind
+        )
+
+    return PublicationExportResponse(
+        item_id=item_id,
+        eligible=readiness.eligible,
+        generated_at=readiness.generated_at,
+        blocking_reasons=readiness.blocking_reasons,
+        snapshot=snapshot,
+    )
 
 
 def build_publication_readiness(

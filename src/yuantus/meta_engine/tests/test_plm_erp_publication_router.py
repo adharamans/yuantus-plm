@@ -355,3 +355,89 @@ def test_response_contains_no_purchase_sale_transaction():
     assert "purchase_order" not in body
     assert "sale_order" not in body
     assert "purchase/sale" not in body
+
+
+# --- R4 /publication/export (read-only pull) ---------------------------------
+
+_EXPORT_URL = "/api/v1/plm-erp/items/item-1/publication/export"
+
+
+def test_export_denies_non_admin():
+    client = _client(_VIEWER, _item())
+    patchers, _svc = _patched(_payload())
+    try:
+        resp = client.get(_EXPORT_URL)
+    finally:
+        _stop(patchers)
+    assert resp.status_code == 403
+
+
+def test_export_404_when_item_missing():
+    client = _client(_ADMIN, None)
+    resp = client.get(_EXPORT_URL)
+    assert resp.status_code == 404
+
+
+def test_export_eligible_returns_canonical_snapshot():
+    cv = SimpleNamespace(
+        id="ver-1", generation=2, revision="B", version_label="2.B", state="Released",
+        is_current=True, is_released=True, released_at=None, primary_file_id="f1",
+        version_files=[
+            SimpleNamespace(file_id="f1", file_role="native_cad", is_primary=True, sequence=0, snapshot_path="/p/a.dwg"),
+        ],
+    )
+    client = _client(_ADMIN, _item(current_version=cv))
+    patchers, _svc = _patched(_payload(ok=True))
+    try:
+        resp = client.get(_EXPORT_URL)
+    finally:
+        _stop(patchers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["eligible"] is True
+    assert data["blocking_reasons"] == []
+    snap = data["snapshot"]
+    assert snap is not None
+    assert snap["target_system"] == ""  # target-agnostic export
+    assert snap["item"]["item_id"] == "item-1"
+    assert snap["version"]["version_id"] == "ver-1"
+    assert snap["file_refs"][0]["file_id"] == "f1"
+
+
+def test_export_ineligible_returns_null_snapshot():
+    client = _client(_ADMIN, _item())
+    patchers, _svc = _patched(
+        _payload(ok=False, resources=[_mbom_error_resource()], error_count=1)
+    )
+    try:
+        resp = client.get(_EXPORT_URL)
+    finally:
+        _stop(patchers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["eligible"] is False
+    assert data["snapshot"] is None  # nothing publishable -> null, not 4xx
+    assert "mbom_release" in {b["reason"] for b in data["blocking_reasons"]}
+
+
+def test_export_unknown_ruleset_400():
+    client = _client(_ADMIN, _item())
+    svc_p = patch(f"{_MODULE}.ReleaseReadinessService")
+    svc = svc_p.start()
+    svc.return_value.get_item_release_readiness.side_effect = ValueError("unknown ruleset")
+    try:
+        resp = client.get(_EXPORT_URL + "?ruleset_id=bogus")
+    finally:
+        svc_p.stop()
+    assert resp.status_code == 400
+
+
+def test_export_publication_kind_stamped_in_snapshot():
+    client = _client(_ADMIN, _item(current_version=None))
+    patchers, _svc = _patched(_payload(ok=True))
+    try:
+        resp = client.get(_EXPORT_URL + "?publication_kind=package")
+    finally:
+        _stop(patchers)
+    data = resp.json()
+    assert data["snapshot"]["publication_kind"] == "package"

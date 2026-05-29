@@ -154,7 +154,9 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   (PLM→ERP G2 R1-B publication-readiness API).
     # - 683: + 5 PLM→ERP G2 R2 publication-outbox manual routes
     #   (enqueue / dry-run / process / replay / status).
-    assert len(app.routes) == 683
+    # - 684: + `GET /api/v1/plm-erp/items/{item_id}/publication/export`
+    #   (PLM→ERP G2 R4 read-only export).
+    assert len(app.routes) == 684
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:
