@@ -269,6 +269,19 @@ def test_process_revalidate_flip_ineligible_skips_without_send(svc):
     assert (out.properties or {}).get("revalidated_ineligible") is True
 
 
+def test_process_revalidate_version_mismatch_skips_without_send(svc):
+    row = svc.enqueue(target_system=TARGET, readiness=_readiness(version_id="VER-1"))
+    out = svc.process(
+        row,
+        NullErpPublicationAdapter(),
+        revalidate=lambda: _readiness(version_id="VER-2"),
+    )
+    assert out.state == "skipped"
+    assert out.reason == "not_eligible"
+    assert out.dispatched_at is None
+    assert (out.properties or {}).get("revalidated_version_mismatch") is True
+
+
 class _RemoteErrorAdapter(NullErpPublicationAdapter):
     def send(self, payload):
         return SendResult(ok=False, error="remote down", error_kind="remote_error")
@@ -351,6 +364,22 @@ def test_replay_skipped_reopens_when_revalidate_now_eligible(svc):
         revalidate=lambda: _readiness(eligible=True),
     )
     assert out.state == "sent"
+
+
+def test_replay_skipped_version_mismatch_stays_skipped(svc):
+    row = svc.enqueue(
+        target_system=TARGET,
+        readiness=_readiness(eligible=False, version_id="VER-1"),
+    )
+    assert row.state == "skipped"
+    out = svc.replay(
+        row,
+        NullErpPublicationAdapter(),
+        revalidate=lambda: _readiness(eligible=True, version_id="VER-2"),
+    )
+    assert out.state == "skipped"
+    assert out.reason == "not_eligible"
+    assert (out.properties or {}).get("revalidated_version_mismatch") is True
 
 
 def test_replay_skipped_without_revalidate_raises(svc):

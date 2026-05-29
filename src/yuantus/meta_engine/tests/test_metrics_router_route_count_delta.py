@@ -3,19 +3,23 @@ from __future__ import annotations
 from yuantus.api.app import create_app
 
 
-EXPECTED_TOTAL_ROUTES = 676
+# 683 = 678 baseline + 5 PLM->ERP G2 R2 publication-outbox manual routes.
+# NOTE: this pin had drifted STALE at 676 (never bumped through the 677/678
+# route additions) and is not in the CI contracts list / no-DB allowlist, so the
+# drift went unobserved until the R2 routes slice reconciled it.
+EXPECTED_TOTAL_ROUTES = 683
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
     """Route-count guard after P4.1 added search indexer status.
 
     The metrics router still owns exactly one route; the app-level total is now
-    676 because `/api/v1/search/indexer/status`,
-    `/api/v1/search/reports/summary`, and
-    `/api/v1/search/reports/eco-stage-aging`, and
-    `/api/v1/search/reports/eco-state-trend` landed after Phase 2. If a future
-    change adds another route in this scope, this test fails and forces a
-    conversation about scope creep.
+    683. NOTE: this guard had drifted stale at 676 (never bumped through the
+    677/678 route additions) and is not in the CI contracts list / no-DB
+    allowlist, so the drift went unobserved until the PLM->ERP G2 R2
+    publication-outbox routes reconciled it (678 baseline + 5 outbox routes).
+    If a future change adds another route in this scope, this test fails and
+    forces a conversation about scope creep.
     """
     app = create_app()
     assert len(app.routes) == EXPECTED_TOTAL_ROUTES, (

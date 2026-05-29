@@ -160,6 +160,50 @@ class ErpPublicationOutboxService:
             row.state = ErpPublicationState.SKIPPED.value
             row.reason = ErpPublicationReason.NOT_ELIGIBLE.value
 
+    @staticmethod
+    def _fresh_version_id(readiness: Any) -> Optional[str]:
+        version = getattr(readiness, "version", None)
+        if version is None:
+            return None
+        version_id = getattr(version, "version_id", None)
+        return str(version_id) if version_id else None
+
+    def _mark_revalidated_not_eligible(
+        self,
+        row: ErpPublicationOutbox,
+        *,
+        version_mismatch: bool = False,
+        fresh_version_id: Optional[str] = None,
+    ) -> ErpPublicationOutbox:
+        row.state = ErpPublicationState.SKIPPED.value
+        row.reason = ErpPublicationReason.NOT_ELIGIBLE.value
+        props = {
+            **(row.properties or {}),
+            "revalidated_ineligible": True,
+        }
+        if version_mismatch:
+            props["revalidated_version_mismatch"] = True
+            props["revalidated_version_id"] = fresh_version_id
+        row.properties = props
+        self.session.flush()
+        return row
+
+    def _revalidate_allows_send(
+        self, row: ErpPublicationOutbox, fresh: Any
+    ) -> bool:
+        if not bool(fresh.eligible):
+            self._mark_revalidated_not_eligible(row)
+            return False
+        fresh_version_id = self._fresh_version_id(fresh)
+        if fresh_version_id != row.version_id:
+            self._mark_revalidated_not_eligible(
+                row,
+                version_mismatch=True,
+                fresh_version_id=fresh_version_id,
+            )
+            return False
+        return True
+
     def _fail_adapter_error(
         self, row: ErpPublicationOutbox, exc: Exception
     ) -> ErpPublicationOutbox:
@@ -280,14 +324,7 @@ class ErpPublicationOutboxService:
         # D-R2-1: re-validate eligibility for a `sent` transition.
         if revalidate is not None:
             fresh = revalidate()
-            if not bool(fresh.eligible):
-                row.state = ErpPublicationState.SKIPPED.value
-                row.reason = ErpPublicationReason.NOT_ELIGIBLE.value
-                row.properties = {
-                    **(row.properties or {}),
-                    "revalidated_ineligible": True,
-                }
-                self.session.flush()
+            if not self._revalidate_allows_send(row, fresh):
                 return row
 
         try:
@@ -359,6 +396,13 @@ class ErpPublicationOutboxService:
             fresh = revalidate()
             if not bool(fresh.eligible):
                 return row  # still ineligible
+            fresh_version_id = self._fresh_version_id(fresh)
+            if fresh_version_id != row.version_id:
+                return self._mark_revalidated_not_eligible(
+                    row,
+                    version_mismatch=True,
+                    fresh_version_id=fresh_version_id,
+                )
             snapshot = build_snapshot(
                 fresh,
                 target_system=row.target_system,
