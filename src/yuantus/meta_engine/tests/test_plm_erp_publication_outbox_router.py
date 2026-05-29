@@ -283,7 +283,7 @@ class _RaiseAdapter(NullErpPublicationAdapter):
 def test_GUARD2_adapter_exception_folds_to_failed_not_500(db):
     row_id = _enqueue(db, _readiness()).outbox.id
     with _patch_readiness(_readiness())[0]:
-        with patch(f"{_MODULE}.NullErpPublicationAdapter", _RaiseAdapter):
+        with patch(f"{_MODULE}.resolve_adapter", lambda *a, **k: _RaiseAdapter()):
             resp = process_publication(row_id, user=_ADMIN, db=db)  # must NOT raise
     assert resp.state == "failed"
     assert resp.reason == "adapter_error"
@@ -343,7 +343,7 @@ class _FailValidateAdapter(NullErpPublicationAdapter):
 def test_replay_failed_remote_error_retries_to_sent(db):
     row_id = _enqueue(db, _readiness()).outbox.id
     with _patch_readiness(_readiness())[0]:
-        with patch(f"{_MODULE}.NullErpPublicationAdapter", _RemoteErrorAdapter):
+        with patch(f"{_MODULE}.resolve_adapter", lambda *a, **k: _RemoteErrorAdapter()):
             process_publication(row_id, user=_ADMIN, db=db)  # -> failed/remote_error
     assert db.get(ErpPublicationOutbox, row_id).reason == "remote_error"
     with _patch_readiness(_readiness())[0]:
@@ -353,7 +353,7 @@ def test_replay_failed_remote_error_retries_to_sent(db):
 
 def test_replay_validation_error_not_retryable_409(db):
     row_id = _enqueue(db, _readiness()).outbox.id
-    with patch(f"{_MODULE}.NullErpPublicationAdapter", _FailValidateAdapter):
+    with patch(f"{_MODULE}.resolve_adapter", lambda *a, **k: _FailValidateAdapter()):
         dry_run_publication(row_id, user=_ADMIN, db=db)  # -> failed/validation_error
     assert db.get(ErpPublicationOutbox, row_id).reason == "validation_error"
     with _patch_readiness(_readiness())[0]:

@@ -33,7 +33,7 @@ from yuantus.api.dependencies.auth import (
     require_admin_permission,
 )
 from yuantus.database import get_db
-from yuantus.meta_engine.erp_publication.adapter import NullErpPublicationAdapter
+from yuantus.meta_engine.erp_publication.adapter_registry import resolve_adapter
 from yuantus.meta_engine.erp_publication.models import (
     DEFAULT_PUBLICATION_KIND,
     ErpPublicationOutbox,
@@ -246,7 +246,7 @@ def dry_run_publication(
     row = _load_row(db, outbox_id)
     service = ErpPublicationOutboxService(db)
     try:
-        service.dry_run(row, NullErpPublicationAdapter())
+        service.dry_run(row, resolve_adapter(row.target_system))
     except PublicationReplayError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _row_response(row)
@@ -266,7 +266,7 @@ def process_publication(
     revalidate = _revalidate_for(db, row)
     service = ErpPublicationOutboxService(db)
     try:
-        service.process(row, NullErpPublicationAdapter(), revalidate=revalidate)
+        service.process(row, resolve_adapter(row.target_system), revalidate=revalidate)
     except PublicationReplayError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
@@ -289,7 +289,7 @@ def replay_publication(
     revalidate = _revalidate_for(db, row)
     service = ErpPublicationOutboxService(db)
     try:
-        service.replay(row, NullErpPublicationAdapter(), revalidate=revalidate)
+        service.replay(row, resolve_adapter(row.target_system), revalidate=revalidate)
     except PublicationReplayError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:

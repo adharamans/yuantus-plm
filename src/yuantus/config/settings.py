@@ -447,6 +447,25 @@ class Settings(BaseSettings):
         default=900,
         description="Reclaim publication-outbox rows claimed but unprocessed beyond this (seconds)",
     )
+    # PLM->ERP publication connector (G2 R3, generic outbound HTTP)
+    PUBLICATION_ERP_TARGET_SYSTEM: str = Field(
+        default="",
+        description="target_system routed to the HTTP connector (empty = Null adapter only)",
+    )
+    PUBLICATION_ERP_BASE_URL: str = Field(
+        default="",
+        description="PLM->ERP publication HTTP endpoint base URL (empty = Null adapter only)",
+    )
+    PUBLICATION_ERP_PATH: str = Field(
+        default="/publications", description="PLM->ERP publication POST path"
+    )
+    PUBLICATION_ERP_SERVICE_TOKEN: str = Field(
+        default="",
+        description="Bearer token for the publication HTTP endpoint (never logged)",
+    )
+    PUBLICATION_ERP_TIMEOUT_SECONDS: float = Field(
+        default=30.0, description="PLM->ERP publication HTTP timeout (seconds)"
+    )
     METRICS_ENABLED: bool = Field(
         default=True,
         description="Serve `/api/v1/metrics` (Prometheus text format). When False the endpoint returns 404; instrumentation always records in-memory.",

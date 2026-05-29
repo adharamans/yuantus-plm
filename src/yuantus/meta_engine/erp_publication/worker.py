@@ -25,10 +25,8 @@ from sqlalchemy.orm import Session
 
 from yuantus.config import get_settings
 from yuantus.database import get_db_session
-from yuantus.meta_engine.erp_publication.adapter import (
-    ErpPublicationAdapter,
-    NullErpPublicationAdapter,
-)
+from yuantus.meta_engine.erp_publication.adapter import ErpPublicationAdapter
+from yuantus.meta_engine.erp_publication.adapter_registry import resolve_adapter
 from yuantus.meta_engine.erp_publication.models import (
     ErpPublicationOutbox,
     ErpPublicationReason,
@@ -66,8 +64,11 @@ class PublicationOutboxWorker:
     ) -> None:
         s = get_settings()
         self.worker_id = worker_id
-        # Null adapter only in R2 (no real connector); injectable for tests.
-        self.adapter = adapter or NullErpPublicationAdapter()
+        # When no adapter override is given, resolve per-row by target_system via
+        # the registry (R3): a configured target -> HttpErpPublicationAdapter,
+        # otherwise the no-I/O Null adapter. `adapter` (when set) overrides for
+        # tests / a fixed deployment.
+        self.adapter = adapter
         # Reuse R1-B's exact logic for the version-drift revalidate; injectable.
         self.readiness_builder = readiness_builder or build_publication_readiness
         self.batch_size = (
@@ -191,9 +192,10 @@ class PublicationOutboxWorker:
                 baseline_limit=int(limits.get("baseline_limit", 20)),
             )
 
+        adapter = self.adapter or resolve_adapter(row.target_system)
         attempt_before = row.attempt_count or 0
         try:
-            service.process(row, self.adapter, revalidate=_revalidate)
+            service.process(row, adapter, revalidate=_revalidate)
         except Exception as exc:  # never crash the loop (e.g. revalidate raised)
             session.rollback()
             logger.error(
@@ -203,14 +205,23 @@ class PublicationOutboxWorker:
                 exc,
                 exc_info=True,
             )
-            # Defer the row so it is not hot-looped; release the claim.
+            # A process() exception (e.g. the revalidate readiness build raised)
+            # CONSUMES an attempt so it cannot defer forever (#673 §10): release
+            # the claim and dead-letter at max_attempts; otherwise back off and
+            # stay pending for the next poll.
             row = session.get(ErpPublicationOutbox, row.id)
             if row is not None:
+                row.attempt_count = (row.attempt_count or 0) + 1
                 row.worker_id = None
                 row.claimed_at = None
-                row.next_attempt_at = datetime.now(timezone.utc) + timedelta(
-                    seconds=max(self.backoff_seconds, 1)
-                )
+                row.error_message = str(exc)
+                if (row.attempt_count or 0) >= (row.max_attempts or 0):
+                    row.state = ErpPublicationState.FAILED.value
+                    row.reason = ErpPublicationReason.REMOTE_ERROR.value
+                else:
+                    row.next_attempt_at = datetime.now(timezone.utc) + timedelta(
+                        seconds=max(self.backoff_seconds, 1)
+                    )
                 session.commit()
             return
 

@@ -313,6 +313,52 @@ def test_stale_claim_reclaimed(session):
     assert row.worker_id is None and row.claimed_at is None
 
 
+# --- registry resolution (no adapter override) ------------------------------
+
+
+def test_worker_resolves_adapter_via_registry_when_no_override(session):
+    from unittest.mock import MagicMock, patch
+
+    row = _enqueue(session)
+    resolver = MagicMock(return_value=NullErpPublicationAdapter())
+    w = PublicationOutboxWorker(
+        "w1",
+        adapter=None,  # no override -> resolve per-row by target_system
+        readiness_builder=lambda *a, **k: _readiness(),
+        batch_size=10, backoff_seconds=30, stale_timeout_seconds=900, poll_interval_seconds=10,
+    )
+    with patch("yuantus.meta_engine.erp_publication.worker.resolve_adapter", resolver):
+        w.run_once_with_session(session)
+    session.refresh(row)
+    assert row.state == SENT
+    resolver.assert_called_once_with(row.target_system)
+
+
+def test_revalidate_raise_consumes_attempt_and_dead_letters(session):
+    # #673 §10(a): a process() exception (here, the revalidate readiness build
+    # raises) must CONSUME an attempt and dead-letter at max_attempts — not defer
+    # forever at attempt 0.
+    row = _enqueue(session)
+    row.max_attempts = 2
+    session.commit()
+
+    def boom(*a, **k):
+        raise ValueError("readiness build broke")
+
+    w = _worker(builder=boom)
+    for _ in range(5):
+        row.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        row.worker_id = None
+        row.claimed_at = None
+        session.commit()
+        w.run_once_with_session(session)
+        session.refresh(row)
+        if row.state == FAILED:
+            break
+    assert row.state == FAILED and row.attempt_count == 2  # bounded, did not loop at 0
+    assert row.reason == ErpPublicationReason.REMOTE_ERROR.value
+
+
 # --- migration schema (guard #2) --------------------------------------------
 
 
