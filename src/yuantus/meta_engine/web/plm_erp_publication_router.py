@@ -133,10 +133,11 @@ def get_publication_readiness(
     if not item:
         raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
 
-    service = ReleaseReadinessService(db)
     try:
-        payload = service.get_item_release_readiness(
-            item_id=item_id,
+        return build_publication_readiness(
+            db,
+            item,
+            item_id,
             ruleset_id=ruleset_id,
             mbom_limit=mbom_limit,
             routing_limit=routing_limit,
@@ -144,6 +145,36 @@ def get_publication_readiness(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def build_publication_readiness(
+    db: Session,
+    item: Item,
+    item_id: str,
+    *,
+    ruleset_id: str = "readiness",
+    mbom_limit: int = 20,
+    routing_limit: int = 20,
+    baseline_limit: int = 20,
+) -> PublicationReadinessResponse:
+    """Shared, HTTP-agnostic publication-readiness builder (R1-B logic).
+
+    Extracted so R2 (the publication outbox) can reuse the EXACT R1-A/R1-B
+    eligibility + snapshot logic instead of copying it (R2 build taskbook §8).
+    Deliberately kept in THIS module so the existing R1-B tests — which patch
+    the names referenced below (ReleaseReadinessService, the guards,
+    _build_response) — stay green unchanged. Raises ValueError for unknown
+    ruleset / item-state problems (callers map to HTTP 400); the latest-released
+    and suspended typed guards are converted to blocking_reasons here.
+    """
+    service = ReleaseReadinessService(db)
+    payload = service.get_item_release_readiness(
+        item_id=item_id,
+        ruleset_id=ruleset_id,
+        mbom_limit=mbom_limit,
+        routing_limit=routing_limit,
+        baseline_limit=baseline_limit,
+    )
 
     readiness = _build_response(payload=payload, ruleset_id=ruleset_id)
 
@@ -159,8 +190,6 @@ def get_publication_readiness(
         blocking_reasons.append(
             BlockingReason(reason="not_latest_released", detail=getattr(exc, "reason", None))
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # suspended guard
     suspended_ok = True
@@ -171,8 +200,6 @@ def get_publication_readiness(
         blocking_reasons.append(
             BlockingReason(reason="suspended", detail=getattr(exc, "reason", None))
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # readiness resource errors (mbom_release / routing_release / baseline_release)
     if not readiness.summary.ok:
