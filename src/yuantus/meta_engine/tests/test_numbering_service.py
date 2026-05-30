@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -353,3 +354,142 @@ def test_generic_allocation_respects_existing_item_number_floor_when_sequence_la
 
     assert value == 21
     session.flush.assert_called_once()
+
+
+# ==========================================================================
+# G4 token-pattern vocabulary (render + validation + real-SQLite floor/scope)
+# ==========================================================================
+
+_NS_DATETIME = "yuantus.meta_engine.services.numbering_service.datetime"
+
+
+def _sqlite_session(tmp_path: Path, name: str):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / name}",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+    # Create only the tables these tests touch (mirrors the existing SQLite tests)
+    # to avoid resolving FKs of unrelated, unimported models.
+    Base.metadata.create_all(
+        engine, tables=[Item.__table__, NumberingSequence.__table__]
+    )
+    return sessionmaker(bind=engine, expire_on_commit=False)()
+
+
+def _seed_item(session, item_id: str, number: str) -> None:
+    session.add(
+        Item(
+            id=item_id,
+            item_type_id="Part",
+            config_id=f"cfg-{item_id}",
+            generation=1,
+            is_current=True,
+            state="Active",
+            properties={"item_number": number},
+        )
+    )
+    session.commit()
+
+
+def test_token_pattern_renders_date_literal_and_trailing_counter() -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type(
+        "Part", numbering={"pattern": "PART-{date:%Y%m}-{seq}", "width": 6, "start": 1}
+    )
+    with patch(_NS_DATETIME) as mdt:
+        mdt.utcnow.return_value = datetime(2026, 1, 15)
+        with patch.object(service, "_allocate_counter", return_value=7) as alloc:
+            number = service.generate(item_type)
+
+    assert number == "PART-202601-000007"
+    rule = alloc.call_args.kwargs["rule"]
+    assert rule.prefix == "PART-202601-"  # rendered scope-prefix handed to allocator
+    assert rule.token_mode is True
+
+
+def test_legacy_rule_is_not_token_mode() -> None:
+    service = NumberingService(MagicMock())
+    rule = service.resolve_rule(
+        make_item_type("Part", numbering={"prefix": "PART-", "width": 6, "start": 1})
+    )
+    assert rule.token_mode is False
+    assert rule.prefix == "PART-"
+
+
+@pytest.mark.parametrize(
+    "pattern, message",
+    [
+        ("PART-{bogus}-{seq}", "unknown numbering token"),
+        ("PART-{date:%Y}", "must include the .seq. token"),
+        ("PART-{seq}-{date:%Y}", "must be the final"),
+        ("PART-{date:%B}-{seq}", "unsupported numbering date code"),
+        ("PART-{seq}}", "stray brace"),
+        ("PART-{seq", "stray brace"),  # unmatched '{' -> stray brace, not a token
+    ],
+)
+def test_token_pattern_validation_errors(pattern, message) -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type("Part", numbering={"pattern": pattern})
+    with pytest.raises(ValueError, match=message):
+        service.resolve_rule(item_type)
+
+
+def test_token_pattern_rejects_digit_immediately_before_seq() -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type("Part", numbering={"pattern": "P{date:%Y}{seq}"})
+    with patch(_NS_DATETIME) as mdt:
+        mdt.utcnow.return_value = datetime(2026, 1, 1)
+        with pytest.raises(ValueError, match="non-digit separator"):
+            service.resolve_rule(item_type)
+
+
+def test_token_pattern_rejects_rendered_length_over_120() -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type("Part", numbering={"pattern": ("X" * 121) + "-{seq}"})
+    with pytest.raises(ValueError, match="exceeds 120"):
+        service.resolve_rule(item_type)
+
+
+def test_token_mode_skips_floor_scan_and_starts_at_start(tmp_path: Path) -> None:
+    # Seed a HIGH legacy-shaped number; a floor scan WOULD jump the counter to 501.
+    session = _sqlite_session(tmp_path, "tok_floor.db")
+    _seed_item(session, "p-legacy", "PART-000500")
+    service = NumberingService(session)
+    item_type = make_item_type(
+        "Part", numbering={"pattern": "PART-{date:%Y%m}-{seq}", "width": 6, "start": 1}
+    )
+    with patch(_NS_DATETIME) as mdt:
+        mdt.utcnow.return_value = datetime(2026, 1, 15)
+        with patch.object(
+            service, "_scope", return_value=NumberingScope("default", "default")
+        ):
+            first = service.generate(item_type)
+            second = service.generate(item_type)
+
+    # §6.1: token mode ignores the seeded legacy floor -> starts at `start`, not 501.
+    assert first == "PART-202601-000001"
+    assert second == "PART-202601-000002"
+
+
+def test_token_mode_scopes_counter_per_rendered_prefix(tmp_path: Path) -> None:
+    session = _sqlite_session(tmp_path, "tok_scope.db")
+    service = NumberingService(session)
+    item_type = make_item_type(
+        "Part", numbering={"pattern": "PART-{date:%Y%m}-{seq}", "width": 6, "start": 1}
+    )
+    with patch.object(
+        service, "_scope", return_value=NumberingScope("default", "default")
+    ):
+        with patch(_NS_DATETIME) as mdt:
+            mdt.utcnow.return_value = datetime(2026, 1, 10)
+            jan1 = service.generate(item_type)
+            jan2 = service.generate(item_type)
+        with patch(_NS_DATETIME) as mdt:
+            mdt.utcnow.return_value = datetime(2026, 2, 10)
+            feb1 = service.generate(item_type)
+
+    assert jan1 == "PART-202601-000001"
+    assert jan2 == "PART-202601-000002"
+    # A new rendered prefix (month) gets its own independent counter.
+    assert feb1 == "PART-202602-000001"

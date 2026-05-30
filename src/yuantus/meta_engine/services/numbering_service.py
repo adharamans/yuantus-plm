@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Optional
+import re
 import uuid
 
 from sqlalchemy import Integer, String, and_, case, cast, func, not_, update
@@ -26,12 +27,22 @@ DEFAULT_NUMBERING_RULES = {
     "Part": {"prefix": "PART-", "width": 6, "start": 1},
 }
 
+# G4 token-pattern vocabulary. A pattern is a closed set of `{...}` tokens; the
+# non-counter portion is rendered into the existing `prefix` slot and the trailing
+# `{seq}` is allocated by the unchanged sequence allocator.
+_TOKEN_RE = re.compile(r"\{([^{}]*)\}")
+# Locale-INDEPENDENT numeric strftime codes only (no %B/%A/%b/%a/%p names).
+_ALLOWED_DATE_CODES = frozenset("YymdHMSj")
+
 
 @dataclass(frozen=True)
 class NumberingRule:
     prefix: str
     width: int
     start: int = 1
+    # True when `prefix` is a rendered token-pattern scope-prefix (G4): the
+    # allocator then skips the historical floor scan (§6.1) and starts at `start`.
+    token_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,6 +88,11 @@ class NumberingService:
         if enabled is False:
             return None
 
+        # G4 token mode: an explicit `pattern` switches to the token vocabulary.
+        # Mutually exclusive with the legacy {prefix,width,start} path below.
+        if raw.get("pattern") is not None:
+            return self._resolve_token_rule(raw)
+
         default = DEFAULT_NUMBERING_RULES.get(item_type.id, {})
         prefix = str(raw.get("prefix") or default.get("prefix") or "").strip()
         if not prefix:
@@ -96,6 +112,114 @@ class NumberingService:
             raise ValueError("numbering start must be > 0")
 
         return NumberingRule(prefix=prefix, width=width_int, start=start_int)
+
+    def _resolve_token_rule(self, raw: dict) -> NumberingRule:
+        """Resolve a G4 token pattern into a NumberingRule whose `prefix` is the
+        rendered scope-prefix and whose counter (`{seq}`) is the trailing
+        zero-pad. `width`/`start` are reused for `{seq}`. Enforces the §6 locks:
+        non-empty rendered prefix, a non-digit immediately before `{seq}`, and
+        rendered length <= 120 (the `prefix` column width).
+        """
+        pattern = raw.get("pattern")
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError("numbering pattern must be a non-empty string")
+
+        width = raw.get("width", 6)
+        start = raw.get("start", 1)
+        try:
+            width_int = int(width)
+            start_int = int(start)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("numbering width/start must be integers") from exc
+        if width_int <= 0:
+            raise ValueError("numbering width must be > 0")
+        if start_int <= 0:
+            raise ValueError("numbering start must be > 0")
+
+        rendered_prefix = self._render_pattern_prefix(pattern)
+        if not rendered_prefix:
+            raise ValueError(
+                "numbering pattern must render a non-empty prefix before {seq}"
+            )
+        if rendered_prefix[-1].isdigit():
+            # §6.2: a non-digit immediately before {seq} keeps a legacy-mode floor
+            # scan on the same item_type from ever miscounting a token number.
+            raise ValueError(
+                "numbering pattern must place a non-digit separator immediately "
+                "before {seq}"
+            )
+        if len(rendered_prefix) > 120:
+            raise ValueError("rendered numbering prefix exceeds 120 characters")
+
+        return NumberingRule(
+            prefix=rendered_prefix,
+            width=width_int,
+            start=start_int,
+            token_mode=True,
+        )
+
+    def _render_pattern_prefix(self, pattern: str) -> str:
+        """Render the non-counter portion of a token pattern (everything before
+        the trailing `{seq}`). Closed token set: literal text, `{date:FMT}`, and a
+        single trailing `{seq}`. Unknown tokens, stray braces, a non-final `{seq}`,
+        or a missing `{seq}` all raise ValueError (G4 §4/§6).
+        """
+        parts: list[str] = []
+        seq_seen = False
+        pos = 0
+        for match in _TOKEN_RE.finditer(pattern):
+            literal = pattern[pos:match.start()]
+            self._reject_stray_braces(literal)
+            if seq_seen:
+                raise ValueError("{seq} must be the final numbering token")
+            parts.append(literal)
+            token = match.group(1).strip()
+            if token == "seq":
+                seq_seen = True
+            elif token.startswith("date:"):
+                self._validate_date_fmt(token[len("date:"):])
+                parts.append(datetime.utcnow().strftime(token[len("date:"):]))
+            else:
+                raise ValueError(f"unknown numbering token: {{{token}}}")
+            pos = match.end()
+
+        trailing = pattern[pos:]
+        self._reject_stray_braces(trailing)
+        if not seq_seen:
+            raise ValueError("numbering pattern must include the {seq} token")
+        if trailing:
+            raise ValueError("{seq} must be the final numbering token")
+        return "".join(parts)
+
+    @staticmethod
+    def _reject_stray_braces(literal: str) -> None:
+        # §4: no literal-brace passthrough — any `{`/`}` outside a recognized token.
+        if "{" in literal or "}" in literal:
+            raise ValueError("unbalanced or stray brace in numbering pattern")
+
+    @staticmethod
+    def _validate_date_fmt(fmt: str) -> None:
+        if not fmt:
+            raise ValueError("numbering date token requires a format, e.g. {date:%Y%m}")
+        i = 0
+        while i < len(fmt):
+            ch = fmt[i]
+            if ch == "%":
+                if i + 1 >= len(fmt):
+                    raise ValueError("dangling '%' in numbering date format")
+                code = fmt[i + 1]
+                if code == "%":
+                    i += 2
+                    continue
+                if code not in _ALLOWED_DATE_CODES:
+                    raise ValueError(f"unsupported numbering date code %{code}")
+                i += 2
+            else:
+                if not (ch.isalnum() or ch in "-_./"):
+                    raise ValueError(
+                        f"unsupported character in numbering date format: {ch!r}"
+                    )
+                i += 1
 
     def _raw_rule_config(self, item_type: ItemType) -> Optional[Any]:
         ui_layout = getattr(item_type, "ui_layout", None)
@@ -233,6 +357,12 @@ class NumberingService:
         raise RuntimeError("Failed to allocate numbering sequence after retries")
 
     def _floor_allocated_value(self, *, item_type_id: str, rule: NumberingRule) -> int:
+        if rule.token_mode:
+            # §6.1: token mode never reads historical numbers. A freshly-rendered
+            # scope-prefix has no legacy data in its shape, so the counter starts
+            # at `start` and relies solely on the per-prefix sequence row. This
+            # also sidesteps the prefix-ambiguity edge of the LIKE-based scan.
+            return rule.start
         bind = self.session.get_bind()
         dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
         if dialect_name in {"postgresql", "sqlite"}:
