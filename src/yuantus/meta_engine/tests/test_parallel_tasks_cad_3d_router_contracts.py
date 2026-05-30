@@ -17,6 +17,9 @@ _CAD_3D_ROUTE_KEYS = {
     ("GET", "/cad-3d/overlays/{document_item_id}"),
     ("POST", "/cad-3d/overlays/{document_item_id}/components/resolve-batch"),
     ("GET", "/cad-3d/overlays/{document_item_id}/components/{component_ref}"),
+    # G3 3D visual explode (validated explode-config persistence).
+    ("PUT", "/cad-3d/explode/{document_item_id}"),
+    ("GET", "/cad-3d/explode/{document_item_id}"),
 }
 
 

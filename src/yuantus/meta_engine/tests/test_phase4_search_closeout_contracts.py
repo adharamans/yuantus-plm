@@ -158,7 +158,9 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   (PLM→ERP G2 R4 read-only export).
     # - 688: + 4 OdooPLM G5 spare-parts routes (list / add / remove + explode)
     #   on `/api/v1/items/{item_id}/spares`.
-    assert len(app.routes) == 688
+    # - 690: + 2 OdooPLM G3 3D-explode routes (PUT/GET) on
+    #   `/api/v1/cad-3d/explode/{document_item_id}`.
+    assert len(app.routes) == 690
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

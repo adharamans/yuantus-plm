@@ -3,12 +3,12 @@ from __future__ import annotations
 from yuantus.api.app import create_app
 
 
-# 688 = 684 (through G2 R4 /publication/export) + 4 OdooPLM G5 spare-parts routes
-# (list / add / remove + explode on /api/v1/items/{item_id}/spares).
+# 690 = 688 (through G5 spare-parts) + 2 OdooPLM G3 3D-explode routes (PUT/GET on
+# /api/v1/cad-3d/explode/{document_item_id}).
 # NOTE: this pin had drifted STALE at 676 (never bumped through the 677/678
 # route additions) and is not in the CI contracts list / no-DB allowlist, so the
 # drift went unobserved until the R2 routes slice reconciled it.
-EXPECTED_TOTAL_ROUTES = 688
+EXPECTED_TOTAL_ROUTES = 690
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

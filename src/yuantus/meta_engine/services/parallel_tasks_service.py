@@ -7173,6 +7173,55 @@ class ThreeDOverlayService:
 
         return self._overlay_from_payload(payload)
 
+    def upsert_explode(
+        self, *, document_item_id: str, explode_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist a single validated explode config for a document under the
+        existing 3D-overlay row's ``properties["explode"]`` (G3 — no migration).
+
+        Creates the overlay row if absent (empty ``part_refs``). The config
+        structure is validated at the router (Pydantic); the server stores it
+        verbatim and never interprets geometry. Reuses the overlay
+        cache-invalidation seam.
+        """
+        overlay = (
+            self.session.query(ThreeDOverlay)
+            .filter(ThreeDOverlay.document_item_id == document_item_id)
+            .first()
+        )
+        if not overlay:
+            overlay = ThreeDOverlay(
+                id=_uuid(),
+                document_item_id=document_item_id,
+                part_refs=[],
+                properties={},
+            )
+            self.session.add(overlay)
+        props = dict(overlay.properties or {})
+        props["explode"] = explode_config
+        overlay.properties = props
+        overlay.updated_at = _utcnow()
+        self.session.flush()
+        self._cache_invalidate(document_item_id)
+        self._cache_set(document_item_id, self._serialize_overlay(overlay))
+        return explode_config
+
+    def get_explode(
+        self, *, document_item_id: str, user_roles: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Return the document's explode config (or None).
+
+        Inherits the overlay's role-visibility gate via ``get_overlay`` (raises
+        PermissionError if hidden for the current roles).
+        """
+        overlay = self.get_overlay(
+            document_item_id=document_item_id, user_roles=user_roles
+        )
+        if not overlay:
+            return None
+        props = overlay.properties if isinstance(overlay.properties, dict) else {}
+        return props.get("explode")
+
     def resolve_component(
         self,
         *,

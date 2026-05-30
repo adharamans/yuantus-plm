@@ -3873,3 +3873,93 @@ def test_parallel_ops_breakage_helpdesk_failures_export_invalid_request_maps_con
     detail = resp.json().get("detail") or {}
     assert detail.get("code") == "parallel_ops_invalid_request"
     assert detail.get("context", {}).get("export_format") == "xlsx"
+
+
+# --------------------------------------------------------------------------
+# G3 3D visual explode — explode-config endpoints (cad-3d router)
+# --------------------------------------------------------------------------
+
+_EXPLODE_SVC = "yuantus.meta_engine.web.parallel_tasks_cad_3d_router.ThreeDOverlayService"
+
+
+def test_put_3d_explode_valid_persists_and_returns_config():
+    user = SimpleNamespace(id=1, roles=["engineer"], is_superuser=False)
+    client, _db = _client_with_user(user)
+    stored = {
+        "factor": 1.5,
+        "mode": "radial",
+        "offsets": [{"component_ref": "C-001", "offset": [1.0, 0.0, 0.0]}],
+    }
+    with patch(_EXPLODE_SVC) as service_cls:
+        service_cls.return_value.upsert_explode.return_value = stored
+        resp = client.put(
+            "/api/v1/cad-3d/explode/doc-1",
+            json={
+                "factor": 1.5,
+                "mode": "radial",
+                "offsets": [{"component_ref": "C-001", "offset": [1, 0, 0]}],
+            },
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["document_item_id"] == "doc-1"
+    assert body["explode"]["factor"] == 1.5
+    service_cls.return_value.upsert_explode.assert_called_once()
+
+
+def test_put_3d_explode_rejects_bad_offset_length():
+    user = SimpleNamespace(id=1, roles=["engineer"], is_superuser=False)
+    client, _db = _client_with_user(user)
+    resp = client.put(
+        "/api/v1/cad-3d/explode/doc-1",
+        json={
+            "factor": 1.0,
+            "mode": "radial",
+            "offsets": [{"component_ref": "C-001", "offset": [1, 0]}],
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_put_3d_explode_rejects_out_of_range_factor():
+    user = SimpleNamespace(id=1, roles=["engineer"], is_superuser=False)
+    client, _db = _client_with_user(user)
+    resp = client.put(
+        "/api/v1/cad-3d/explode/doc-1",
+        json={"factor": -1.0, "mode": "radial", "offsets": []},
+    )
+    assert resp.status_code == 422
+
+
+def test_get_3d_explode_returns_config():
+    user = SimpleNamespace(id=1, roles=["engineer"], is_superuser=False)
+    client, _db = _client_with_user(user)
+    with patch(_EXPLODE_SVC) as service_cls:
+        service_cls.return_value.get_explode.return_value = {
+            "factor": 2.0,
+            "mode": "axial",
+            "offsets": [],
+        }
+        resp = client.get("/api/v1/cad-3d/explode/doc-1")
+    assert resp.status_code == 200
+    assert resp.json()["explode"]["factor"] == 2.0
+
+
+def test_get_3d_explode_none_when_absent():
+    user = SimpleNamespace(id=1, roles=["engineer"], is_superuser=False)
+    client, _db = _client_with_user(user)
+    with patch(_EXPLODE_SVC) as service_cls:
+        service_cls.return_value.get_explode.return_value = None
+        resp = client.get("/api/v1/cad-3d/explode/doc-1")
+    assert resp.status_code == 200
+    assert resp.json()["explode"] is None
+
+
+def test_get_3d_explode_visibility_denied_returns_403():
+    user = SimpleNamespace(id=1, roles=["viewer"], is_superuser=False)
+    client, _db = _client_with_user(user)
+    with patch(_EXPLODE_SVC) as service_cls:
+        service_cls.return_value.get_explode.side_effect = PermissionError("hidden")
+        resp = client.get("/api/v1/cad-3d/explode/doc-1")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "explode_access_denied"

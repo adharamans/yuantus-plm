@@ -3316,6 +3316,66 @@ def test_3d_overlay_role_gate_and_component_lookup(session):
         )
 
 
+def test_3d_explode_upsert_get_and_update(session):
+    service = ThreeDOverlayService(session)
+    service.reset_cache_for_tests()
+    config = {
+        "factor": 1.5,
+        "mode": "radial",
+        "offsets": [
+            {"component_ref": "C-001", "offset": [1.0, 0.0, 0.0]},
+            {"component_ref": "C-002", "offset": [0.0, 2.0, 0.0]},
+        ],
+    }
+    returned = service.upsert_explode(document_item_id="doc-ex-1", explode_config=config)
+    session.commit()
+    assert returned == config
+
+    service.reset_cache_for_tests()  # force a DB reload
+    assert service.get_explode(document_item_id="doc-ex-1") == config
+
+    # update replaces the config in place
+    service.upsert_explode(
+        document_item_id="doc-ex-1",
+        explode_config={"factor": 3.0, "mode": "axial", "offsets": []},
+    )
+    session.commit()
+    service.reset_cache_for_tests()
+    got = service.get_explode(document_item_id="doc-ex-1")
+    assert got["factor"] == 3.0 and got["offsets"] == []
+
+
+def test_3d_explode_none_when_absent(session):
+    service = ThreeDOverlayService(session)
+    service.reset_cache_for_tests()
+    # no overlay row at all
+    assert service.get_explode(document_item_id="doc-ex-missing") is None
+    # overlay exists but carries no explode key
+    service.upsert_overlay(document_item_id="doc-ex-2", part_refs=[])
+    session.commit()
+    service.reset_cache_for_tests()
+    assert service.get_explode(document_item_id="doc-ex-2") is None
+
+
+def test_3d_explode_inherits_overlay_role_gate(session):
+    service = ThreeDOverlayService(session)
+    service.reset_cache_for_tests()
+    service.upsert_overlay(
+        document_item_id="doc-ex-3", visibility_role="engineer", part_refs=[]
+    )
+    service.upsert_explode(
+        document_item_id="doc-ex-3",
+        explode_config={"factor": 1.0, "mode": "radial", "offsets": []},
+    )
+    session.commit()
+    service.reset_cache_for_tests()
+
+    with pytest.raises(PermissionError):
+        service.get_explode(document_item_id="doc-ex-3", user_roles=["viewer"])
+    got = service.get_explode(document_item_id="doc-ex-3", user_roles=["engineer"])
+    assert got["factor"] == 1.0
+
+
 def test_3d_overlay_batch_resolve_and_cache_stats(session):
     service = ThreeDOverlayService(session)
     service.reset_cache_for_tests()

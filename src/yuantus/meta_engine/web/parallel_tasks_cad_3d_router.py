@@ -58,6 +58,22 @@ class ThreeDOverlayBatchResolveRequest(BaseModel):
     include_missing: bool = True
 
 
+class ExplodeOffset(BaseModel):
+    component_ref: str = Field(..., min_length=1)
+    # [x, y, z], applied client-side to the component_ref's viewer node.
+    offset: List[float] = Field(..., min_length=3, max_length=3)
+
+
+class ExplodeConfigRequest(BaseModel):
+    # G3: a thin, VALIDATED explode config. The server validates structure only
+    # (numeric offsets, well-formed refs) and stores it verbatim; the viewer
+    # applies it to the geometry it holds. `component_ref` is the same opaque,
+    # client-defined identity the overlay uses.
+    factor: float = Field(..., ge=0, le=1000)
+    mode: str = Field("radial", min_length=1, max_length=40)
+    offsets: List[ExplodeOffset] = Field(default_factory=list)
+
+
 @parallel_tasks_cad_3d_router.post("/cad-3d/overlays")
 async def upsert_3d_overlay(
     payload: ThreeDOverlayUpsertRequest,
@@ -215,3 +231,60 @@ async def resolve_overlay_component(
             },
         )
     return result
+
+
+@parallel_tasks_cad_3d_router.put("/cad-3d/explode/{document_item_id}")
+async def upsert_3d_explode(
+    document_item_id: str,
+    payload: ExplodeConfigRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """G3: persist a single VALIDATED explode config for a 3D document.
+
+    Stored under the existing 3D-overlay row (no migration). Validates structure
+    only (numeric offsets, well-formed refs) — never geometry; the viewer applies
+    the offsets to the geometry it holds, keyed by the opaque client-defined
+    ``component_ref``.
+    """
+    service = ThreeDOverlayService(db)
+    try:
+        config = service.upsert_explode(
+            document_item_id=document_item_id,
+            explode_config=payload.model_dump(),
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        _raise_api_error(
+            status_code=400,
+            code="explode_upsert_invalid",
+            message=str(exc),
+            context={"document_item_id": document_item_id},
+        )
+    return {"document_item_id": document_item_id, "explode": config}
+
+
+@parallel_tasks_cad_3d_router.get("/cad-3d/explode/{document_item_id}")
+async def get_3d_explode(
+    document_item_id: str,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """G3: the document's explode config (or null).
+
+    Inherits the overlay's role-visibility gate (403 when hidden).
+    """
+    service = ThreeDOverlayService(db)
+    try:
+        config = service.get_explode(
+            document_item_id=document_item_id, user_roles=_as_roles(user)
+        )
+    except PermissionError as exc:
+        _raise_api_error(
+            status_code=403,
+            code="explode_access_denied",
+            message=str(exc),
+            context={"document_item_id": document_item_id},
+        )
+    return {"document_item_id": document_item_id, "explode": config}
