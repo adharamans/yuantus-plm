@@ -125,6 +125,13 @@ License note（**已逐源抽样核验**）: odooplm 许可证**非单一 LGPL-3
 > - **G1**：CAD helper "最后一英里" **软件侧已闭环**（helper checkout/undo/status/checkin/bom-import 路由 + 六条 LISP 命令 + `yuantus-helper-upload` 多部传输缝；路由计数 15）。详见 `DEV_AND_VERIFICATION_CAD_HELPER_BRIDGE_LAST_MILE_CLOSEOUT_20260527.md`(#662)。残留仅 native-CAD 真机 operational signoff（硬件/操作员）与产品化/跨-CAD 覆盖。
 > - **G2**：**PLM→ERP publication contract 为下一主线**，程序计划见 `DEVELOPMENT_PLM_TO_ERP_PUBLICATION_CONTRACT_PLAN_20260527.md`（outbound 投放契约，不自建 ERP、不绑 Odoo）。
 
+> **状态更新（2026-05-30，仅标注，不改原始分析）**
+> - **G2**：PLM→ERP publication spine **已功能闭环**：readiness API、outbox/routes/worker、generic HTTP connector、read-only export 已落 `main`（#663-#676）。vendor-specific adapter 仅在有明确目标 ERP 时另起 taskbook。
+> - **G3**：3D visual explode **thin server surface 已落地**：validated explode config 存于 `meta_3d_overlays.properties["explode"]`，无 migration/table/model；BOM-derived auto-layout 与 multi-preset table 仍 deferred。详见 `DEV_AND_VERIFICATION_ODOOPLM_G3_3D_EXPLODE_IMPL_20260530.md`(#682)。
+> - **G4**：numbering pattern v1 **已落地**：literal + UTC date + trailing `{seq}` token 复用既有 prefix allocator，无 migration/route/schema change；category/property token 仍 deferred。详见 `DEV_AND_VERIFICATION_ODOOPLM_G4_NUMBERING_PATTERN_IMPL_20260529.md`(#680)。
+> - **G5**：spare parts **已落地**：基于 `ItemType(is_relationship=True)` 关系模型实现 `Part Spare`，无 bespoke table/migration。详见 `DEV_AND_VERIFICATION_ODOOPLM_G5_SPARE_PARTS_IMPL_20260529.md`(#678)。
+> - 当前 ledger 刷新见 `DEVELOPMENT_ODOOPLM_GAP_LEDGER_REFRESH_20260530.md`；§2 原模块表保留为 2026-05-25 历史快照，不追溯改写。
+
 ---
 
 ## 6. 借鉴与建议（可落地，License 边界内）
