@@ -231,6 +231,23 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# finishing/treatment R1 (taskbook #689): `finish` (surface finish / coating) is an
+# OPTIONAL attribute on EVERY default profile — not a new table, route, or service.
+# Its `cad_key` is packaged back by `cad_field_package`'s field-level mapping, so no
+# per-profile `cad_mapping` edit is needed. `finish_standard` stays a
+# tenant/profile-configured companion (via `required_when`), and heat treatment stays
+# forging-only by default — neither is baked in here.
+_FINISH_FIELD = {
+    "name": "finish",
+    "label": "表面处理",
+    "type": "string",
+    "required": False,
+    "cad_key": "表面处理",
+}
+for _profile in DEFAULT_PROFILES.values():
+    _profile["fields"].append(dict(_FINISH_FIELD))
+del _profile
+
 PROFILE_ALIASES = {
     "板材": "sheet",
     "sheet": "sheet",

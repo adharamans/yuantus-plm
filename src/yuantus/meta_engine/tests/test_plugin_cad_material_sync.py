@@ -1868,3 +1868,73 @@ def test_sync_inbound_returns_ambiguous_match_candidates(material_sync_session):
         "part-ambiguous-1",
     }
     assert material_sync_session.query(Item).count() == 2
+
+
+# ==========================================================================
+# finishing/treatment R1 (taskbook #689) — optional `finish` field + the
+# `finish_standard` companion, on the existing material-sync profile system.
+# ==========================================================================
+
+_SHEET_BASE = {"material": "AL-7075", "length": 10, "width": 5, "thickness": 2}
+
+
+def test_finish_is_optional_on_all_default_profiles_and_packages_to_cad():
+    module = _load_plugin_module()
+    profiles = module.load_profiles(config={})
+    for profile_id in ("sheet", "tube", "bar", "forging"):
+        profile = profiles[profile_id]
+        names = {f["name"] for f in profile["fields"] if isinstance(f, dict)}
+        assert "finish" in names, f"{profile_id} is missing the optional finish field"
+        # non-empty finish packages back to its CAD key
+        package = module.cad_field_package(profile, {"finish": "hard-anodized"})
+        assert package.get("表面处理") == "hard-anodized"
+
+
+def test_blank_finish_is_omitted_from_cad_package_by_default():
+    module = _load_plugin_module()
+    profile = module.load_profiles(config={})["sheet"]
+    assert "表面处理" not in module.cad_field_package(profile, {"finish": ""})
+
+
+def test_finish_enum_rejects_unmapped_value():
+    module = _load_plugin_module()
+    profile = module.load_profiles(config={})["sheet"]
+    for field in profile["fields"]:
+        if field.get("name") == "finish":
+            field["enum"] = ["anodized", "painted"]
+    _vals, _composed, errors, _warnings = module.compose_profile(
+        profile, {**_SHEET_BASE, "finish": "chromed"}
+    )
+    assert any(
+        e["field"] == "finish" and e["code"] == "invalid_enum" for e in errors
+    )
+
+
+def test_finish_standard_required_only_when_finish_exists():
+    module = _load_plugin_module()
+    profile = module.load_profiles(config={})["sheet"]
+    profile["fields"].append(
+        {
+            "name": "finish_standard",
+            "label": "表面处理标准",
+            "type": "string",
+            "required_when": {"field": "finish", "exists": True},
+            "cad_key": "表面处理标准",
+        }
+    )
+    # finish absent -> finish_standard not required
+    _v, _c, errors, _w = module.compose_profile(profile, dict(_SHEET_BASE))
+    assert not any(e["field"] == "finish_standard" for e in errors)
+    # finish present, standard absent -> required error
+    _v, _c, errors, _w = module.compose_profile(
+        profile, {**_SHEET_BASE, "finish": "anodized"}
+    )
+    assert any(
+        e["field"] == "finish_standard" and e["code"] == "required" for e in errors
+    )
+    # both present -> clean
+    vals, _c, errors, _w = module.compose_profile(
+        profile, {**_SHEET_BASE, "finish": "anodized", "finish_standard": "GB/T 1031"}
+    )
+    assert not any(e["field"] == "finish_standard" for e in errors)
+    assert vals["finish"] == "anodized"

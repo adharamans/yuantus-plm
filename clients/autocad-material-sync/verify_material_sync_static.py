@@ -393,6 +393,27 @@ def check_brace_balance() -> None:
         require(text.count("{") == text.count("}"), f"unbalanced braces: {path.name}")
 
 
+def check_finish_treatment_aliases() -> None:
+    """finishing/treatment R1 (#689): the AutoCAD field mapper canonicalizes
+    surface finish / coating to ``finish``, keeps ``heat_treatment``, and
+    deliberately does NOT add the bare ``表面`` alias (too broad -> would mis-map
+    unrelated surface-* fields)."""
+    mapper = read(PLUGIN / "CadMaterialFieldMapper.cs")
+    for alias in ("表面处理", "涂层", "finish", "coating"):
+        require(
+            f'{{ "{alias}", "finish" }}' in mapper,
+            f"finishing/treatment R1: missing finish alias {alias!r} in CadMaterialFieldMapper",
+        )
+    require(
+        '{ "热处理", "heat_treatment" }' in mapper,
+        "finishing/treatment R1: heat_treatment alias must remain",
+    )
+    require(
+        '{ "表面", "finish" }' not in mapper,
+        "finishing/treatment R1: bare 表面 alias must not be present (too broad)",
+    )
+
+
 def main() -> int:
     checks = [
         check_xml,
@@ -405,6 +426,7 @@ def main() -> int:
         check_field_service_contract,
         check_diff_preview_ui_contract,
         check_fixture_contract,
+        check_finish_treatment_aliases,
         check_brace_balance,
     ]
     for check in checks:

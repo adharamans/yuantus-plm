@@ -43,6 +43,7 @@ def test_solidworks_fixture_shape_pins_property_table_and_writeback_fields() -> 
         "width": "600",
         "material_category": "sheet",
         "specification": "old-spec",
+        "finish": "painted",
         "heat_treatment": "none",
     }
     assert fixture["expected_writeback_fields"] == {
@@ -56,6 +57,7 @@ def test_solidworks_fixture_shape_pins_property_table_and_writeback_fields() -> 
     forbidden_autocad_keys = {"材料", "规格", "长", "宽", "厚", "图号", "名称"}
     assert forbidden_autocad_keys.isdisjoint(fixture["expected_writeback_fields"])
     assert "SW-HeatTreatment@Part" not in fixture["expected_writeback_fields"]
+    assert "SW-Coating@Part" not in fixture["expected_writeback_fields"]
 
 
 def test_solidworks_fixture_script_runs_without_sdk_or_windows_dependencies() -> None:

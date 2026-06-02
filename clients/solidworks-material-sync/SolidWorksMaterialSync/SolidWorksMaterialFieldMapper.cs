@@ -38,7 +38,12 @@ namespace SolidWorksMaterialSync
                 { "SW-BlankSize", "blank_size" },
                 { "BlankSize", "blank_size" },
                 { "SW-HeatTreatment", "heat_treatment" },
-                { "HeatTreatment", "heat_treatment" }
+                { "HeatTreatment", "heat_treatment" },
+                // finishing/treatment R1 (#689): surface finish / coating -> finish.
+                { "SW-Coating", "finish" },
+                { "Coating", "finish" },
+                { "SW-Finish", "finish" },
+                { "Finish", "finish" }
             };
 
         public bool AddField(Dictionary<string, object> fields, string rawKey, string value)

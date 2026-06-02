@@ -36,6 +36,8 @@ CANONICAL_ALIASES = {
     "materialcategory": "material_category",
     "category": "material_category",
     "heattreatment": "heat_treatment",
+    "coating": "finish",
+    "finish": "finish",
 }
 
 FORBIDDEN_AUTOCAD_PRIMARY_KEYS = {
@@ -168,6 +170,7 @@ def validate_writeback_package(fixture: dict[str, Any]) -> dict[str, str]:
     extracted = extract_fields(fixture)
     undeclared = {
         "SW-HeatTreatment@Part": extracted.get("heat_treatment"),
+        "SW-Coating@Part": extracted.get("finish"),
     }
     overwritten = sorted(key for key in undeclared if key in apply_fields)
     require(not overwritten, "writeback package overwrites undeclared fields: " + ", ".join(overwritten))

@@ -71,6 +71,9 @@ def test_solidworks_gateway_pins_custom_property_manager_read_path() -> None:
         "SW-Width",
         "SW-Thickness",
         "heat_treatment",
+        "SW-Coating",
+        "SW-Finish",
+        "finish",
     ):
         assert required in mapper
 

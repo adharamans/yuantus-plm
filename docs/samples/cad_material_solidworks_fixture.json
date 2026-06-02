@@ -4,7 +4,8 @@
     "SW-Part Number@Part": "SW-1001",
     "SW-Description@Part": "支撑板",
     "SW-Material@Part": "Q235B",
-    "SW-Thickness@Part": "12"
+    "SW-Thickness@Part": "12",
+    "SW-Coating@Part": "painted"
   },
   "cut_list_properties": [
     {
@@ -51,6 +52,7 @@
     "width": "600",
     "material_category": "sheet",
     "specification": "old-spec",
+    "finish": "painted",
     "heat_treatment": "none"
   },
   "expected_writeback_fields": {

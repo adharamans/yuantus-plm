@@ -57,7 +57,14 @@ namespace CADDedupPlugin
                 { "blank_size", "blank_size" },
                 { "热处理", "heat_treatment" },
                 { "heattreatment", "heat_treatment" },
-                { "heat_treatment", "heat_treatment" }
+                { "heat_treatment", "heat_treatment" },
+                // finishing/treatment R1 (#689): surface finish / coating -> finish.
+                // Deliberately NOT the bare "表面" (surface) alias — too broad, would
+                // mis-map unrelated surface-* fields.
+                { "表面处理", "finish" },
+                { "涂层", "finish" },
+                { "finish", "finish" },
+                { "coating", "finish" }
             };
 
         public bool AddField(Dictionary<string, object> fields, string rawKey, string value)
