@@ -61,19 +61,26 @@ class NumberingService:
         if explicit:
             return ensure_item_number_aliases(props, explicit)
 
-        generated = self.generate(item_type)
+        # Thread the incoming payload properties so a G4 {prop:<key>} token can
+        # render a category code. Add-time ordering LOCK (taskbook §4): these are
+        # the step-7 add_op values; validator-defaulted properties are not here.
+        generated = self.generate(item_type, props)
         if not generated:
             return props
         return ensure_item_number_aliases(props, generated)
 
-    def generate(self, item_type: ItemType) -> Optional[str]:
-        rule = self.resolve_rule(item_type)
+    def generate(
+        self, item_type: ItemType, properties: Optional[dict] = None
+    ) -> Optional[str]:
+        rule = self.resolve_rule(item_type, properties)
         if rule is None:
             return None
         value = self._allocate_counter(item_type_id=item_type.id, rule=rule)
         return f"{rule.prefix}{value:0{rule.width}d}"
 
-    def resolve_rule(self, item_type: ItemType) -> Optional[NumberingRule]:
+    def resolve_rule(
+        self, item_type: ItemType, properties: Optional[dict] = None
+    ) -> Optional[NumberingRule]:
         raw = self._raw_rule_config(item_type)
         if raw is None:
             default = DEFAULT_NUMBERING_RULES.get(item_type.id)
@@ -91,7 +98,7 @@ class NumberingService:
         # G4 token mode: an explicit `pattern` switches to the token vocabulary.
         # Mutually exclusive with the legacy {prefix,width,start} path below.
         if raw.get("pattern") is not None:
-            return self._resolve_token_rule(raw)
+            return self._resolve_token_rule(raw, properties)
 
         default = DEFAULT_NUMBERING_RULES.get(item_type.id, {})
         prefix = str(raw.get("prefix") or default.get("prefix") or "").strip()
@@ -113,12 +120,16 @@ class NumberingService:
 
         return NumberingRule(prefix=prefix, width=width_int, start=start_int)
 
-    def _resolve_token_rule(self, raw: dict) -> NumberingRule:
+    def _resolve_token_rule(
+        self, raw: dict, properties: Optional[dict] = None
+    ) -> NumberingRule:
         """Resolve a G4 token pattern into a NumberingRule whose `prefix` is the
         rendered scope-prefix and whose counter (`{seq}`) is the trailing
         zero-pad. `width`/`start` are reused for `{seq}`. Enforces the §6 locks:
         non-empty rendered prefix, a non-digit immediately before `{seq}`, and
-        rendered length <= 120 (the `prefix` column width).
+        rendered length <= 120 (the `prefix` column width). A `{prop:<key>}` token
+        renders a config value->code map (`raw["props"][key]["values"]`) against
+        the passed-in `properties` (taskbook #686).
         """
         pattern = raw.get("pattern")
         if not isinstance(pattern, str) or not pattern.strip():
@@ -136,7 +147,9 @@ class NumberingService:
         if start_int <= 0:
             raise ValueError("numbering start must be > 0")
 
-        rendered_prefix = self._render_pattern_prefix(pattern)
+        rendered_prefix = self._render_pattern_prefix(
+            pattern, props_config=raw.get("props"), properties=properties
+        )
         if not rendered_prefix:
             raise ValueError(
                 "numbering pattern must render a non-empty prefix before {seq}"
@@ -158,12 +171,21 @@ class NumberingService:
             token_mode=True,
         )
 
-    def _render_pattern_prefix(self, pattern: str) -> str:
+    def _render_pattern_prefix(
+        self,
+        pattern: str,
+        *,
+        props_config: Optional[dict] = None,
+        properties: Optional[dict] = None,
+    ) -> str:
         """Render the non-counter portion of a token pattern (everything before
-        the trailing `{seq}`). Closed token set: literal text, `{date:FMT}`, and a
-        single trailing `{seq}`. Unknown tokens, stray braces, a non-final `{seq}`,
-        or a missing `{seq}` all raise ValueError (G4 §4/§6).
+        the trailing `{seq}`). Closed token set: literal text, `{date:FMT}`,
+        `{prop:<key>}`, and a single trailing `{seq}`. Unknown tokens, stray
+        braces, a non-final `{seq}`, or a missing `{seq}` all raise ValueError
+        (G4 §4/§6).
         """
+        props_config = props_config if isinstance(props_config, dict) else {}
+        properties = properties if isinstance(properties, dict) else {}
         parts: list[str] = []
         seq_seen = False
         pos = 0
@@ -179,6 +201,14 @@ class NumberingService:
             elif token.startswith("date:"):
                 self._validate_date_fmt(token[len("date:"):])
                 parts.append(datetime.utcnow().strftime(token[len("date:"):]))
+            elif token.startswith("prop:"):
+                parts.append(
+                    self._render_prop_token(
+                        token[len("prop:"):].strip(),
+                        props_config=props_config,
+                        properties=properties,
+                    )
+                )
             else:
                 raise ValueError(f"unknown numbering token: {{{token}}}")
             pos = match.end()
@@ -190,6 +220,52 @@ class NumberingService:
         if trailing:
             raise ValueError("{seq} must be the final numbering token")
         return "".join(parts)
+
+    @staticmethod
+    def _render_prop_token(
+        key: str, *, props_config: dict, properties: dict
+    ) -> str:
+        """Render a `{prop:<key>}` token to its config-declared CODE (taskbook
+        #686 §3/§4). Fail-closed (ValueError, never normalize) on: empty key;
+        undeclared / empty `values` map; duplicate output codes (output-side of
+        the "merge two categories" bug); missing / empty property; multi-value
+        property; or a value not in the map. The emitted code rides the §6.2/§6.4
+        locks on the final rendered prefix (a code ending in a digit before
+        `{seq}` is rejected there).
+        """
+        if not key:
+            raise ValueError("prop token requires a key, e.g. {prop:category}")
+        spec = props_config.get(key)
+        values_map = spec.get("values") if isinstance(spec, dict) else None
+        if not isinstance(values_map, dict) or not values_map:
+            raise ValueError(
+                f"numbering {{prop:{key}}} requires a props['{key}'].values map"
+            )
+        # §3 output-side lock: two source values mapping to the same code would
+        # silently merge two categories into one counter scope. (str() keying:
+        # `1` and `"1"` render identically, so they collapse as a duplicate.)
+        codes = [str(code) for code in values_map.values()]
+        if any(not code.strip() for code in codes):
+            # An empty code would silently vanish the category segment.
+            raise ValueError(
+                f"numbering prop map for '{key}' has an empty output code"
+            )
+        if len(set(codes)) != len(codes):
+            raise ValueError(
+                f"numbering prop map for '{key}' has duplicate output codes"
+            )
+        # §4 add-time ordering: read ONLY the passed-in (step-7 payload) value.
+        value = properties.get(key)
+        if isinstance(value, (list, dict)):
+            raise ValueError(f"numbering prop '{key}' must be a scalar value")
+        if value is None or str(value).strip() == "":
+            raise ValueError(f"numbering prop '{key}' is missing or empty")
+        code = values_map.get(str(value))
+        if code is None:
+            raise ValueError(
+                f"numbering prop '{key}' value is not in the declared map"
+            )
+        return str(code)
 
     @staticmethod
     def _reject_stray_braces(literal: str) -> None:
