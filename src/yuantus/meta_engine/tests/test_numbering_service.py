@@ -493,3 +493,148 @@ def test_token_mode_scopes_counter_per_rendered_prefix(tmp_path: Path) -> None:
     assert jan2 == "PART-202601-000002"
     # A new rendered prefix (month) gets its own independent counter.
     assert feb1 == "PART-202602-000001"
+
+
+# ==========================================================================
+# G4 category/property token {prop:<key>} (taskbook #686) — value->code map,
+# fail-closed; properties threaded from apply (add-time step-7 payload only).
+# ==========================================================================
+
+_CAT_MAP = {
+    "pattern": "PART-{prop:category}-{seq}",
+    "props": {"category": {"values": {"Mechanical": "MEC", "Electrical": "ELE"}}},
+    "width": 4,
+}
+
+
+def test_prop_token_renders_mapped_code_from_properties() -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type("Part", numbering=_CAT_MAP)
+    with patch.object(service, "_allocate_counter", return_value=7) as alloc:
+        number = service.generate(item_type, {"category": "Mechanical"})
+    assert number == "PART-MEC-0007"
+    rule = alloc.call_args.kwargs["rule"]
+    assert rule.prefix == "PART-MEC-" and rule.token_mode is True
+    # reads the PASSED value (not a default): a different category -> a different code
+    with patch.object(service, "_allocate_counter", return_value=1):
+        assert service.generate(item_type, {"category": "Electrical"}) == "PART-ELE-0001"
+
+
+def test_apply_threads_properties_into_prop_token() -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type(
+        "Part",
+        numbering={
+            "pattern": "PART-{prop:category}-{seq}",
+            "props": {"category": {"values": {"Electrical": "ELE"}}},
+            "width": 4,
+        },
+    )
+    with patch.object(service, "_allocate_counter", return_value=3):
+        props = service.apply(item_type, {"category": "Electrical", "name": "X"})
+    assert props["item_number"] == "PART-ELE-0003"
+
+
+@pytest.mark.parametrize(
+    "properties, message",
+    [
+        ({"category": "Unknown"}, "not in the declared map"),
+        ({}, "missing or empty"),
+        ({"category": ""}, "missing or empty"),
+        ({"category": ["a", "b"]}, "must be a scalar"),
+        ({"category": {"k": "v"}}, "must be a scalar"),
+    ],
+)
+def test_prop_token_value_errors(properties, message) -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type("Part", numbering=_CAT_MAP)
+    with pytest.raises(ValueError, match=message):
+        service.resolve_rule(item_type, properties)
+
+
+@pytest.mark.parametrize(
+    "numbering, message",
+    [
+        # no props[key].values map declared
+        ({"pattern": "PART-{prop:category}-{seq}"}, "values map"),
+        ({"pattern": "PART-{prop:category}-{seq}", "props": {"category": {}}}, "values map"),
+        # duplicate output codes -> two source values share one counter scope
+        (
+            {
+                "pattern": "PART-{prop:category}-{seq}",
+                "props": {"category": {"values": {"Mechanical": "MEC", "Mech": "MEC"}}},
+            },
+            "duplicate output codes",
+        ),
+        # str() keying: int 1 and str "1" render identically -> duplicate
+        (
+            {
+                "pattern": "PART-{prop:category}-{seq}",
+                "props": {"category": {"values": {"A": 1, "B": "1"}}},
+            },
+            "duplicate output codes",
+        ),
+        # an empty code would silently vanish the category segment
+        (
+            {
+                "pattern": "PART-{prop:category}-{seq}",
+                "props": {"category": {"values": {"Mechanical": ""}}},
+            },
+            "empty output code",
+        ),
+    ],
+)
+def test_prop_token_config_errors(numbering, message) -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type("Part", numbering=numbering)
+    with pytest.raises(ValueError, match=message):
+        service.resolve_rule(item_type, {"category": "Mechanical"})
+
+
+def test_prop_token_code_with_trailing_digit_before_seq_rejected() -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type(
+        "Part",
+        numbering={
+            "pattern": "PART-{prop:category}{seq}",  # no separator before {seq}
+            "props": {"category": {"values": {"Mechanical": "MEC2"}}},
+        },
+    )
+    with pytest.raises(ValueError, match="non-digit separator"):
+        service.resolve_rule(item_type, {"category": "Mechanical"})
+
+
+def test_prop_token_rendered_length_over_120_rejected() -> None:
+    service = NumberingService(MagicMock())
+    item_type = make_item_type(
+        "Part",
+        numbering={
+            "pattern": "{prop:category}-{seq}",
+            "props": {"category": {"values": {"Mechanical": "X" * 121}}},
+        },
+    )
+    with pytest.raises(ValueError, match="exceeds 120"):
+        service.resolve_rule(item_type, {"category": "Mechanical"})
+
+
+def test_prop_token_requires_seq_and_must_precede_seq() -> None:
+    service = NumberingService(MagicMock())
+    no_seq = make_item_type(
+        "Part",
+        numbering={
+            "pattern": "PART-{prop:category}",
+            "props": {"category": {"values": {"Mechanical": "MEC"}}},
+        },
+    )
+    with pytest.raises(ValueError, match="must include the .seq. token"):
+        service.resolve_rule(no_seq, {"category": "Mechanical"})
+
+    after_seq = make_item_type(
+        "Part",
+        numbering={
+            "pattern": "PART-{seq}-{prop:category}",
+            "props": {"category": {"values": {"Mechanical": "MEC"}}},
+        },
+    )
+    with pytest.raises(ValueError, match="must be the final"):
+        service.resolve_rule(after_seq, {"category": "Mechanical"})
