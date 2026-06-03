@@ -363,6 +363,18 @@ class Settings(BaseSettings):
         ),
     )
 
+    # PLM-COLLAB-P1-C: offline-license verification public keys, kid -> base64 raw
+    # Ed25519 public key. Verifies vendor-signed license files; the signing PRIVATE
+    # key never lives in this repo. env: YUANTUS_LICENSE_PUBLIC_KEYS as a JSON object.
+    LICENSE_PUBLIC_KEYS: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Offline-license public keys (kid -> base64 raw Ed25519 public key) for "
+            "verifying vendor-signed license files. env: YUANTUS_LICENSE_PUBLIC_KEYS "
+            "(JSON object). The signing private key is never stored in this repo."
+        ),
+    )
+
     AUDIT_ENABLED: bool = Field(default=False, description="Audit log middleware")
     AUDIT_RETENTION_DAYS: int = Field(
         default=0, description="Prune audit logs older than N days (0=disabled)"

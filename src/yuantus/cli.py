@@ -17,6 +17,43 @@ from yuantus.context import org_id_var, tenant_id_var
 app = typer.Typer(add_completion=False, help="YuantusPLM CLI")
 search_app = typer.Typer(help="Search index maintenance")
 app.add_typer(search_app, name="search")
+license_app = typer.Typer(help="Offline license import/verify (PLM-COLLAB-P1-C)")
+app.add_typer(license_app, name="license")
+
+
+@license_app.command("import")
+def license_import(
+    path: str = typer.Argument(..., help="Path to a signed license JSON file"),
+) -> None:
+    """Verify a vendor-signed license file and activate it (offline, no network)."""
+    import json
+
+    from yuantus.config import get_settings
+    from yuantus.database import get_db_session
+    from yuantus.meta_engine.app_framework.license_import_service import (
+        LicenseImportService,
+    )
+    from yuantus.meta_engine.app_framework.license_verification import (
+        LicenseVerificationError,
+    )
+
+    with open(path, "r", encoding="utf-8") as fh:
+        license_obj = json.load(fh)
+    public_keys = get_settings().LICENSE_PUBLIC_KEYS
+    try:
+        with get_db_session() as session:
+            activated = LicenseImportService(session).import_license(
+                license_obj, public_keys
+            )
+            session.commit()
+            for lic in activated:
+                typer.echo(
+                    f"activated tenant={lic.tenant_id} app={lic.app_name} "
+                    f"expires={lic.expires_at}"
+                )
+    except (LicenseVerificationError, ValueError) as exc:
+        typer.echo(f"license import failed: {exc}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.callback()
