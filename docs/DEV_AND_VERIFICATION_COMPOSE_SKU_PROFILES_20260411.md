@@ -1,5 +1,11 @@
 # Compose SKU Profiles
 
+> **Update (2026-06-03 · PLM-COLLAB-P0-B, #697):** the original `YUANTUS_ENABLE_COLLAB` env key was
+> compose-only and silently dropped by `Settings(extra="ignore")` — a runtime no-op. It has been
+> **retired** in favor of the real `YUANTUS_ENABLE_METASHEET` Settings flag (PLM-COLLAB-P0-A, #695),
+> which actually mounts the inert MetaSheet collaboration bridge seam. `base` sets it `false`;
+> `collab`/`combined` set it `true`. The env values below reflect the current `ENABLE_METASHEET` wiring.
+
 ## Goal
 
 Land the missing deployment artifacts promised by the PLM / Metasheet packaging plan:
@@ -24,7 +30,7 @@ stack.
 It does not fork the runtime. It only pins packaging metadata:
 
 - `YUANTUS_DELIVERY_PROFILE=base`
-- `YUANTUS_ENABLE_COLLAB=false`
+- `YUANTUS_ENABLE_METASHEET=false`
 
 Command:
 
@@ -35,10 +41,10 @@ docker compose -f docker-compose.yml -f docker-compose.profile-base.yml up -d --
 ### Collab
 
 `docker-compose.profile-collab.yml` keeps the same Yuantus stack shape but
-turns on the reserved collaboration gate:
+turns on the real MetaSheet collaboration bridge flag:
 
 - `YUANTUS_DELIVERY_PROFILE=collab`
-- `YUANTUS_ENABLE_COLLAB=true`
+- `YUANTUS_ENABLE_METASHEET=true`
 
 Command:
 
