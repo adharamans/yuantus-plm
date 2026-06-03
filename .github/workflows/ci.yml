@@ -144,6 +144,10 @@ jobs:
                 run_playwright="true"
                 reason_playwright="${reason_playwright:-matched frontend/playwright: ${f}}"
                 ;;
+              src/yuantus/meta_engine/app_framework/store_service.py|src/yuantus/meta_engine/app_framework/store_models.py|src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py)
+                run_contracts="true"
+                reason_contracts="${reason_contracts:-matched entitlement core (PLM-COLLAB-P1-A): ${f}}"
+                ;;
               src/*)
                 # Ignore test-only changes for the heavier CI jobs.
                 if [[ "${f}" == *"/tests/"* ]]; then
@@ -243,6 +247,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_admin_guard_consolidation_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_admin_permission_guard_followup_contracts.py \
             src/yuantus/meta_engine/tests/test_admin_permission_shared_guard_contracts.py \
+            src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py \
             src/yuantus/meta_engine/tests/test_app_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_approval_category_router_contracts.py \
             src/yuantus/meta_engine/tests/test_approval_ops_router_contracts.py \

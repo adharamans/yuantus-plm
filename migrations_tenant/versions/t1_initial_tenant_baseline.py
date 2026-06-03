@@ -500,6 +500,8 @@ def upgrade() -> None:
     sa.Column('expires_at', sa.DateTime(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.Column('license_data', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('tenant_id', sa.String(length=64), nullable=True),
+    sa.Column('org_id', sa.String(length=64), nullable=True),
     sa.ForeignKeyConstraint(['app_registry_id'], ['meta_app_registry.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('license_key')
