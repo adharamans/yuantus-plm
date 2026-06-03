@@ -56,3 +56,10 @@ class AppLicense(Base):
 
     # Use variant for SQLite compatibility
     license_data = Column(JSON().with_variant(JSONB, "postgresql"), default={})
+
+    # PLM-COLLAB-P1-A (D0-3): entitlement tenant/org scoping. Nullable at the DB
+    # layer (no backfill); the store_service resolver + tenant-scoped query enforce
+    # that a legacy NULL-tenant license never silently unlocks for a resolved
+    # tenant. org_id is recorded only -- NOT an entitlement filter in P1-A.
+    tenant_id = Column(String(64), nullable=True, index=True)
+    org_id = Column(String(64), nullable=True, index=True)

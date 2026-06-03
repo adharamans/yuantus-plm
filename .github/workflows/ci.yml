@@ -243,6 +243,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_admin_guard_consolidation_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_admin_permission_guard_followup_contracts.py \
             src/yuantus/meta_engine/tests/test_admin_permission_shared_guard_contracts.py \
+            src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py \
             src/yuantus/meta_engine/tests/test_app_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_approval_category_router_contracts.py \
             src/yuantus/meta_engine/tests/test_approval_ops_router_contracts.py \
