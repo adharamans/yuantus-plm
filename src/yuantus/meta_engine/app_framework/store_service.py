@@ -3,12 +3,11 @@ App Store Service
 Simulates interaction with a remote PLM App Store.
 """
 
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 import uuid
 from datetime import datetime
-from yuantus.config import get_settings
-from yuantus.context import get_request_context
+from yuantus.meta_engine.app_framework.license_scope import resolve_license_scope
 from yuantus.meta_engine.app_framework.store_models import (
     MarketplaceAppListing,
     AppLicense,
@@ -20,29 +19,6 @@ class AppStoreService:
     def __init__(self, session: Session):
         self.session = session
         self.app_service = AppService(session)
-
-    def _resolve_license_scope(self) -> Tuple[str, Optional[str]]:
-        """Resolve (tenant_id, org_id) for a license operation (PLM-COLLAB-P1-A, D0-3).
-
-        Hard boundary (F2): tenant_id comes from the request context. If absent,
-        fall back to "default" ONLY when TENANCY_MODE == "single" (dev/test/local);
-        in any multi-tenant mode a missing tenant raises rather than silently
-        creating/honoring a global license. org_id is recorded but is NOT an
-        entitlement filter in P1-A (collaboration licensing is tenant/company-level).
-        """
-        ctx = get_request_context()
-        tenant_id = str(ctx.tenant_id).strip() if ctx.tenant_id else ""
-        org_id = str(ctx.org_id).strip() if ctx.org_id else None
-        if not tenant_id:
-            mode = get_settings().TENANCY_MODE
-            if mode == "single":
-                tenant_id = "default"
-            else:
-                raise ValueError(
-                    "tenant context is required for license operations when "
-                    f"TENANCY_MODE={mode!r} (refusing a silent global license)"
-                )
-        return tenant_id, org_id
 
     def sync_store_listings(self):
         """
@@ -116,7 +92,7 @@ class AppStoreService:
             raise ValueError("App not found in store")
 
         # Create License (PLM-COLLAB-P1-A: scoped to the resolved tenant)
-        tenant_id, org_id = self._resolve_license_scope()
+        tenant_id, org_id = resolve_license_scope()
         lic_key = str(uuid.uuid4()).upper()
         license = AppLicense(
             id=str(uuid.uuid4()),
@@ -144,7 +120,7 @@ class AppStoreService:
         # Check license (PLM-COLLAB-P1-A: only a license scoped to the resolved
         # tenant unlocks; a legacy NULL-tenant license never matches).
         if listing.price_model != "Free":
-            tenant_id, _ = self._resolve_license_scope()
+            tenant_id, _ = resolve_license_scope()
             lic = (
                 self.session.query(AppLicense)
                 .filter_by(app_name=listing.name, status="Active", tenant_id=tenant_id)

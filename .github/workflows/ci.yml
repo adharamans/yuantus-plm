@@ -144,9 +144,9 @@ jobs:
                 run_playwright="true"
                 reason_playwright="${reason_playwright:-matched frontend/playwright: ${f}}"
                 ;;
-              src/yuantus/meta_engine/app_framework/store_service.py|src/yuantus/meta_engine/app_framework/store_models.py|src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py)
+              src/yuantus/meta_engine/app_framework/store_service.py|src/yuantus/meta_engine/app_framework/store_models.py|src/yuantus/meta_engine/app_framework/license_scope.py|src/yuantus/meta_engine/app_framework/entitlement_service.py|src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py|src/yuantus/meta_engine/tests/test_entitlement_service.py)
                 run_contracts="true"
-                reason_contracts="${reason_contracts:-matched entitlement core (PLM-COLLAB-P1-A): ${f}}"
+                reason_contracts="${reason_contracts:-matched entitlement core (PLM-COLLAB-P1-A/B): ${f}}"
                 ;;
               src/*)
                 # Ignore test-only changes for the heavier CI jobs.
@@ -407,6 +407,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_eco_router_decomposition_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_router_exception_chaining_closeout.py \
             src/yuantus/meta_engine/tests/test_eco_stage_router_contracts.py \
+            src/yuantus/meta_engine/tests/test_entitlement_service.py \
             src/yuantus/meta_engine/tests/test_erp_http_adapter.py \
             src/yuantus/meta_engine/tests/test_erp_publication_outbox_service.py \
             src/yuantus/meta_engine/tests/test_file_attachment_router_contracts.py \
