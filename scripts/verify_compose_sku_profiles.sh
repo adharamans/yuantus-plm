@@ -103,14 +103,15 @@ render_profile() {
   case "${name}" in
     base)
       grep -Fq "YUANTUS_DELIVERY_PROFILE: base" "${out}" || die "base render missing YUANTUS_DELIVERY_PROFILE=base"
-      grep -Fq 'YUANTUS_ENABLE_COLLAB: "false"' "${out}" || die "base render missing YUANTUS_ENABLE_COLLAB=false"
+      grep -Fq 'YUANTUS_ENABLE_METASHEET: "false"' "${out}" || die "base render missing YUANTUS_ENABLE_METASHEET=false"
       ;;
     collab)
       grep -Fq "YUANTUS_DELIVERY_PROFILE: collab" "${out}" || die "collab render missing YUANTUS_DELIVERY_PROFILE=collab"
-      grep -Fq 'YUANTUS_ENABLE_COLLAB: "true"' "${out}" || die "collab render missing YUANTUS_ENABLE_COLLAB=true"
+      grep -Fq 'YUANTUS_ENABLE_METASHEET: "true"' "${out}" || die "collab render missing YUANTUS_ENABLE_METASHEET=true"
       ;;
     combined)
       grep -Fq "YUANTUS_DELIVERY_PROFILE: combined" "${out}" || die "combined render missing YUANTUS_DELIVERY_PROFILE=combined"
+      grep -Fq 'YUANTUS_ENABLE_METASHEET: "true"' "${out}" || die "combined render missing YUANTUS_ENABLE_METASHEET=true"
       grep -Fq "PLM_API_MODE: yuantus" "${out}" || die "combined render missing PLM_API_MODE=yuantus"
       grep -Fq "PLM_BASE_URL: http://api:7910" "${out}" || die "combined render missing PLM_BASE_URL=http://api:7910"
       grep -Fq "backend:" "${out}" || die "combined render missing backend service"

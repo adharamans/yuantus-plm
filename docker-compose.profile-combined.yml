@@ -7,12 +7,12 @@ services:
   api:
     environment:
       YUANTUS_DELIVERY_PROFILE: ${YUANTUS_DELIVERY_PROFILE:-combined}
-      YUANTUS_ENABLE_COLLAB: ${YUANTUS_ENABLE_COLLAB:-true}
+      YUANTUS_ENABLE_METASHEET: ${YUANTUS_ENABLE_METASHEET:-true}
 
   worker:
     environment:
       YUANTUS_DELIVERY_PROFILE: ${YUANTUS_DELIVERY_PROFILE:-combined}
-      YUANTUS_ENABLE_COLLAB: ${YUANTUS_ENABLE_COLLAB:-true}
+      YUANTUS_ENABLE_METASHEET: ${YUANTUS_ENABLE_METASHEET:-true}
 
   metasheet-postgres:
     image: postgres:15-alpine

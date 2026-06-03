@@ -53,7 +53,7 @@ def test_compose_sku_profiles_define_expected_runtime_shapes() -> None:
             f"are applied (missing service: {service_name})"
         )
 
-    def assert_profile_env(doc: dict, expected_profile: str, expected_collab_flag: str) -> None:
+    def assert_profile_env(doc: dict, expected_profile: str, expected_metasheet_flag: str) -> None:
         services = (doc or {}).get("services") or {}
         for service_name in ("api", "worker"):
             service = services.get(service_name) or {}
@@ -61,8 +61,18 @@ def test_compose_sku_profiles_define_expected_runtime_shapes() -> None:
             assert env.get("YUANTUS_DELIVERY_PROFILE") == f"${{YUANTUS_DELIVERY_PROFILE:-{expected_profile}}}", (
                 f"{service_name} should pin delivery profile to {expected_profile!r}"
             )
-            assert env.get("YUANTUS_ENABLE_COLLAB") == f"${{YUANTUS_ENABLE_COLLAB:-{expected_collab_flag}}}", (
-                f"{service_name} should set YUANTUS_ENABLE_COLLAB default to {expected_collab_flag!r}"
+            # P0-B: profiles now drive the real ENABLE_METASHEET runtime flag
+            # (a declared Settings field) so a real deployment actually mounts the
+            # collaboration bridge seam, instead of the compose-only no-op flag.
+            assert env.get("YUANTUS_ENABLE_METASHEET") == f"${{YUANTUS_ENABLE_METASHEET:-{expected_metasheet_flag}}}", (
+                f"{service_name} should set YUANTUS_ENABLE_METASHEET default to {expected_metasheet_flag!r}"
+            )
+            # Lock the retirement of the dead compose-only YUANTUS_ENABLE_COLLAB
+            # (Settings(extra="ignore") silently dropped it) so the no-op flag
+            # cannot silently return.
+            assert "YUANTUS_ENABLE_COLLAB" not in env, (
+                f"{service_name} must not reintroduce the retired compose-only "
+                "YUANTUS_ENABLE_COLLAB; use YUANTUS_ENABLE_METASHEET (a real Settings field)"
             )
 
     assert_profile_env(base_doc, "base", "false")
