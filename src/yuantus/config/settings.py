@@ -349,6 +349,20 @@ class Settings(BaseSettings):
         description="Header that supplies an upstream request id; absent → middleware generates uuid4",
     )
 
+    # PLM Collaboration & Automation Edition (#691 canonical / #693 Phase 0).
+    # Master kill switch for the MetaSheet collaboration bridge seam
+    # (PLM-COLLAB-P0-A, scope taskbook D0-2). Replaces the compose-only
+    # YUANTUS_ENABLE_COLLAB, which Settings (extra="ignore") silently drops.
+    ENABLE_METASHEET: bool = Field(
+        default=False,
+        description=(
+            "MetaSheet collaboration bridge kill switch. False (default) = base "
+            "PLM only: no bridge route, no bridge state, no event subscription. "
+            "True = the inert bridge seam may mount; per-tenant entitlement still "
+            "gates actual use (Phase 1+). env: YUANTUS_ENABLE_METASHEET."
+        ),
+    )
+
     AUDIT_ENABLED: bool = Field(default=False, description="Audit log middleware")
     AUDIT_RETENTION_DAYS: int = Field(
         default=0, description="Prune audit logs older than N days (0=disabled)"

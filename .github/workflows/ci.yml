@@ -536,6 +536,9 @@ jobs:
       - name: Pact provider verifier (Metasheet2 -> Yuantus)
         run: |
           pytest -q src/yuantus/api/tests/test_pact_provider_yuantus_plm.py
+      - name: PLM collaboration base-green (ENABLE_METASHEET flag OFF/ON) contract
+        run: |
+          pytest -q src/yuantus/api/tests/test_metasheet_bridge_flag_contracts.py
 
   plugin-tests:
     name: plugin-tests

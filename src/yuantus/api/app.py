@@ -411,6 +411,19 @@ def create_app() -> FastAPI:
     app.include_router(subcontracting_analytics_router, prefix="/api/v1")
     app.include_router(subcontracting_approval_mapping_router, prefix="/api/v1")
 
+    # PLM-COLLAB-P0-A: MetaSheet collaboration bridge seam.
+    # Absent by default so the base PLM SKU keeps its exact route surface
+    # (the flag-OFF route-count pin stays at 691). When ENABLE_METASHEET is true
+    # the seam mounts but stays inert until a later phase wires per-tenant
+    # entitlement. The flag is read ONLY here, at the registration boundary
+    # (canonical plan 铁律 4) — no MetaSheet concern leaks into PLM core logic.
+    if settings.ENABLE_METASHEET:
+        from yuantus.api.routers.metasheet_bridge import (
+            router as metasheet_bridge_router,
+        )
+
+        app.include_router(metasheet_bridge_router, prefix="/api/v1")
+
     return app
 
 
