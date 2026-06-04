@@ -170,7 +170,9 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     # - 697: + 2 PLM-COLLAB-P2-C ECO approval-automation routes (GET
     #   /approvals/automation/eco/{eco_id}/context; POST .../actions), both
     #   unconditional.
-    assert len(app.routes) == 697
+    # - 698: + 1 PLM-COLLAB-P2-D ECO-scenario capability/upgrade entry
+    #   (GET /approvals/automation/eco/capabilities), unconditional.
+    assert len(app.routes) == 698
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

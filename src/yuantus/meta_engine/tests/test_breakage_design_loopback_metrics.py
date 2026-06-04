@@ -337,13 +337,13 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
         session.close()
 
     # This slice still adds no route. Keep this secondary pin aligned with the
-    # current app-level route-count contract (697 after the 2 PLM-COLLAB-P2-C ECO
-    # approval-automation routes; 695 after the 2 PLM-COLLAB-P2-B approval-automation
-    # routes; 693 after the 2 PLM-COLLAB-P1-D feature-affordance routes).
+    # current app-level route-count contract (698 after the 1 PLM-COLLAB-P2-D ECO
+    # capability-entry route; 697 after the 2 PLM-COLLAB-P2-C ECO approval-automation
+    # routes; 695 after the 2 PLM-COLLAB-P2-B approval-automation routes).
     from yuantus.api.app import create_app
 
     app = create_app()
-    assert len(app.routes) == 697
+    assert len(app.routes) == 698
 
 
 # ==========================================================================

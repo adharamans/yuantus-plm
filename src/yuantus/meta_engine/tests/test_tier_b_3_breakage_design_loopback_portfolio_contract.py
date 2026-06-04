@@ -232,13 +232,13 @@ def test_summary_method_does_not_reference_breakage_design_loopback():
 # --------------------------------------------------------------------------
 
 
-def test_phase4_route_count_pin_still_lives_at_697():
-    # Cross-reference to the authoritative phase-4 pin. Bumped 691 -> 693 (P1-D
-    # feature-affordance) -> 695 (P2-B approval-automation) -> 697 (P2-C ECO
-    # approval-automation projection + notify routes).
+def test_phase4_route_count_pin_still_lives_at_698():
+    # Cross-reference to the authoritative phase-4 pin. Bumped 691 -> 693 (P1-D) ->
+    # 695 (P2-B) -> 697 (P2-C ECO projection + notify) -> 698 (P2-D ECO-scenario
+    # capability/upgrade entry).
     text = _PHASE4_TEST.read_text()
-    assert "len(app.routes) == 697" in text, (
-        "phase-4 route-count pin (697) must still exist as the "
+    assert "len(app.routes) == 698" in text, (
+        "phase-4 route-count pin (698) must still exist as the "
         "authoritative assertion."
     )
 
