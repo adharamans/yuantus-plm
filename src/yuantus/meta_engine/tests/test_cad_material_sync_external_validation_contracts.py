@@ -83,7 +83,7 @@ def test_windows_validation_guide_preserves_required_evidence_and_exit_criteria(
         "AutoCAD `ACADVER` output showing `R22.0`.",
         "Preflight output.",
         "Build output and DLL path.",
-        "Screenshot or command log for `DEDUPHELP`, `PLMMATPROFILES`, `PLMMATCOMPOSE`, `PLMMATPUSH`, `PLMMATPULL`.",
+        "Screenshot or command log for `DEDUPHELP`, `PLMMATPROFILES`, `PLMMATCOMPOSE`, `PLMMATPUSH`, `PLMMATPULL`, `PLMMATASSIST`.",
         "Before/after screenshot of the DWG material field.",
         "Preflight passes on the Windows machine.",
         "DLL builds against AutoCAD 2018 assemblies.",
