@@ -16,6 +16,7 @@ from yuantus.api.routers.cad_preview import router as cad_preview_router
 from yuantus.api.routers.favicon import router as favicon_router
 from yuantus.api.routers.health import router as health_router
 from yuantus.api.routers.integrations import router as integrations_router
+from yuantus.meta_engine.web.integration_capabilities_router import integration_capabilities_router
 from yuantus.api.routers.jobs import router as jobs_router
 from yuantus.api.routers.metrics import router as metrics_router
 from yuantus.api.routers.plugins import router as plugins_router
@@ -291,6 +292,9 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(cad_preview_router, prefix="/api/v1")
     app.include_router(integrations_router, prefix="/api/v1")
+    # PLM-COLLAB-P2.5 (Integration Handshake): advisory integration capability manifest.
+    # Same /integrations namespace; separate router (no async-probe deps). Ungated.
+    app.include_router(integration_capabilities_router, prefix="/api/v1")
     app.include_router(plugins_router, prefix="/api/v1")
     app.include_router(jobs_router, prefix="/api/v1")
     app.include_router(plm_workspace_router, prefix="/api/v1")

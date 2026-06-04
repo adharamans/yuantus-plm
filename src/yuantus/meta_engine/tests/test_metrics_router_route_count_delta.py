@@ -15,10 +15,12 @@ from yuantus.api.app import create_app
 #   -- both unconditional.
 # 698 = 697 + 1 PLM-COLLAB-P2-D ECO-scenario capability/upgrade entry
 #   (GET /api/v1/approvals/automation/eco/capabilities) -- unconditional.
+# 699 = 698 + 1 PLM-COLLAB-P2.5 integration capability manifest
+#   (GET /api/v1/integrations/capabilities) -- unconditional.
 # NOTE: this pin had drifted STALE at 676 (never bumped through the 677/678
 # route additions) and is not in the CI contracts list / no-DB allowlist, so the
 # drift went unobserved until the R2 routes slice reconciled it.
-EXPECTED_TOTAL_ROUTES = 698
+EXPECTED_TOTAL_ROUTES = 699
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
