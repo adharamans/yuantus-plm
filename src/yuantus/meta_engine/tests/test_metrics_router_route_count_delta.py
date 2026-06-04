@@ -10,10 +10,13 @@ from yuantus.api.app import create_app
 # 695 = 693 + 2 PLM-COLLAB-P2-B approval-automation routes (GET
 #   /api/v1/approvals/automation/templates; POST /api/v1/approvals/automation/provision)
 #   -- both unconditional.
+# 697 = 695 + 2 PLM-COLLAB-P2-C ECO approval-automation routes (GET
+#   /api/v1/approvals/automation/eco/{eco_id}/context; POST .../actions)
+#   -- both unconditional.
 # NOTE: this pin had drifted STALE at 676 (never bumped through the 677/678
 # route additions) and is not in the CI contracts list / no-DB allowlist, so the
 # drift went unobserved until the R2 routes slice reconciled it.
-EXPECTED_TOTAL_ROUTES = 695
+EXPECTED_TOTAL_ROUTES = 697
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

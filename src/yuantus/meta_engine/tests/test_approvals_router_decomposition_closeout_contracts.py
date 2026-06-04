@@ -33,6 +33,9 @@ _EXPECTED_APPROVAL_ROUTE_OWNERS = {
     # under /api/v1/approvals/automation so they are owned here for completeness.
     ("GET", "/api/v1/approvals/automation/templates"): "yuantus.meta_engine.web.approval_automation_router",
     ("POST", "/api/v1/approvals/automation/provision"): "yuantus.meta_engine.web.approval_automation_router",
+    # PLM-COLLAB-P2-C: ECO approval-automation governed projection + notify action.
+    ("GET", "/api/v1/approvals/automation/eco/{eco_id}/context"): "yuantus.meta_engine.web.approval_automation_eco_router",
+    ("POST", "/api/v1/approvals/automation/eco/{eco_id}/actions"): "yuantus.meta_engine.web.approval_automation_eco_router",
 }
 
 _ROUTER_REGISTRATION_ORDER = [

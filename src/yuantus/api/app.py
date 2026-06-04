@@ -24,6 +24,7 @@ from yuantus.api.routers.workbench import router as workbench_router
 from yuantus.config import get_settings
 from yuantus.database import init_db
 from yuantus.meta_engine.web.bom_compare_router import bom_compare_router
+from yuantus.meta_engine.web.approval_automation_eco_router import approval_automation_eco_router
 from yuantus.meta_engine.web.approval_automation_router import approval_automation_router
 from yuantus.meta_engine.web.feature_router import feature_router
 from yuantus.meta_engine.web.bom_tree_router import bom_tree_router
@@ -422,6 +423,10 @@ def create_app() -> FastAPI:
     # provisioning). Unconditional -- the GET is the upgrade-affordance surface; the
     # POST is gated by EntitlementService.is_entitled("approval_automation").
     app.include_router(approval_automation_router, prefix="/api/v1")
+
+    # PLM-COLLAB-P2-C: ECO approval-automation governed projection + notify action.
+    # Read-only projection + stub notify; GET auth->entitled->ECO, POST admin->entitled.
+    app.include_router(approval_automation_eco_router, prefix="/api/v1")
 
     # PLM-COLLAB-P0-A: MetaSheet collaboration bridge seam.
     # Absent by default so the base PLM SKU keeps its exact route surface
