@@ -45,6 +45,7 @@
         <Command Global="PLMMATCOMPOSE" Local="PLMMATCOMPOSE" Description="合成物料规格并回填 CAD"/>
         <Command Global="PLMMATPUSH" Local="PLMMATPUSH" Description="从 CAD 提取字段并同步到 PLM"/>
         <Command Global="PLMMATPULL" Local="PLMMATPULL" Description="从 PLM 拉取字段，差异预览确认后回填 CAD"/>
+        <Command Global="PLMMATASSIST" Local="PLMMATASSIST" Description="物料助手：解析候选物料并经确认创建 Draft"/>
       </Commands>
 
     </ComponentEntry>

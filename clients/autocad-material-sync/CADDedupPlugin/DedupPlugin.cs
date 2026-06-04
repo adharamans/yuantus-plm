@@ -433,6 +433,7 @@ namespace CADDedupPlugin
             ed.WriteMessage("\n  PLMMATCOMPOSE  - 输入物料字段并回填 CAD 明细栏/标题栏");
             ed.WriteMessage("\n  PLMMATPUSH     - 从 CAD 提取字段并同步到 PLM");
             ed.WriteMessage("\n  PLMMATPULL     - 按 PLM Item ID 差异预览并确认回填 CAD");
+            ed.WriteMessage("\n  PLMMATASSIST   - 物料助手：解析候选物料并经确认创建 Draft");
             ed.WriteMessage("\n");
             ed.WriteMessage("\n自动检查:");
             ed.WriteMessage("\n  保存图纸时自动检查重复");
@@ -577,6 +578,117 @@ namespace CADDedupPlugin
             {
                 ed.WriteMessage($"\n❌ CAD 字段同步到 PLM 失败: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 物料助手：按当前图纸字段解析候选物料（只展示），用户显式确认后创建 Draft 物料。
+        /// 保守 v1：resolve 不写库；取消零写入；create 仅在显式确认后调用；不回写 DWG
+        /// （assistant/create 不返回 CAD field package，本期不写 DWG 字段或关系）。
+        /// </summary>
+        [CommandMethod("PLMMATASSIST")]
+        public async void RunMaterialAssistant()
+        {
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            var ed = doc?.Editor;
+            if (doc == null || ed == null) return;
+
+            try
+            {
+                var profileId = PromptProfileId(ed);
+                if (string.IsNullOrWhiteSpace(profileId)) return;
+
+                var cadFields = _materialFieldService.ExtractFields(doc);
+                var resolve = await _materialSyncClient.ResolveAsync(
+                    profileId,
+                    cadFields,
+                    new Dictionary<string, object>());
+
+                ed.WriteMessage("\n===== 物料助手 (PLMMATASSIST) =====");
+                ed.WriteMessage($"\n状态: {(resolve.Ok ? "OK" : "失败")}  profile: {resolve.ProfileId}");
+                ed.WriteMessage($"\n精确匹配: {resolve.ExactMatches.Count}  相似候选: {resolve.SimilarCandidates.Count}  建议新增: {(resolve.DraftSuggested ? "是" : "否")}");
+                foreach (var warning in resolve.Warnings)
+                {
+                    ed.WriteMessage($"\n  ⚠ {warning}");
+                }
+                foreach (var issue in resolve.Errors)
+                {
+                    ed.WriteMessage($"\n  ❌ {issue.Code}: {issue.Message}");
+                }
+                if (resolve.ExactMatches.Count > 0)
+                {
+                    ed.WriteMessage("\n-- 已存在物料（仅展示，不绑定/不回写）--");
+                    foreach (var match in resolve.ExactMatches)
+                    {
+                        ed.WriteMessage($"\n  {DescribeCandidate(match)}");
+                    }
+                }
+                if (resolve.SimilarCandidates.Count > 0)
+                {
+                    ed.WriteMessage("\n-- 相似候选（仅展示）--");
+                    foreach (var candidate in resolve.SimilarCandidates)
+                    {
+                        ed.WriteMessage($"\n  {DescribeCandidate(candidate)}");
+                    }
+                }
+
+                if (!resolve.Ok)
+                {
+                    return;
+                }
+
+                // 仅在用户显式确认后创建 Draft；默认 No；取消或关闭则零写入。
+                var options = new PromptKeywordOptions("\n创建 Draft 物料？");
+                options.Keywords.Add("Yes");
+                options.Keywords.Add("No");
+                options.Keywords.Default = "No";
+                var decision = ed.GetKeywords(options);
+                if (decision.Status != PromptStatus.OK || decision.StringResult != "Yes")
+                {
+                    ed.WriteMessage("\n已取消：未创建任何 PLM 物料，未修改 DWG。");
+                    return;
+                }
+
+                var create = await _materialSyncClient.CreateAsync(
+                    profileId,
+                    resolve.ComposedProperties,
+                    cadFields,
+                    new Dictionary<string, object>());
+
+                if (!create.Ok)
+                {
+                    ed.WriteMessage("\n❌ 创建失败:");
+                    foreach (var issue in create.Errors)
+                    {
+                        ed.WriteMessage($"\n  {issue.Code}: {issue.Message}");
+                    }
+                    return;
+                }
+
+                ed.WriteMessage("\n✓ 已创建 Draft 物料（未回写 DWG）:");
+                ed.WriteMessage($"\n  item_id: {create.ItemId}");
+                ed.WriteMessage($"\n  item_number: {create.ItemNumber}");
+                ed.WriteMessage($"\n  state: {create.State}  current_state: {create.CurrentState}");
+                if (create.DraftCheck != null && create.DraftCheck.Count > 0)
+                {
+                    ed.WriteMessage($"\n  draft_check: {string.Join(", ", create.DraftCheck.Select(kv => kv.Key + "=" + kv.Value))}");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                ed.WriteMessage($"\n❌ 物料助手失败: {ex.Message}");
+            }
+        }
+
+        private static string DescribeCandidate(Dictionary<string, object> candidate)
+        {
+            var id = candidate.TryGetValue("id", out var idValue) ? idValue : null;
+            var score = candidate.TryGetValue("score", out var scoreValue) ? scoreValue : null;
+            var high = candidate.TryGetValue("high_similar", out var highValue) ? highValue : null;
+            var props = candidate.TryGetValue("properties", out var propsValue) ? propsValue : null;
+            var summary = props == null ? "" : props.ToString();
+            var scorePart = score == null ? "" : $" score={score}";
+            var highPart = (high is bool b && b) ? " [高相似]" : "";
+            return $"id={id}{scorePart}{highPart} {summary}";
         }
 
         /// <summary>
@@ -1024,6 +1136,14 @@ namespace CADDedupPlugin
                     Text = "拉取字段",
                     ShowText = true,
                     CommandParameter = "PLMMATPULL",
+                    CommandHandler = new RibbonCommandHandler()
+                });
+
+                materialPanel.Source.Items.Add(new RibbonButton
+                {
+                    Text = "物料助手",
+                    ShowText = true,
+                    CommandParameter = "PLMMATASSIST",
                     CommandHandler = new RibbonCommandHandler()
                 });
 

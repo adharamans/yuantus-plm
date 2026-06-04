@@ -214,6 +214,42 @@ Pass criteria:
 - CAD title block/table fields are updated after confirmation.
 - Saved DWG reopens with the updated fields still present.
 
+### 6. Material Assistant
+
+Command:
+
+```text
+PLMMATASSIST
+```
+
+Enter a profile and run against a test DWG. The command reads current CAD
+fields, calls `/material/assistant/resolve` (via Helper Bridge), and prints
+exact matches, similar candidates, and `draft_suggested` — display only.
+
+Pass criteria:
+
+- The command-line summary lists status, profile, exact-match count,
+  similar-candidate count, and `draft_suggested`.
+- Exact matches and similar candidates are shown read-only; there is no
+  bind/apply action and no DWG field is written by `resolve`.
+- The create prompt defaults to `No`; pressing Enter or choosing `No` or
+  cancelling creates nothing and writes nothing to the DWG.
+- Choosing `Yes` (explicit) calls `/material/assistant/create` and prints
+  `item_id`, `item_number`, `state`, `current_state`, `draft_check`.
+- The created item is in the lifecycle start state per the Phase 2 contract;
+  on a test tenant only.
+- No DWG field is written back after create (assistant/create returns no CAD
+  field package in this phase).
+
+Reject the assistant evidence if:
+
+- `PLMMATASSIST` is missing from `DEDUPHELP` or the package commands;
+- create happens without the explicit `Yes` confirmation;
+- `resolve` changes any PLM business row or DWG field;
+- the command writes DWG fields back after create;
+- evidence uses production drawings or production customer data;
+- any token/password/local helper token appears in screenshots or logs.
+
 ## Evidence To Capture
 
 Keep the following evidence for the validation record:
@@ -221,8 +257,11 @@ Keep the following evidence for the validation record:
 - AutoCAD `ACADVER` output showing `R22.0`.
 - Preflight output.
 - Build output and DLL path.
-- Screenshot or command log for `DEDUPHELP`, `PLMMATPROFILES`, `PLMMATCOMPOSE`, `PLMMATPUSH`, `PLMMATPULL`.
+- Screenshot or command log for `DEDUPHELP`, `PLMMATPROFILES`, `PLMMATCOMPOSE`, `PLMMATPUSH`, `PLMMATPULL`, `PLMMATASSIST`.
 - Screenshot of the `PLMMATPULL` diff preview window before confirmation.
+- `PLMMATASSIST` resolve summary log + helper/PLM log excerpt proving `/material/assistant/resolve` was called.
+- `PLMMATASSIST` cancel-path evidence: no PLM item created and no DWG field changed.
+- `PLMMATASSIST` create-path evidence on a test tenant: explicit confirmation, returned `item_id/item_number/state/current_state/draft_check`, and no DWG write-back.
 - Before/after screenshot of the DWG material field.
 - Yuantus API/log excerpt for dry-run and real write.
 

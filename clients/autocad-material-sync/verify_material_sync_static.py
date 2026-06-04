@@ -414,6 +414,52 @@ def check_finish_treatment_aliases() -> None:
     )
 
 
+def _command_body(source: str, command: str) -> str:
+    """Slice the source from a command's CommandMethod attribute to the next
+    CommandMethod (or EOF). Scopes per-command guards so a method-body check is
+    not a whole-file grep. Returns "" if the command is absent."""
+    marker = f'CommandMethod("{command}")'
+    start = source.find(marker)
+    if start == -1:
+        return ""
+    nxt = source.find("[CommandMethod(", start + len(marker))
+    return source[start:nxt] if nxt != -1 else source[start:]
+
+
+def check_material_assistant_command_contract() -> None:
+    plugin_cs = read(PLUGIN / "DedupPlugin.cs")
+    readme = read(ROOT / "README.md")
+    guide = read(ROOT / "PLM_MATERIAL_SYNC_GUIDE.md")
+    packages = {
+        "PackageContents.xml": read(PLUGIN / "PackageContents.xml"),
+        "PackageContents.2018.xml": read(PLUGIN / "PackageContents.2018.xml"),
+        "PackageContents.2024.xml": read(PLUGIN / "PackageContents.2024.xml"),
+    }
+
+    # registration + discoverability
+    require('CommandMethod("PLMMATASSIST")' in plugin_cs, "DedupPlugin missing PLMMATASSIST command")
+    for name, package in packages.items():
+        require('Global="PLMMATASSIST"' in package, f"{name} missing PLMMATASSIST command")
+    require("PLMMATASSIST" in readme, "README missing PLMMATASSIST")
+    require("PLMMATASSIST" in guide, "guide missing PLMMATASSIST")
+    require('CommandParameter = "PLMMATASSIST"' in plugin_cs, "Ribbon missing PLMMATASSIST")
+    require("PLMMATASSIST   - 物料助手" in plugin_cs, "DEDUPHELP should describe PLMMATASSIST")
+
+    # conservative-flow contract, SCOPED to the PLMMATASSIST method body only.
+    # DedupPlugin.cs legitimately calls ApplyFields in PLMMATCOMPOSE/PUSH/PULL,
+    # so a whole-file ApplyFields assertion would fail by construction.
+    body = _command_body(plugin_cs, "PLMMATASSIST")
+    require("ExtractFields(doc)" in body, "PLMMATASSIST must extract current CAD fields")
+    require("ResolveAsync(" in body, "PLMMATASSIST must call ResolveAsync")
+    require("CreateAsync(" in body, "PLMMATASSIST must call CreateAsync (confirm-gated)")
+    require("GetKeywords(" in body, "PLMMATASSIST must gate create behind an explicit keyword confirmation")
+    require("ApplyFields(" not in body, "PLMMATASSIST must not write DWG fields (assistant/create returns no cad_fields)")
+    pos_extract = body.find("ExtractFields(doc)")
+    pos_resolve = body.find("ResolveAsync(")
+    pos_create = body.find("CreateAsync(")
+    require(0 <= pos_extract < pos_resolve < pos_create, "PLMMATASSIST order must be extract -> resolve -> create")
+
+
 def main() -> int:
     checks = [
         check_xml,
@@ -425,6 +471,7 @@ def main() -> int:
         check_config_contract,
         check_field_service_contract,
         check_diff_preview_ui_contract,
+        check_material_assistant_command_contract,
         check_fixture_contract,
         check_finish_treatment_aliases,
         check_brace_balance,

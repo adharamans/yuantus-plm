@@ -70,6 +70,12 @@ PLMMATPULL
 
 输入 PLM Item ID，从 PLM 拉取物料目标字段并先展示差异预览窗口。窗口列出 CAD 字段、当前值、目标值和状态；只有用户点击确认后，插件才会把 `write_cad_fields` 写回当前图纸。
 
+```text
+PLMMATASSIST
+```
+
+物料助手：读取当前图纸字段，调用 `/material/assistant/resolve`（经 Helper Bridge）解析并**只展示**精确匹配、相似候选、草稿建议；用户取消则零写入。仅在用户显式确认（默认 No）后才调用 `/material/assistant/create` 创建 Draft 物料，创建成功只展示 `item_id`/`item_number`/`state`/`current_state`/`draft_check`。本期**不回写 DWG**，也不提供"绑定已有物料"动作（assistant/create 不返回 CAD field package，绑定/回写待后续 contract）。
+
 ## CAD 字段匹配
 
 当前客户端会读取和写入：

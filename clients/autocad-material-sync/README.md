@@ -127,6 +127,7 @@ DEDUPVIEW
 | `PLMMATCOMPOSE` | 合成物料规格并回填 CAD | 用户输入长宽厚等字段后写回明细栏 |
 | `PLMMATPUSH` | 从 CAD 提取字段并同步到 PLM | 从标题栏/明细表回写物料字段 |
 | `PLMMATPULL` | 从 PLM 拉取字段并回填 CAD | 按 Item ID 先差异预览，确认后写回图纸 |
+| `PLMMATASSIST` | 物料助手：解析候选并经确认创建 Draft | resolve 只展示精确/相似/草稿建议；取消零写入；确认后创建 Draft；不回写 DWG |
 
 物料同步功能详见 `PLM_MATERIAL_SYNC_GUIDE.md`。
 
