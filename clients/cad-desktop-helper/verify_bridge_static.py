@@ -194,8 +194,8 @@ def check_helper_route_count_after_g1b() -> None:
     helper_sources = gather_sources(HELPER)
     map_count = helper_sources.count("MapGet(") + helper_sources.count("MapPost(")
     require(
-        map_count == 15,
-        f"Helper production routes must be exactly 15 after G1-C (G1-B 14 + /document/bom-import); got {map_count}",
+        map_count == 17,
+        f"Helper production routes must be exactly 17 after Phase 3 (15 + /material/assistant/resolve + /material/assistant/create); got {map_count}",
     )
     bridge_sources = gather_sources(BRIDGE)
     for verb in ("MapGet(", "MapPost(", "MapPut(", "MapDelete("):

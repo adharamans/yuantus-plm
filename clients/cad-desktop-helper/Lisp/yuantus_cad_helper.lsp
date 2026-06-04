@@ -34,8 +34,8 @@
 ;;;   - never opens modal dialogs (alert/getfiled/initdia) — only (princ).
 ;;;
 ;;; No commands beyond the six listed above. No direct HTTP. No direct DPAPI access. No other
-;;; native-CAD .NET DLL loads. No new helper Kestrel routes (helper route
-;;; count stays exactly 15).
+;;; native-CAD .NET DLL loads. No new helper Kestrel routes from the LISP
+;;; shell (helper route count is 17 after Phase 3 material-assistant routes).
 ;;;
 ;;; External interaction stays within the S9/Slice-B bridge primitives:
 ;;; (yuantus-helper-call ...) for JSON and (yuantus-helper-upload ...) for
