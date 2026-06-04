@@ -37,10 +37,26 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/document/status\"", sources);
             Assert.Contains("MapPost(\"/document/checkin\"", sources);
             Assert.Contains("MapPost(\"/document/bom-import\"", sources);
-            Assert.Equal(15, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Contains("MapPost(\"/material/assistant/resolve\"", sources);
+            Assert.Contains("MapPost(\"/material/assistant/create\"", sources);
+            Assert.Equal(17, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
             Assert.DoesNotContain("MapPatch(", sources);
+        }
+
+        [Fact]
+        public void test_material_assistant_routes_forward_to_plm_assistant_endpoints()
+        {
+            var sources = ReadHelperSources();
+
+            Assert.Contains("MapPost(\"/material/assistant/resolve\"", sources);
+            Assert.Contains("MapPost(\"/material/assistant/create\"", sources);
+            // forwarded to the Phase 2 PLM assistant endpoints
+            Assert.Contains("/plugins/cad-material-sync/assistant/resolve", sources);
+            Assert.Contains("/plugins/cad-material-sync/assistant/create", sources);
+            Assert.Contains("MaterialAssistantResolveAsync", sources);
+            Assert.Contains("MaterialAssistantCreateAsync", sources);
         }
 
         [Fact]

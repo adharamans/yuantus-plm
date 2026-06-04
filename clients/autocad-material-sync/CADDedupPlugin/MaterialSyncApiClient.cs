@@ -167,6 +167,46 @@ namespace CADDedupPlugin
             return preview;
         }
 
+        // Phase 3: material assistant. Helper-forwarded (not direct to PLM); the
+        // helper proxies to /plugins/cad-material-sync/assistant/*. resolve is
+        // read-only, create is confirm-gated by the caller (PLMMATASSIST).
+        public async Task<MaterialAssistantResolveResponse> ResolveAsync(
+            string profileId,
+            Dictionary<string, object> cadFields,
+            Dictionary<string, object> values)
+        {
+            var payload = new
+            {
+                profile_id = profileId,
+                cad_fields = cadFields ?? new Dictionary<string, object>(),
+                values = values ?? new Dictionary<string, object>(),
+                cad_system = CadSystem
+            };
+            return await _helperTransport.PostJsonAsync<MaterialAssistantResolveResponse>(
+                "/material/assistant/resolve",
+                payload,
+                CancellationToken.None);
+        }
+
+        public async Task<MaterialAssistantCreateResponse> CreateAsync(
+            string profileId,
+            Dictionary<string, object> properties,
+            Dictionary<string, object> cadFields,
+            Dictionary<string, object> values)
+        {
+            var payload = new
+            {
+                profile_id = profileId,
+                properties = properties ?? new Dictionary<string, object>(),
+                cad_fields = cadFields ?? new Dictionary<string, object>(),
+                values = values ?? new Dictionary<string, object>()
+            };
+            return await _helperTransport.PostJsonAsync<MaterialAssistantCreateResponse>(
+                "/material/assistant/create",
+                payload,
+                CancellationToken.None);
+        }
+
         public Task<JObject> ReportApplyResultAsync(
             string pullId,
             string outcome,
@@ -329,6 +369,66 @@ namespace CADDedupPlugin
 
         [JsonProperty("conflicts")]
         public List<MaterialSyncIssue> Conflicts { get; set; } = new List<MaterialSyncIssue>();
+    }
+
+    public class MaterialAssistantResolveResponse
+    {
+        [JsonProperty("ok")]
+        public bool Ok { get; set; }
+
+        [JsonProperty("profile_id")]
+        public string ProfileId { get; set; }
+
+        [JsonProperty("composed_properties")]
+        public Dictionary<string, object> ComposedProperties { get; set; } = new Dictionary<string, object>();
+
+        [JsonProperty("cad_fields")]
+        public Dictionary<string, object> CadFields { get; set; } = new Dictionary<string, object>();
+
+        [JsonProperty("exact_matches")]
+        public List<Dictionary<string, object>> ExactMatches { get; set; } = new List<Dictionary<string, object>>();
+
+        [JsonProperty("similar_candidates")]
+        public List<Dictionary<string, object>> SimilarCandidates { get; set; } = new List<Dictionary<string, object>>();
+
+        [JsonProperty("draft_suggested")]
+        public bool DraftSuggested { get; set; }
+
+        [JsonProperty("errors")]
+        public List<MaterialSyncIssue> Errors { get; set; } = new List<MaterialSyncIssue>();
+
+        [JsonProperty("warnings")]
+        public List<string> Warnings { get; set; } = new List<string>();
+    }
+
+    public class MaterialAssistantCreateResponse
+    {
+        [JsonProperty("ok")]
+        public bool Ok { get; set; }
+
+        [JsonProperty("profile_id")]
+        public string ProfileId { get; set; }
+
+        [JsonProperty("item_id")]
+        public string ItemId { get; set; }
+
+        [JsonProperty("item_number")]
+        public string ItemNumber { get; set; }
+
+        [JsonProperty("state")]
+        public string State { get; set; }
+
+        [JsonProperty("current_state")]
+        public string CurrentState { get; set; }
+
+        [JsonProperty("draft_check")]
+        public Dictionary<string, object> DraftCheck { get; set; } = new Dictionary<string, object>();
+
+        [JsonProperty("errors")]
+        public List<MaterialSyncIssue> Errors { get; set; } = new List<MaterialSyncIssue>();
+
+        [JsonProperty("warnings")]
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     public class MaterialSyncIssue

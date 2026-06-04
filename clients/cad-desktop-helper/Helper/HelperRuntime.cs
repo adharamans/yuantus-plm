@@ -2690,6 +2690,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
         private const string DiffPreviewEndpoint = "/plugins/cad-material-sync/diff/preview";
         private const string SyncInboundEndpoint = "/plugins/cad-material-sync/sync/inbound";
         private const string SyncOutboundEndpoint = "/plugins/cad-material-sync/sync/outbound";
+        private const string AssistantResolveEndpoint = "/plugins/cad-material-sync/assistant/resolve";
+        private const string AssistantCreateEndpoint = "/plugins/cad-material-sync/assistant/create";
 
         private static readonly HashSet<string> ApplyResultOutcomes = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -2771,6 +2773,19 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
         public Task<HelperRouteResult> SyncOutboundAsync(JObject request, CancellationToken cancellationToken)
         {
             return ForwardBusinessAsync("/sync/outbound", SyncOutboundEndpoint, request, cancellationToken);
+        }
+
+        // Phase 3: material assistant resolve/create. Pure forward to the PLM
+        // assistant endpoints (read-only resolve, confirm-gated create); the
+        // global local-token gate already protects these routes.
+        public Task<HelperRouteResult> MaterialAssistantResolveAsync(JObject request, CancellationToken cancellationToken)
+        {
+            return ForwardBusinessAsync("/material/assistant/resolve", AssistantResolveEndpoint, request, cancellationToken);
+        }
+
+        public Task<HelperRouteResult> MaterialAssistantCreateAsync(JObject request, CancellationToken cancellationToken)
+        {
+            return ForwardBusinessAsync("/material/assistant/create", AssistantCreateEndpoint, request, cancellationToken);
         }
 
         // G1-A document lock routes. Pure proxy to existing backend primitives:
@@ -3393,6 +3408,24 @@ CREATE INDEX IF NOT EXISTS idx_audit_pull ON audit_events(pull_id);
                 var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
                 await HelperRouteResponse
                     .WriteAsync(context, businessAuditService.ApplyResult(request), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/material/assistant/resolve", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.MaterialAssistantResolveAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+            });
+
+            app.MapPost("/material/assistant/create", async context =>
+            {
+                idle.Touch(clock.UtcNow);
+                var request = await ReadJsonAsync<JObject>(context).ConfigureAwait(false);
+                await HelperRouteResponse
+                    .WriteAsync(context, await businessAuditService.MaterialAssistantCreateAsync(request, cancellationToken).ConfigureAwait(false), cancellationToken)
                     .ConfigureAwait(false);
             });
 

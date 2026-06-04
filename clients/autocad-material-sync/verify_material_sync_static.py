@@ -231,7 +231,7 @@ def check_s8_helper_bridge_contract() -> None:
     require("/api/dedup/check" in dedup, "DedupApiClient.CheckDuplicateAsync should remain legacy direct in S8-R1")
     require("HelperTransport" not in dedup, "DedupApiClient should not migrate to helper in S8-R1")
     require('MapPost("/dedup/check"' not in helper, "S8-R1 must not add helper /dedup/check")
-    require(helper.count("MapGet(") + helper.count("MapPost(") == 15, "helper route count should be 15 after G1-C (G1-B 14 + /document/bom-import)")
+    require(helper.count("MapGet(") + helper.count("MapPost(") == 17, "helper route count should be 17 after Phase 3 (15 + /material/assistant/resolve + /material/assistant/create)")
     for _doc_route in ('MapPost("/document/checkout"', 'MapPost("/document/undo-checkout"', 'MapPost("/document/status"', 'MapPost("/document/checkin"', 'MapPost("/document/bom-import"'):
         require(_doc_route in helper, f"G1-A helper must register {_doc_route}")
 

@@ -303,7 +303,7 @@ namespace Yuantus.Cad.Helper.Tests
             Assert.Contains("MapPost(\"/document/status\"", sources);
             Assert.Contains("MapPost(\"/document/checkin\"", sources);
             Assert.Contains("MapPost(\"/document/bom-import\"", sources);
-            Assert.Equal(15, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
+            Assert.Equal(17, CountOccurrences(sources, "MapGet(") + CountOccurrences(sources, "MapPost("));
             Assert.DoesNotContain("MapPut(", sources);
             Assert.DoesNotContain("MapDelete(", sources);
             Assert.DoesNotContain("MapPatch(", sources);

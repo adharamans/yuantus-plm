@@ -53,6 +53,23 @@ namespace Yuantus.Cad.Helper.Tests
         }
 
         [Fact]
+        public void test_material_assistant_routes_require_local_token()
+        {
+            // Phase 3: /material/assistant/* are protected business routes (only
+            // /healthz and /version are exempt), so the local-token gate applies.
+            foreach (var path in new[] { "/material/assistant/resolve", "/material/assistant/create" })
+            {
+                var missing = Gate(AllowedOrigin()).Authorize(Request("POST", path, null, new[] { Paths.ProtocolVersion }));
+                Assert.False(missing.Allowed);
+                Assert.Equal(401, missing.StatusCode);
+                Assert.Equal(ErrorCodes.AuthLocalTokenMissing, missing.Code);
+
+                var allowed = Gate(AllowedOrigin()).Authorize(Request("POST", path, new[] { ValidToken }, new[] { Paths.ProtocolVersion }));
+                Assert.True(allowed.Allowed);
+            }
+        }
+
+        [Fact]
         public void test_protected_path_valid_token_uses_bootstrapped_in_memory_token()
         {
             var resolver = AllowedOrigin();

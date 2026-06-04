@@ -321,6 +321,33 @@ namespace Yuantus.Cad.Bridge.Tests
         }
 
         [Fact]
+        public async Task test_material_assistant_resolve_posts_through_shared_locator_and_transport()
+        {
+            // Phase 3: the generic bridge facade carries /material/assistant/* with
+            // NO Bridge code change (EndpointValidator is format-only) — same strict
+            // call shape as /diff/preview, proving the new route works via the LISP facade.
+            var locator = new RecordingBridgeLocator(new Uri("http://127.0.0.1:7959"));
+            var transport = new RecordingBridgeTransport
+            {
+                Response = new JObject { ["server_response"] = new JObject { ["ok"] = true } }
+            };
+            var writer = new RecordingCommandLineWriter();
+            var service = new BridgeCallService(locator, transport, writer);
+
+            var payload = new JObject { ["profile_id"] = "bar", ["cad_fields"] = new JObject { ["MAT"] = "Q235" } };
+            var result = await service.CallAsync("/material/assistant/resolve", payload.ToString(), CancellationToken.None);
+
+            Assert.True(result.Ok);
+            Assert.Equal(1, locator.Calls);
+            Assert.Equal(1, transport.Calls);
+            Assert.True(locator.CalledBefore(transport));
+            Assert.Equal(new Uri("http://127.0.0.1:7959"), transport.LastBaseUri);
+            Assert.Equal("/material/assistant/resolve", transport.LastEndpoint);
+            Assert.True(JToken.DeepEquals(payload, transport.LastPayload), "transport payload must match Lisp-supplied JSON object byte-for-byte.");
+            Assert.Empty(writer.Lines);
+        }
+
+        [Fact]
         public async Task test_s9_returns_helper_data_payload_as_json_string_on_success()
         {
             // Non-null object data: returned as serialized JSON object.
@@ -481,7 +508,7 @@ namespace Yuantus.Cad.Bridge.Tests
             var bridgeSources = ReadBridgeSources();
 
             var mapCount = CountOccurrences(helperSources, "MapGet(") + CountOccurrences(helperSources, "MapPost(");
-            Assert.Equal(15, mapCount);
+            Assert.Equal(17, mapCount);
             Assert.Contains("MapPost(\"/document/checkout\"", helperSources);
             Assert.Contains("MapPost(\"/document/undo-checkout\"", helperSources);
             Assert.Contains("MapPost(\"/document/status\"", helperSources);

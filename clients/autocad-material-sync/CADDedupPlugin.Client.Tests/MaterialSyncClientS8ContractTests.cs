@@ -19,7 +19,7 @@ namespace CADDedupPlugin.Client.Tests
         {
             var helper = ReadRepoFile("clients/cad-desktop-helper/Helper/HelperRuntime.cs");
 
-            Assert.Equal(15, Count(helper, "MapGet(") + Count(helper, "MapPost("));
+            Assert.Equal(17, Count(helper, "MapGet(") + Count(helper, "MapPost("));
             Assert.Contains("MapPost(\"/document/checkout\"", helper);
             Assert.Contains("MapPost(\"/document/undo-checkout\"", helper);
             Assert.Contains("MapPost(\"/document/status\"", helper);
@@ -87,6 +87,24 @@ namespace CADDedupPlugin.Client.Tests
             Assert.Equal("item-1", call.Payload.Value<string>("item_id"));
             Assert.Equal("autocad", call.Payload.Value<string>("cad_system"));
             Assert.DoesNotContain("{BasePath}/sync/outbound", ReadRepoFile("clients/autocad-material-sync/CADDedupPlugin/MaterialSyncApiClient.cs"));
+        }
+
+        [Fact]
+        public async Task test_material_assistant_resolve_and_create_use_helper_not_direct_plm()
+        {
+            var transport = new RecordingTransport();
+            var client = CreateClient(transport);
+
+            await client.ResolveAsync("bar", new Dictionary<string, object> { ["MAT"] = "Q235" }, new Dictionary<string, object>());
+            await client.CreateAsync("bar", new Dictionary<string, object> { ["material"] = "Q235" }, new Dictionary<string, object>(), new Dictionary<string, object>());
+
+            Assert.Equal(
+                new[] { "/material/assistant/resolve", "/material/assistant/create" },
+                transport.Calls.Select(c => c.Path).ToArray());
+            Assert.Equal("Q235", transport.Calls[0].Payload["cad_fields"]["MAT"].Value<string>());
+            Assert.Equal("autocad", transport.Calls[0].Payload.Value<string>("cad_system"));
+            // helper-forwarded, never a direct PLM call
+            Assert.DoesNotContain("{BasePath}/assistant", ReadRepoFile("clients/autocad-material-sync/CADDedupPlugin/MaterialSyncApiClient.cs"));
         }
 
         [Fact]
@@ -294,6 +312,14 @@ namespace CADDedupPlugin.Client.Tests
                 else if (typeof(T) == typeof(MaterialSyncResponse))
                 {
                     response = new MaterialSyncResponse { Ok = true, Valid = true };
+                }
+                else if (typeof(T) == typeof(MaterialAssistantResolveResponse))
+                {
+                    response = new MaterialAssistantResolveResponse { Ok = true };
+                }
+                else if (typeof(T) == typeof(MaterialAssistantCreateResponse))
+                {
+                    response = new MaterialAssistantCreateResponse { Ok = true };
                 }
                 else
                 {
