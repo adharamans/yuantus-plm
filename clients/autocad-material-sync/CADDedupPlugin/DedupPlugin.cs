@@ -636,8 +636,12 @@ namespace CADDedupPlugin
                     return;
                 }
 
-                // 仅在用户显式确认后创建 Draft；默认 No；取消或关闭则零写入。
-                var options = new PromptKeywordOptions("\n创建 Draft 物料？");
+                // 仅在用户显式确认后创建 Draft；默认 No；AllowNone 让按 Enter 落到默认 No
+                // （同 PromptBoolean 范式）；取消或关闭则零写入。
+                var options = new PromptKeywordOptions("\n创建 Draft 物料？")
+                {
+                    AllowNone = true
+                };
                 options.Keywords.Add("Yes");
                 options.Keywords.Add("No");
                 options.Keywords.Default = "No";

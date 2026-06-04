@@ -453,6 +453,7 @@ def check_material_assistant_command_contract() -> None:
     require("ResolveAsync(" in body, "PLMMATASSIST must call ResolveAsync")
     require("CreateAsync(" in body, "PLMMATASSIST must call CreateAsync (confirm-gated)")
     require("GetKeywords(" in body, "PLMMATASSIST must gate create behind an explicit keyword confirmation")
+    require("AllowNone = true" in body, "PLMMATASSIST create prompt must set AllowNone = true so Enter falls back to the default (No)")
     require("ApplyFields(" not in body, "PLMMATASSIST must not write DWG fields (assistant/create returns no cad_fields)")
     pos_extract = body.find("ExtractFields(doc)")
     pos_resolve = body.find("ResolveAsync(")
