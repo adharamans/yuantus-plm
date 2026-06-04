@@ -144,9 +144,9 @@ jobs:
                 run_playwright="true"
                 reason_playwright="${reason_playwright:-matched frontend/playwright: ${f}}"
                 ;;
-              src/yuantus/meta_engine/app_framework/store_service.py|src/yuantus/meta_engine/app_framework/store_models.py|src/yuantus/meta_engine/app_framework/license_scope.py|src/yuantus/meta_engine/app_framework/entitlement_service.py|src/yuantus/meta_engine/app_framework/license_verification.py|src/yuantus/meta_engine/app_framework/license_import_service.py|src/yuantus/meta_engine/web/feature_router.py|src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py|src/yuantus/meta_engine/tests/test_entitlement_service.py|src/yuantus/meta_engine/tests/test_license_import.py|src/yuantus/meta_engine/tests/test_feature_router.py)
+              src/yuantus/meta_engine/app_framework/store_service.py|src/yuantus/meta_engine/app_framework/store_models.py|src/yuantus/meta_engine/app_framework/license_scope.py|src/yuantus/meta_engine/app_framework/entitlement_service.py|src/yuantus/meta_engine/app_framework/license_verification.py|src/yuantus/meta_engine/app_framework/license_import_service.py|src/yuantus/meta_engine/web/feature_router.py|src/yuantus/meta_engine/services/approval_automation_service.py|src/yuantus/meta_engine/web/approval_automation_router.py|src/yuantus/meta_engine/models/approval_automation.py|src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py|src/yuantus/meta_engine/tests/test_entitlement_service.py|src/yuantus/meta_engine/tests/test_license_import.py|src/yuantus/meta_engine/tests/test_feature_router.py|src/yuantus/meta_engine/tests/test_approval_automation.py)
                 run_contracts="true"
-                reason_contracts="${reason_contracts:-matched entitlement core (PLM-COLLAB-P1-A/B/C/D): ${f}}"
+                reason_contracts="${reason_contracts:-matched entitlement core (PLM-COLLAB-P1-A/B/C/D, P2-A/B): ${f}}"
                 ;;
               src/*)
                 # Ignore test-only changes for the heavier CI jobs.
@@ -249,6 +249,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_admin_permission_shared_guard_contracts.py \
             src/yuantus/meta_engine/tests/test_app_license_tenant_scoping.py \
             src/yuantus/meta_engine/tests/test_app_router_exception_chaining.py \
+            src/yuantus/meta_engine/tests/test_approval_automation.py \
             src/yuantus/meta_engine/tests/test_approval_category_router_contracts.py \
             src/yuantus/meta_engine/tests/test_approval_ops_router_contracts.py \
             src/yuantus/meta_engine/tests/test_approval_ops_router_exception_chaining.py \

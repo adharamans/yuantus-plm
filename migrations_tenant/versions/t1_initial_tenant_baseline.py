@@ -506,6 +506,22 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('license_key')
     )
+    # PLM-COLLAB-P2-B: provisioned approval-automation template drafts (single source
+    # for future tenant schemas; mirrors migrations/versions/p2b_appr_tmpl_001).
+    op.create_table('meta_approval_automation_templates',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('tenant_id', sa.String(length=120), nullable=False),
+    sa.Column('template_key', sa.String(length=100), nullable=False),
+    sa.Column('state', sa.String(length=20), nullable=False),
+    sa.Column('definition_json', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('version', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('tenant_id', 'template_key', name='uq_approval_automation_template_scope')
+    )
+    op.create_index('ix_meta_approval_automation_templates_tenant_id', 'meta_approval_automation_templates', ['tenant_id'])
+    op.create_index('ix_meta_approval_automation_templates_template_key', 'meta_approval_automation_templates', ['template_key'])
     op.create_table('meta_approval_requests',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('title', sa.String(length=300), nullable=False),

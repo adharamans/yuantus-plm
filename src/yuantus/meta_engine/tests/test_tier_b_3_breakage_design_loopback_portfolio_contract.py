@@ -232,13 +232,12 @@ def test_summary_method_does_not_reference_breakage_design_loopback():
 # --------------------------------------------------------------------------
 
 
-def test_phase4_route_count_pin_still_lives_at_693():
-    # Cross-reference to the authoritative phase-4 pin. Bumped 691 -> 693 when the
-    # 2 PLM-COLLAB-P1-D feature-affordance routes were added -- the first slice in
-    # the collaboration line to intentionally add routes.
+def test_phase4_route_count_pin_still_lives_at_695():
+    # Cross-reference to the authoritative phase-4 pin. Bumped 691 -> 693 (PLM-COLLAB
+    # -P1-D feature-affordance) -> 695 (PLM-COLLAB-P2-B approval-automation routes).
     text = _PHASE4_TEST.read_text()
-    assert "len(app.routes) == 693" in text, (
-        "phase-4 route-count pin (693) must still exist as the "
+    assert "len(app.routes) == 695" in text, (
+        "phase-4 route-count pin (695) must still exist as the "
         "authoritative assertion."
     )
 
