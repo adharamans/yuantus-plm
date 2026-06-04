@@ -102,6 +102,9 @@ def test_windows_evidence_template_is_blank_and_not_acceptance() -> None:
         "AutoCAD primary version: `2018`",
         "AutoCAD ACADVER output: `R22.0`",
         "AutoCAD regression version: `2024`",
+        "PLMMATASSIST resolve endpoint observed:",
+        "PLMMATASSIST Enter default No result:",
+        "PLMMATASSIST create DWG write-back result:",
         "AutoCAD 2018 support complete: no",
         "Real DWG write-back validated: no",
         "Windows client runtime accepted: no",
@@ -110,8 +113,10 @@ def test_windows_evidence_template_is_blank_and_not_acceptance() -> None:
         "must remain `no` and the decision must remain `pending`",
         "The DWG write-back result uses a mock fixture instead of a real DWG.",
         "The saved DWG was not reopened to confirm persistence.",
+        "`PLMMATASSIST` cancel or Enter-default-No creates a PLM item or writes the DWG.",
         "Any plaintext token, password, or production customer drawing content appears\n  in the evidence.",
         "python3 scripts/validate_cad_material_windows_evidence.py",
+        "`PLMMATASSIST` command implementation is merged, but AutoCAD runtime evidence\n  is not recorded.",
         "Windows + AutoCAD 2018 evidence is not recorded.",
         "AutoCAD 2024 regression evidence is not recorded.",
     ):
@@ -167,6 +172,7 @@ def _minimal_real_2018_evidence(*, regression_complete: bool = False) -> str:
         "PLMMATCOMPOSE: passed",
         "PLMMATPUSH: passed",
         "PLMMATPULL: passed",
+        "PLMMATASSIST: passed",
         "DWG file description: sanitized-copy.dwg",
         "Before material field value: old-spec",
         "Diff preview screenshot path: evidence/diff-preview.png",
@@ -175,6 +181,21 @@ def _minimal_real_2018_evidence(*, regression_complete: bool = False) -> str:
         "Save/reopen result: passed and persisted",
         "Yuantus dry-run log path: evidence/dry-run.log",
         "Yuantus real-write log path: evidence/real-write.log",
+        "PLMMATASSIST resolve summary log path: evidence/plmmatassist-resolve.txt",
+        "PLMMATASSIST resolve endpoint observed: /material/assistant/resolve",
+        "PLMMATASSIST resolve PLM log path: evidence/plmmatassist-resolve-plm.log",
+        "PLMMATASSIST cancel result: passed no item created",
+        "PLMMATASSIST cancel PLM item count check: passed unchanged",
+        "PLMMATASSIST cancel DWG unchanged check: passed unchanged",
+        "PLMMATASSIST Enter default No result: passed no item created",
+        "PLMMATASSIST create confirmation result: passed explicit Yes",
+        "PLMMATASSIST create endpoint observed: /material/assistant/create",
+        "PLMMATASSIST created item id: item-123",
+        "PLMMATASSIST created item number: MAT-123",
+        "PLMMATASSIST created state: Draft",
+        "PLMMATASSIST current state: draft-state-id",
+        "PLMMATASSIST draft check: passed lifecycle start-state aligned",
+        "PLMMATASSIST create DWG write-back result: no DWG write-back observed",
         "AutoCAD regression version: 2024",
         f"AutoCAD 2024 ACADVER output: {regression_fields['AutoCAD 2024 ACADVER output']}",
         f"AutoCAD 2024 build result: {regression_fields['AutoCAD 2024 build result']}",
@@ -209,6 +230,7 @@ def test_windows_evidence_validator_rejects_blank_template() -> None:
     assert cp.returncode == 1
     assert "FAIL: CAD material Windows evidence is not acceptable" in cp.stdout
     assert "AutoCAD 2018 support complete must be yes" in cp.stdout
+    assert "PLMMATASSIST resolve endpoint observed must include /material/assistant/resolve" in cp.stdout
     assert "Decision must be accept after reviewer approval" in cp.stdout
 
 
@@ -220,6 +242,26 @@ def test_windows_evidence_validator_accepts_minimal_real_2018_evidence(tmp_path:
 
     assert cp.returncode == 0, cp.stdout + cp.stderr
     assert "OK: CAD material Windows evidence shape is acceptable" in cp.stdout
+
+
+def test_windows_evidence_validator_rejects_missing_plmmatassist_runtime_evidence(tmp_path: Path) -> None:
+    evidence = tmp_path / "old-shape-cad-material-windows-evidence.md"
+    evidence.write_text(
+        _minimal_real_2018_evidence().replace(
+            "PLMMATASSIST resolve endpoint observed: /material/assistant/resolve\n",
+            "",
+        ).replace(
+            "PLMMATASSIST create DWG write-back result: no DWG write-back observed\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+
+    cp = _run_validator(evidence)
+
+    assert cp.returncode == 1
+    assert "PLMMATASSIST resolve endpoint observed must be filled" in cp.stdout
+    assert "PLMMATASSIST create DWG write-back result must be filled" in cp.stdout
 
 
 def test_windows_evidence_validator_rejects_incomplete_2024_claim(tmp_path: Path) -> None:

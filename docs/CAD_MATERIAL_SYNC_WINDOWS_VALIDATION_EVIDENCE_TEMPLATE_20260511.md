@@ -84,6 +84,7 @@ PLMMATPROFILES:
 PLMMATCOMPOSE:
 PLMMATPUSH:
 PLMMATPULL:
+PLMMATASSIST:
 ```
 
 Acceptance requirements:
@@ -113,7 +114,42 @@ Acceptance requirements:
 - Confirm path writes only confirmed fields.
 - Saved DWG reopens with the updated material field still present.
 
-## 7. AutoCAD 2024 Regression Evidence
+## 7. Material Assistant Evidence
+
+Use a test tenant and a copy of a test DWG. Do not use production drawings or
+customer data.
+
+```text
+PLMMATASSIST resolve summary log path:
+PLMMATASSIST resolve endpoint observed:
+PLMMATASSIST resolve PLM log path:
+PLMMATASSIST cancel result:
+PLMMATASSIST cancel PLM item count check:
+PLMMATASSIST cancel DWG unchanged check:
+PLMMATASSIST Enter default No result:
+PLMMATASSIST create confirmation result:
+PLMMATASSIST create endpoint observed:
+PLMMATASSIST created item id:
+PLMMATASSIST created item number:
+PLMMATASSIST created state:
+PLMMATASSIST current state:
+PLMMATASSIST draft check:
+PLMMATASSIST create DWG write-back result:
+```
+
+Acceptance requirements:
+
+- `PLMMATASSIST` runs without an "unknown command" error.
+- The resolve path reaches `/material/assistant/resolve` and only displays exact
+  matches, similar candidates, and draft suggestion.
+- Cancel/No creates no PLM item and writes no DWG fields.
+- Pressing Enter at the create prompt follows the default `No` path.
+- Explicit `Yes` reaches `/material/assistant/create` and returns
+  `item_id`, `item_number`, `state`, `current_state`, and `draft_check`.
+- The created item satisfies the Phase 2 lifecycle start-state/Draft check.
+- Create does not write DWG fields in this phase.
+
+## 8. AutoCAD 2024 Regression Evidence
 
 This section is optional for initial AutoCAD 2018 acceptance but required before
 marking the higher-version regression item complete.
@@ -127,7 +163,7 @@ AutoCAD 2024 command smoke result:
 AutoCAD 2024 DWG write-back result:
 ```
 
-## 8. Reviewer Decision
+## 9. Reviewer Decision
 
 ```text
 AutoCAD 2018 support complete: no
@@ -145,7 +181,7 @@ must remain `no` and the decision must remain `pending`. A future evidence
 review may change these values only after the real Windows artifacts are
 attached.
 
-## 9. Rejection Rules
+## 10. Rejection Rules
 
 Reject the evidence if any item below is true:
 
@@ -155,11 +191,14 @@ Reject the evidence if any item below is true:
 - Any command smoke result is missing.
 - The DWG write-back result uses a mock fixture instead of a real DWG.
 - The saved DWG was not reopened to confirm persistence.
+- `PLMMATASSIST` cancel or Enter-default-No creates a PLM item or writes the DWG.
+- `PLMMATASSIST` create evidence is missing `item_id`, lifecycle/Draft check, or
+  the no-DWG-write-back result.
 - Any plaintext token, password, or production customer drawing content appears
   in the evidence.
 - The template is submitted with placeholder values.
 
-## 10. Local Pre-Review Check
+## 11. Local Pre-Review Check
 
 After filling this template with real Windows output, run the local shape
 validator before reviewer sign-off:
@@ -176,11 +215,13 @@ The validator does not run AutoCAD and does not create validation evidence. It
 only checks that this markdown contains the required fields, keeps secrets out
 of the record, and does not accept placeholder, mock, or synthetic evidence.
 
-## 11. Current Repository State
+## 12. Current Repository State
 
-As of `main=8593911` and the post-merge handoff in `main=fed5128`:
+As of `main=27afe717`:
 
 - CAD Material Sync delivery package is merged.
+- `PLMMATASSIST` command implementation is merged, but AutoCAD runtime evidence
+  is not recorded.
 - macOS/Linux verification is green.
 - Windows + AutoCAD 2018 evidence is not recorded.
 - AutoCAD 2024 regression evidence is not recorded.

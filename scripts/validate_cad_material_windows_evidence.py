@@ -65,6 +65,7 @@ REQUIRED_2018_FIELDS = (
     "PLMMATCOMPOSE",
     "PLMMATPUSH",
     "PLMMATPULL",
+    "PLMMATASSIST",
     "DWG file description",
     "Before material field value",
     "Diff preview screenshot path",
@@ -73,6 +74,21 @@ REQUIRED_2018_FIELDS = (
     "Save/reopen result",
     "Yuantus dry-run log path",
     "Yuantus real-write log path",
+    "PLMMATASSIST resolve summary log path",
+    "PLMMATASSIST resolve endpoint observed",
+    "PLMMATASSIST resolve PLM log path",
+    "PLMMATASSIST cancel result",
+    "PLMMATASSIST cancel PLM item count check",
+    "PLMMATASSIST cancel DWG unchanged check",
+    "PLMMATASSIST Enter default No result",
+    "PLMMATASSIST create confirmation result",
+    "PLMMATASSIST create endpoint observed",
+    "PLMMATASSIST created item id",
+    "PLMMATASSIST created item number",
+    "PLMMATASSIST created state",
+    "PLMMATASSIST current state",
+    "PLMMATASSIST draft check",
+    "PLMMATASSIST create DWG write-back result",
     "Reviewer",
     "Decision date",
     "Reason",
@@ -131,6 +147,11 @@ def _require_yes(fields: dict[str, str], failures: list[str], name: str) -> None
     _add_if(value != "yes", failures, f"{name} must be yes")
 
 
+def _require_pass(fields: dict[str, str], failures: list[str], name: str) -> None:
+    value = _field(fields, name).lower()
+    _add_if("pass" not in value, failures, f"{name} must record a passed check")
+
+
 def _validate_no_secrets(fields: dict[str, str], failures: list[str]) -> None:
     for name, value in fields.items():
         for pattern in SECRET_PATTERNS:
@@ -179,6 +200,36 @@ def validate(text: str, *, require_2024: bool = False) -> list[str]:
         _field(fields, "Before material field value") == _field(fields, "After material field value"),
         failures,
         "Before/after material field values must differ",
+    )
+    _add_if(
+        "/material/assistant/resolve"
+        not in _field(fields, "PLMMATASSIST resolve endpoint observed"),
+        failures,
+        "PLMMATASSIST resolve endpoint observed must include /material/assistant/resolve",
+    )
+    _add_if(
+        "/material/assistant/create"
+        not in _field(fields, "PLMMATASSIST create endpoint observed"),
+        failures,
+        "PLMMATASSIST create endpoint observed must include /material/assistant/create",
+    )
+    for name in (
+        "PLMMATASSIST cancel result",
+        "PLMMATASSIST cancel PLM item count check",
+        "PLMMATASSIST cancel DWG unchanged check",
+        "PLMMATASSIST Enter default No result",
+        "PLMMATASSIST create confirmation result",
+        "PLMMATASSIST draft check",
+    ):
+        _require_pass(fields, failures, name)
+    assistant_write_back = _field(
+        fields, "PLMMATASSIST create DWG write-back result"
+    ).lower()
+    _add_if(
+        "no dwg" not in assistant_write_back
+        and "not written" not in assistant_write_back,
+        failures,
+        "PLMMATASSIST create DWG write-back result must record no DWG write-back",
     )
 
     for name in (

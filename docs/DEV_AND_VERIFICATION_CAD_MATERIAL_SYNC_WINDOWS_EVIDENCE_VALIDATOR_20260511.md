@@ -8,7 +8,8 @@ Path:
 ## 1. Summary
 
 Added a local evidence-shape validator for future CAD Material Sync Windows +
-AutoCAD validation records.
+AutoCAD validation records. It now also gates the `PLMMATASSIST` manual
+evidence added after the CAD material assistant Phase 3 command implementation.
 
 The validator does not run AutoCAD and does not create acceptance evidence. It
 only checks that an operator-filled markdown record is complete enough for
@@ -32,7 +33,10 @@ The validator is intentionally shape-only:
 - It requires the AutoCAD 2018 primary baseline: `AutoCAD primary version:
   2018` and `AutoCAD ACADVER output: R22.0`.
 - It requires filled preflight, build, load, command smoke, diff-preview,
-  real write, save/reopen, reviewer, and decision fields.
+  real write, save/reopen, `PLMMATASSIST`, reviewer, and decision fields.
+- It requires `PLMMATASSIST` evidence for resolve endpoint observation,
+  cancel/no-write, Enter-default-No, explicit create, lifecycle/Draft check, and
+  no DWG write-back after create.
 - It requires the acceptance fields for AutoCAD 2018, real DWG write-back, and
   Windows runtime to be `yes`, with `Decision: accept`.
 - It allows AutoCAD 2024 regression to remain `no` by default, but if the
@@ -73,15 +77,20 @@ git diff --check
 
 ## 6. Verification Results
 
-- External validation contract: 8 passed.
-- Focused script/doc-index suite: 14 passed.
+- External validation contract: 10 passed.
+- Focused script/doc-index suite: rerun when this documentation refresh is
+  merged; the validator/test pair is the authoritative gate for the new
+  `PLMMATASSIST` fields.
 - `py_compile` on validator and contract: passed.
 - `git diff --check`: clean.
 
 ## 7. Reviewer Checklist
 
 - Confirm the script rejects the blank template.
-- Confirm the script accepts a filled minimal AutoCAD 2018 evidence shape.
+- Confirm the script accepts a filled minimal AutoCAD 2018 evidence shape only
+  when `PLMMATASSIST` runtime evidence is present.
+- Confirm the script rejects old evidence records that omit `PLMMATASSIST`
+  resolve/create/no-write evidence.
 - Confirm 2024 evidence is optional unless explicitly claimed or
   `--require-2024` is used.
 - Confirm no runtime, AutoCAD source, binary, Phase 5, P3.4, or cutover changes

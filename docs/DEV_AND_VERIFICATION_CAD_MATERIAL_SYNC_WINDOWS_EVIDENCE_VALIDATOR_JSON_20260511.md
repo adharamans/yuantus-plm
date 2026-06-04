@@ -7,7 +7,9 @@ Path:
 
 ## 1. Summary
 
-Added `--json` output to the CAD Material Sync Windows evidence validator.
+Added `--json` output to the CAD Material Sync Windows evidence validator. The
+same JSON mode now reports the expanded `PLMMATASSIST` evidence gate without
+echoing raw operator evidence values.
 
 The JSON output is intended for future operator automation and CI-style
 pre-review checks. It reports only validator status and field-level failure
@@ -82,6 +84,8 @@ git diff --check
 
 - Confirm JSON output does not echo secret-bearing field values.
 - Confirm JSON failure messages remain field-level and reviewable.
+- Confirm missing `PLMMATASSIST` fields are reported as field-level failures
+  without echoing evidence values.
 - Confirm text-mode behavior remains unchanged.
 - Confirm no runtime, AutoCAD source, binary, Phase 5, P3.4, or cutover changes
   are included.
