@@ -583,7 +583,8 @@ jobs:
       - name: Plugin tests
         run: |
           pytest -q src/yuantus/meta_engine/tests/test_plugin_pack_and_go.py \
-            src/yuantus/meta_engine/tests/test_plugin_bom_compare.py
+            src/yuantus/meta_engine/tests/test_plugin_bom_compare.py \
+            src/yuantus/meta_engine/tests/test_plugin_cad_material_sync.py
 
   playwright-esign:
     name: playwright-esign
