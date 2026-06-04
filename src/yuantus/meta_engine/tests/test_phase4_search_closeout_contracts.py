@@ -164,7 +164,10 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   `/api/v1/cad-3d/explode/{document_item_id}/auto-layout`.
     # - 693: + 2 PLM-COLLAB-P1-D feature-affordance routes (GET /features/{key};
     #   POST /features/{key}/mock-activate), both unconditional.
-    assert len(app.routes) == 693
+    # - 695: + 2 PLM-COLLAB-P2-B approval-automation routes (GET
+    #   /approvals/automation/templates; POST /approvals/automation/provision),
+    #   both unconditional.
+    assert len(app.routes) == 695
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

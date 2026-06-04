@@ -28,6 +28,11 @@ _EXPECTED_APPROVAL_ROUTE_OWNERS = {
     ("GET", "/api/v1/approvals/ops-report/export"): "yuantus.meta_engine.web.approval_ops_router",
     ("GET", "/api/v1/approvals/queue-health"): "yuantus.meta_engine.web.approval_ops_router",
     ("GET", "/api/v1/approvals/queue-health/export"): "yuantus.meta_engine.web.approval_ops_router",
+    # PLM-COLLAB-P2-B: approval-automation product entry. A separate feature router
+    # (NOT part of the legacy approvals_router decomposition), but its paths live
+    # under /api/v1/approvals/automation so they are owned here for completeness.
+    ("GET", "/api/v1/approvals/automation/templates"): "yuantus.meta_engine.web.approval_automation_router",
+    ("POST", "/api/v1/approvals/automation/provision"): "yuantus.meta_engine.web.approval_automation_router",
 }
 
 _ROUTER_REGISTRATION_ORDER = [
