@@ -29,6 +29,7 @@ from yuantus.meta_engine.web.approval_automation_capabilities_router import appr
 from yuantus.meta_engine.web.approval_automation_eco_router import approval_automation_eco_router
 from yuantus.meta_engine.web.approval_automation_router import approval_automation_router
 from yuantus.meta_engine.web.feature_router import feature_router
+from yuantus.meta_engine.web.bom_multitable_router import bom_multitable_router
 from yuantus.meta_engine.web.bom_tree_router import bom_tree_router
 from yuantus.meta_engine.web.bom_children_router import bom_children_router
 from yuantus.meta_engine.web.bom_obsolete_rollup_router import (
@@ -308,6 +309,8 @@ def create_app() -> FastAPI:
     app.include_router(store_router, prefix="/api/v1")
     app.include_router(bom_compare_router, prefix="/api/v1")
     app.include_router(bom_tree_router, prefix="/api/v1")
+    # PLM-COLLAB-P3-A: BOM multi-table governed read-only projection (auth->entitled->part->perm).
+    app.include_router(bom_multitable_router, prefix="/api/v1")
     app.include_router(bom_children_router, prefix="/api/v1")
     app.include_router(bom_obsolete_rollup_router, prefix="/api/v1")
     app.include_router(bom_where_used_router, prefix="/api/v1")

@@ -177,7 +177,10 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     # - 701: + 2 WP1.3 CAD 2D/3D staleness routes (GET
     #   /cad/items/{item_id}/staleness; POST .../staleness/recompute), both
     #   unconditional.
-    assert len(app.routes) == 701
+    # - 702: + 1 PLM-COLLAB-P3-A BOM multi-table governed projection
+    #   (GET /bom/multitable/{part_id}/context), unconditional route (the
+    #   entitlement gate lives INSIDE the handler, not as a separate route).
+    assert len(app.routes) == 702
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:
