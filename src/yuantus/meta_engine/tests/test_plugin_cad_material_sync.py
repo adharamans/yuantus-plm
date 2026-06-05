@@ -977,6 +977,63 @@ def test_cad_diff_preview_reports_field_level_changes():
     assert payload["requires_confirmation"] is True
 
 
+def test_diff_preview_with_item_id_uses_selected_item_properties(material_sync_session):
+    # Phase 4 bind contract: when item_id is supplied, /diff/preview targets the
+    # SELECTED Item.properties, not the current CAD fields (and never the
+    # assistant resolve draft package). Current CAD here conflicts with the item.
+    module = _load_plugin_module()
+    client = _db_client(module, material_sync_session)
+    _add_part(
+        material_sync_session,
+        "bind-target",
+        {
+            "material_category": "sheet",
+            "material": "Q345B",
+            "length": 1200,
+            "width": 600,
+            "thickness": 10,
+            "specification": "1200*600*10",
+            "name": "板A",
+        },
+    )
+
+    resp = client.post(
+        "/api/v1/plugins/cad-material-sync/diff/preview",
+        json={
+            "profile_id": "sheet",
+            "item_id": "bind-target",
+            "current_cad_fields": {
+                "物料类别": "sheet",
+                "材料": "Q235B",
+                "长": "1200",
+                "宽": "600",
+                "厚": "12",
+                "规格": "旧规格",
+            },
+        },
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    # target/write come from the selected item, not the conflicting current CAD
+    assert payload["target_cad_fields"]["材料"] == "Q345B"
+    assert payload["target_cad_fields"]["规格"] == "1200*600*10"
+    assert payload["write_cad_fields"]["材料"] == "Q345B"
+    assert payload["write_cad_fields"]["厚"] == 10
+    assert payload["write_cad_fields"]["规格"] == "1200*600*10"
+    assert payload["requires_confirmation"] is True
+
+
+def test_diff_preview_missing_item_returns_404(material_sync_session):
+    module = _load_plugin_module()
+    client = _db_client(module, material_sync_session)
+    resp = client.post(
+        "/api/v1/plugins/cad-material-sync/diff/preview",
+        json={"profile_id": "sheet", "item_id": "does-not-exist", "current_cad_fields": {}},
+    )
+    assert resp.status_code == 404
+
+
 def test_cad_diff_preview_can_compare_explicit_target_cad_fields():
     module = _load_plugin_module()
     app = FastAPI()
