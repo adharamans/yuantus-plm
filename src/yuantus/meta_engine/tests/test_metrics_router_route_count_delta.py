@@ -25,10 +25,12 @@ from yuantus.api.app import create_app
 #   (the entitlement gate is INSIDE the handler, not a separate route).
 # 704 = 702 + 2 WP1.2 PDM traversal routes (GET /api/v1/pdm/items/{id}/relationships;
 #   GET /api/v1/pdm/items/{id}/relationship-tree) -- both unconditional.
+# 705 = 704 + 1 WP1.2 stale-drawings route (GET /api/v1/cad/items/{root}/stale-drawings)
+#   -- unconditional.
 # NOTE: this pin had drifted STALE at 676 (never bumped through the 677/678
 # route additions) and is not in the CI contracts list / no-DB allowlist, so the
 # drift went unobserved until the R2 routes slice reconciled it.
-EXPECTED_TOTAL_ROUTES = 704
+EXPECTED_TOTAL_ROUTES = 705
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

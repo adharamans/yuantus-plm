@@ -182,7 +182,8 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   entitlement gate lives INSIDE the handler, not as a separate route).
     # - 704: + 2 WP1.2 PDM traversal routes (GET /pdm/items/{id}/relationships;
     #   GET /pdm/items/{id}/relationship-tree), both unconditional.
-    assert len(app.routes) == 704
+    # - 705: + 1 WP1.2 stale-drawings route (GET /cad/items/{root}/stale-drawings).
+    assert len(app.routes) == 705
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

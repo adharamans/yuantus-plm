@@ -232,14 +232,15 @@ def test_summary_method_does_not_reference_breakage_design_loopback():
 # --------------------------------------------------------------------------
 
 
-def test_phase4_route_count_pin_still_lives_at_704():
+def test_phase4_route_count_pin_still_lives_at_705():
     # Cross-reference to the authoritative phase-4 pin. Bumped 691 -> 693 (P1-D) ->
     # 695 (P2-B) -> 697 (P2-C) -> 698 (P2-D ECO capability entry) -> 699 (P2.5
     # integration capability manifest) -> 701 (WP1.3 CAD 2D/3D staleness) -> 702
-    # (P3-A BOM multi-table projection) -> 704 (WP1.2 PDM traversal).
+    # (P3-A BOM multi-table projection) -> 704 (WP1.2 PDM traversal) -> 705
+    # (WP1.2 stale-drawings).
     text = _PHASE4_TEST.read_text()
-    assert "len(app.routes) == 704" in text, (
-        "phase-4 route-count pin (704) must still exist as the "
+    assert "len(app.routes) == 705" in text, (
+        "phase-4 route-count pin (705) must still exist as the "
         "authoritative assertion."
     )
 
