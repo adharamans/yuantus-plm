@@ -57,9 +57,10 @@ _USER = type("_User", (), {"id": 7, "roles": ["engineer"], "is_superuser": False
 # Curated row keys (the FULL allowed surface per row).
 _PART_KEYS = {"part_id", "item_number", "name", "state", "generation"}
 _LINE_KEYS = {
+    "part_id",  # read-only technical key (stable locator for P3-C)
     "item_number", "name", "state", "generation",
     "quantity", "uom", "find_num", "refdes",
-    "level", "path",
+    "level", "path", "path_labels",
     "source_version", "source_updated_at", "sync_status",
 }
 
@@ -218,7 +219,6 @@ def test_get_entitled_returns_curated_flattened_tree_snapshot(db_session, monkey
     assert ctx["source_version"] == 3  # part.generation
     assert ctx["sync_status"] == "snapshot"
     assert ctx["template_key"] == "bom_review"
-    assert ctx["max_depth"] == 10
     # fresh Part has no updated_at -> source_updated_at falls back to created_on (NOT null)
     assert isinstance(ctx["source_updated_at"], str) and ctx["source_updated_at"]
 
@@ -242,13 +242,18 @@ def test_get_entitled_returns_curated_flattened_tree_snapshot(db_session, monkey
         assert isinstance(line["source_updated_at"], str) and line["source_updated_at"]
 
     c1, d1 = lines
-    # path is the ancestor ITEM_NUMBER chain (joins to the item_number column), not raw ids
-    assert c1["item_number"] == "C-001" and c1["level"] == 1 and c1["path"] == ["P-001"]
+    # path is the ancestor PART-ID chain (stable key: path[-1] == parent row's part_id);
+    # path_labels is the parallel item_number chain (display only).
+    assert c1["part_id"] == "C1" and c1["item_number"] == "C-001" and c1["level"] == 1
+    assert c1["path"] == ["P1"] and c1["path_labels"] == ["P-001"]
     assert c1["quantity"] == 2 and c1["uom"] == "EA" and c1["find_num"] == "10" and c1["refdes"] == "R1,R2"
     assert c1["source_version"] == 1  # C1.generation (the displayed one)
 
-    assert d1["item_number"] == "D-001" and d1["level"] == 2 and d1["path"] == ["P-001", "C-001"]
+    assert d1["part_id"] == "D1" and d1["item_number"] == "D-001" and d1["level"] == 2
+    assert d1["path"] == ["P1", "C1"] and d1["path_labels"] == ["P-001", "C-001"]
     assert d1["quantity"] == 4 and d1["source_version"] == 2  # D1.generation
+    # the stable-key invariant the owner asked for: a line's path[-1] is its parent's part_id
+    assert d1["path"][-1] == c1["part_id"]
 
 
 def test_second_level_bom_line_is_not_dropped(db_session, monkeypatch):
@@ -261,8 +266,10 @@ def test_second_level_bom_line_is_not_dropped(db_session, monkeypatch):
     lines = _client(db_session).get(ROUTE_PATH.format(part_id="P1")).json()["context"]["lines"]
     by_num = {ln["item_number"]: ln for ln in lines}
     assert "D-001" in by_num, "level-2 BOM line was dropped"
-    assert by_num["D-001"]["level"] == 2
-    assert by_num["D-001"]["path"] == ["P-001", "C-001"]
+    d1 = by_num["D-001"]
+    assert d1["part_id"] == "D1" and d1["level"] == 2
+    assert d1["path"] == ["P1", "C1"]  # ancestor part-ids
+    assert d1["path_labels"] == ["P-001", "C-001"]  # ancestor item_numbers
 
 
 def test_get_entitled_missing_part_is_404(db_session, monkeypatch):

@@ -64,12 +64,13 @@ This `ItemType≈table / property≈field / Item≈record` isomorphism is the ca
 `contracts/pacts/metasheet2-yuantus-plm.json`):
 `/api/v1/bom/{id}/tree`, `/where-used`, `/substitutes`, `/bom/compare`, `/bom/compare/schema`.
 
-**Minimal-cut object set (F-A):** the **full BOM tree of one Part** (`/bom/{id}/tree`, bounded depth)
-FLATTENED (pre-order) into a review table — the Part as the context row, and **every** descendant BOM line
-(a "Part BOM" relationship-Item, at any level) as a row tagged with `level` + `path` (an ancestor
-item_number BREADCRUMB — NOT a hierarchy key, since item_number isn't unique across a BOM; P3-C indents by
-`level` + the pre-order sequence). Sub-assemblies are not dropped within a bounded depth (`max_depth`, default
-10, echoed; -1 for unbounded). `where-used`,
+**Minimal-cut object set (F-A):** the **full BOM tree of one Part** (`/bom/{id}/tree`, `depth=-1` — the
+WHOLE tree, never silently truncated; any future cap is a pagination/limit slice, not a v1 drop) FLATTENED
+(pre-order) into a review table — the Part as the context row, and **every** descendant BOM line (a "Part BOM"
+relationship-Item, at any level) as a row carrying `part_id` (a read-only STABLE technical key so P3-C can
+attach collaboration fields / row state — item_number can't, it duplicates/renumbers), `level`, `path` (the
+ancestor **part-id** chain — the stable hierarchy key, `path[-1]` == parent row's `part_id`), and
+`path_labels` (the parallel item_number chain, display only). `where-used`,
 `substitutes`, `compare` are review aids, deferred past the minimal cut unless trivially additive.
 
 ---
@@ -190,7 +191,7 @@ risk out of the first sellable cut.
 
 | Slice | Scope | Entry | Exit |
 |---|---|---|---|
-| **P3-A** Yuantus BOM governed projection | `GET /api/v1/bom/multitable/{part_id}/context` (like P2-C, object = BOM/Part): full BOM tree flattened with `level`/`path`, curated read-only fields + envelope/per-row provenance; order auth → `is_entitled` → part → Part-type (400) → read perm; unentitled → `context:null` (no existence leak); NO write-back, NO embed | this package ratified | endpoint + endpoint/service tests on main; the EXISTING provider pact stays green (the new projection has NO consumer pact interaction yet — P3-C adds it, after which provider verification pins the projection contract) |
+| **P3-A** Yuantus BOM governed projection | `GET /api/v1/bom/multitable/{part_id}/context` (like P2-C, object = BOM/Part): full BOM tree (`depth=-1`, no truncation) flattened with `part_id` (stable technical key) + `level` + `path` (ancestor part-ids) + `path_labels` (item_numbers), curated read-only fields + envelope/per-row provenance; order auth → `is_entitled` → part → Part-type (400) → read perm; unentitled → `context:null` (no existence leak); NO write-back, NO embed | this package ratified | endpoint + endpoint/service tests on main; the EXISTING provider pact stays green (the new projection has NO consumer pact interaction yet — P3-C adds it, after which provider verification pins the projection contract) |
 | **P3-B** `bom_multitable` SKU + capabilities | light the reserved key to an independent SKU; manifest descriptor (supported/api_version/scenarios) | P3-A endpoint exists | lit + advertised; entitlement tests; route/pin updated |
 | **P3-C** metasheet2 consume BOM capability | backend adapter method + relay route + frontend read-only review table with collaboration fields; degrade by supported/entitled (reuse C1/C2/C3) | P3-A/B on main | review table renders; vitest specs; CI green |
 | **P3-D** embed / collaboration surface | identity spine (short-token / DingTalk IdP), `apiTokenAuth` base-scope, iframe slot; BOM table inside the PLM BOM screen; PLM fields still read-only, write-back only via governed endpoint | P3-C shipped + spine decision | embedded review surface; auth-gated iframe |
