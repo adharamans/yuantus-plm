@@ -141,6 +141,7 @@ from yuantus.meta_engine.web.file_metadata_router import file_metadata_router
 from yuantus.meta_engine.web.file_storage_router import file_storage_router
 from yuantus.meta_engine.web.file_viewer_router import file_viewer_router
 from yuantus.meta_engine.web.esign_router import esign_router
+from yuantus.meta_engine.web.pdm_relationship_router import pdm_relationship_router
 from yuantus.meta_engine.web.permission_router import permission_router
 from yuantus.meta_engine.web.product_router import product_router
 from yuantus.meta_engine.web.release_readiness_router import release_readiness_router
@@ -369,6 +370,7 @@ def create_app() -> FastAPI:
     app.include_router(document_sync_freshness_router, prefix="/api/v1")
     app.include_router(document_sync_core_router, prefix="/api/v1")
     app.include_router(product_router, prefix="/api/v1")
+    app.include_router(pdm_relationship_router, prefix="/api/v1")
     app.include_router(permission_router, prefix="/api/v1")
     app.include_router(schema_router, prefix="/api/v1")
     app.include_router(impact_router, prefix="/api/v1")

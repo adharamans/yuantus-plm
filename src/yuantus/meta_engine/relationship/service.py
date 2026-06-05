@@ -9,6 +9,19 @@ from sqlalchemy.orm import Session
 
 from yuantus.meta_engine.models.item import Item  # Item model for relationship edges.
 from yuantus.meta_engine.models.meta_schema import ItemType
+from yuantus.meta_engine.services.item_number_keys import get_item_number
+
+# WP1.2 traversal cost bound. The path-based cycle guard stops cycles but NOT
+# shared-part (diamond) path explosion -- a part reachable via K ancestor paths is
+# expanded K times, which stacks multiplicatively and can blow up memory/latency
+# on heavily-shared BOMs. max_depth caps depth only, not breadth, so we also cap
+# the total expanded node count and fail loud (-> 422) rather than OOM. A bounded
+# O(V+E) flat projection (memoized, no tree materialization) is a tracked follow-up.
+MAX_TRAVERSAL_NODES = 50_000
+
+
+class TraversalBudgetError(Exception):
+    """Raised when relationship-tree expansion exceeds MAX_TRAVERSAL_NODES."""
 
 
 class RelationshipService:
@@ -228,3 +241,199 @@ class RelationshipService:
             node["children"].append(child_node)
 
         return node
+
+    # ------------------------------------------------------------------
+    # WP1.2 PDM traversal (ASSEMBLY/REFERENCE, Part<->Part).
+    # Locked contract: DEVELOPMENT_WP1_2_PDM_TRAVERSAL_AND_STALE_DRAWINGS_TASKBOOK.
+    # The traversal returns rows/nodes that explicitly distinguish the edge
+    # (relationship_id) from the counterpart item (item_id) -- the edge IS an Item.
+    # ------------------------------------------------------------------
+    ASSEMBLY = "ASSEMBLY"
+    REFERENCE = "REFERENCE"
+    MAX_DEPTH_CAP = 50
+
+    def _item_summary(self, item_id: str) -> Dict[str, Any]:
+        item = self.session.get(Item, item_id)
+        if not item:
+            return {
+                "item_id": item_id,
+                "item_type_id": None,
+                "item_number": None,
+                "name": None,
+            }
+        props = item.properties or {}
+        return {
+            "item_id": item.id,
+            "item_type_id": item.item_type_id,
+            "item_number": get_item_number(props),
+            "name": props.get("name"),
+        }
+
+    def get_item_relationships(
+        self,
+        item_id: str,
+        kind: Optional[str] = None,
+        direction: str = "outgoing",
+    ) -> List[Dict[str, Any]]:
+        """One-level relationships. Each row keeps the edge id (relationship_id)
+        distinct from the counterpart item id. ``kind=None`` returns only the PDM
+        kinds (ASSEMBLY + REFERENCE) -- not every is_relationship type (e.g. it
+        excludes ``Part BOM``), since this is a /pdm surface."""
+        kinds = [kind] if kind else [self.ASSEMBLY, self.REFERENCE]
+        edges: List[Item] = []
+        seen_edges: set = set()
+        for k in kinds:
+            for edge in self.get_relationships(
+                item_id, direction=direction, relationship_type_name=k
+            ):
+                if edge.id not in seen_edges:
+                    seen_edges.add(edge.id)
+                    edges.append(edge)
+        rows: List[Dict[str, Any]] = []
+        for edge in edges:
+            # Per-edge counterpart (correct even when direction == "both").
+            if edge.source_id == item_id:
+                counterpart_id = edge.related_id
+                counterpart_direction = "outgoing"
+            else:
+                counterpart_id = edge.source_id
+                counterpart_direction = "incoming"
+            cp = self._item_summary(counterpart_id)
+            rows.append(
+                {
+                    "relationship_id": edge.id,
+                    "relationship_kind": edge.item_type_id,
+                    "source_id": edge.source_id,
+                    "related_id": edge.related_id,
+                    "counterpart_item_id": cp["item_id"],
+                    "counterpart_direction": counterpart_direction,
+                    "counterpart_item_type_id": cp["item_type_id"],
+                    "counterpart_item_number": cp["item_number"],
+                    "counterpart_name": cp["name"],
+                    "properties": edge.properties or {},
+                }
+            )
+        return rows
+
+    def get_relationship_tree(
+        self,
+        root_id: str,
+        kinds: Optional[List[str]] = None,
+        max_depth: int = 10,
+        projection: str = "tree",
+        max_nodes: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Recursive containment tree (default ASSEMBLY). Path-based cycle guard;
+        root is included. projection='flat' dedupes by item (occurrence_count).
+        Raises TraversalBudgetError if expansion exceeds ``max_nodes`` (shared-part
+        explosion bound; default MAX_TRAVERSAL_NODES, resolved at call time)."""
+        kinds = tuple(kinds) if kinds else (self.ASSEMBLY,)
+        budget = max_nodes if max_nodes is not None else MAX_TRAVERSAL_NODES
+        state = {"count": 0, "max": budget}
+        root_node = self._build_node(
+            root_id, kinds, max_depth, state=state, depth=0, path=[], rel_path=[], via=None
+        )
+        if projection == "flat":
+            agg: Dict[str, Dict[str, Any]] = {}
+            order: List[str] = []
+            self._flatten_node(root_node, agg, order)
+            return {
+                "root_id": root_id,
+                "max_depth": max_depth,
+                "projection": "flat",
+                "items": [agg[i] for i in order],
+            }
+        return {
+            "root_id": root_id,
+            "max_depth": max_depth,
+            "projection": "tree",
+            "tree": root_node,
+        }
+
+    def _build_node(
+        self,
+        item_id: str,
+        kinds,
+        max_depth: int,
+        *,
+        state: Dict[str, int],
+        depth: int,
+        path: List[str],
+        rel_path: List[str],
+        via: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        state["count"] += 1
+        if state["count"] > state["max"]:
+            raise TraversalBudgetError(
+                f"relationship-tree expansion exceeded {state['max']} nodes; "
+                f"narrow max_depth (heavy part-sharing expands multiplicatively)"
+            )
+        node = {
+            **self._item_summary(item_id),
+            "depth": depth,
+            "path": path + [item_id],
+            "relationship_path": list(rel_path),
+            "cycle": False,
+            "via_relationship": via,
+            "children": [],
+        }
+        # Path-based cycle guard: only an ANCESTOR reappearing is a cycle (a shared
+        # part in two different branches is legitimate and kept).
+        if item_id in path:
+            node["cycle"] = True
+            return node
+        if depth >= max_depth:
+            return node
+        for kind in kinds:
+            for edge in self.get_relationships(
+                item_id, direction="outgoing", relationship_type_name=kind
+            ):
+                props = edge.properties or {}
+                child_via = {
+                    "relationship_id": edge.id,
+                    "relationship_kind": edge.item_type_id,
+                    "source_id": edge.source_id,
+                    "related_id": edge.related_id,
+                    "quantity": props.get("quantity"),
+                    "uom": props.get("uom"),
+                    "position": props.get("position") or props.get("find_num"),
+                    "properties": props,
+                }
+                node["children"].append(
+                    self._build_node(
+                        edge.related_id,
+                        kinds,
+                        max_depth,
+                        state=state,
+                        depth=depth + 1,
+                        path=path + [item_id],
+                        rel_path=rel_path + [edge.id],
+                        via=child_via,
+                    )
+                )
+        return node
+
+    def _flatten_node(
+        self, node: Dict[str, Any], agg: Dict[str, Dict[str, Any]], order: List[str]
+    ) -> None:
+        # Cycle nodes are not counted (their item already has a non-cycle occurrence).
+        if not node.get("cycle"):
+            iid = node["item_id"]
+            entry = agg.get(iid)
+            if entry is None:
+                agg[iid] = {
+                    "item_id": iid,
+                    "item_type_id": node["item_type_id"],
+                    "item_number": node["item_number"],
+                    "name": node["name"],
+                    "occurrence_count": 1,
+                    "min_depth": node["depth"],
+                    "first_path": list(node["path"]),
+                    "first_relationship_path": list(node["relationship_path"]),
+                }
+                order.append(iid)
+            else:
+                entry["occurrence_count"] += 1
+                entry["min_depth"] = min(entry["min_depth"], node["depth"])
+        for child in node.get("children", []):
+            self._flatten_node(child, agg, order)
