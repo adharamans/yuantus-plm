@@ -614,20 +614,17 @@ namespace CADDedupPlugin
                 {
                     ed.WriteMessage($"\n  ❌ {issue.Code}: {issue.Message}");
                 }
-                if (resolve.ExactMatches.Count > 0)
+                // 候选物料按编号展示（精确在前，相似在后），供用户选择绑定/回写。
+                var candidates = new List<Dictionary<string, object>>();
+                candidates.AddRange(resolve.ExactMatches);
+                candidates.AddRange(resolve.SimilarCandidates);
+                if (candidates.Count > 0)
                 {
-                    ed.WriteMessage("\n-- 已存在物料（仅展示，不绑定/不回写）--");
-                    foreach (var match in resolve.ExactMatches)
+                    ed.WriteMessage("\n-- 候选物料（输入编号可绑定/回写已有物料）--");
+                    for (var i = 0; i < candidates.Count; i++)
                     {
-                        ed.WriteMessage($"\n  {DescribeCandidate(match)}");
-                    }
-                }
-                if (resolve.SimilarCandidates.Count > 0)
-                {
-                    ed.WriteMessage("\n-- 相似候选（仅展示）--");
-                    foreach (var candidate in resolve.SimilarCandidates)
-                    {
-                        ed.WriteMessage($"\n  {DescribeCandidate(candidate)}");
+                        var tag = i < resolve.ExactMatches.Count ? "精确" : "相似";
+                        ed.WriteMessage($"\n  [{i + 1}] ({tag}) {DescribeCandidate(candidates[i])}");
                     }
                 }
 
@@ -636,9 +633,64 @@ namespace CADDedupPlugin
                     return;
                 }
 
-                // 仅在用户显式确认后创建 Draft；默认 No；AllowNone 让按 Enter 落到默认 No
-                // （同 PromptBoolean 范式）；取消或关闭则零写入。
-                var options = new PromptKeywordOptions("\n创建 Draft 物料？")
+                // 绑定已有物料分支：用户按编号显式选择候选，复用现成 helper-forwarded
+                // /diff/preview 回写链（同 PLMMATPULL）；只写 confirmed write_cad_fields，不新建物料。
+                var selectedItemId = PromptCandidateSelection(ed, candidates);
+                if (!string.IsNullOrWhiteSpace(selectedItemId))
+                {
+                    var preview = await _materialSyncClient.DiffPreviewAsync(
+                        profileId,
+                        selectedItemId,
+                        cadFields,
+                        includeEmpty: false);
+
+                    PrintMaterialDiffPreview(ed, preview);
+                    if (!preview.Ok)
+                    {
+                        return;
+                    }
+                    if (preview.WriteCadFields == null || preview.WriteCadFields.Count == 0)
+                    {
+                        ed.WriteMessage("\n✓ 当前 CAD 字段已与所选物料一致，无需回写");
+                        return;
+                    }
+
+                    var window = new MaterialSyncDiffPreviewWindow(preview);
+                    if (window.ShowDialog() != true)
+                    {
+                        ed.WriteMessage("\n已取消：未修改 DWG，未创建物料。");
+                        return;
+                    }
+
+                    var writeFields = window.ConfirmedWriteFields ?? preview.WriteCadFields;
+                    if (writeFields.Count > 0)
+                    {
+                        var started = DateTime.UtcNow;
+                        try
+                        {
+                            var updated = _materialFieldService.ApplyFields(doc, writeFields);
+                            await ReportApplyResultSafely(ed, preview, "ok", writeFields, null, doc, started);
+                            ed.WriteMessage($"\n✓ 已按所选物料回写 CAD，更新 {updated} 处（未创建新物料）");
+                        }
+                        catch (System.Exception applyEx)
+                        {
+                            await ReportApplyResultSafely(
+                                ed,
+                                preview,
+                                "failed",
+                                null,
+                                CreateFailedFields(writeFields, applyEx),
+                                doc,
+                                started);
+                            throw;
+                        }
+                    }
+                    return;
+                }
+
+                // 未绑定已有物料 → 创建 Draft 分支；显式确认；默认 No；AllowNone 让按 Enter
+                // 落到默认 No（同 PromptBoolean 范式）；取消或关闭则零写入；create 不回写 DWG。
+                var options = new PromptKeywordOptions("\n未绑定已有物料。创建 Draft 物料？")
                 {
                     AllowNone = true
                 };
@@ -693,6 +745,39 @@ namespace CADDedupPlugin
             var scorePart = score == null ? "" : $" score={score}";
             var highPart = (high is bool b && b) ? " [高相似]" : "";
             return $"id={id}{scorePart}{highPart} {summary}";
+        }
+
+        // 让用户按编号显式选择一个已有候选物料用于绑定/回写。回车=跳过（转创建分支）。
+        // 不自动选第一个；编号无效或候选缺少 item id 时拒绝绑定（不从材料号/描述/文本臆测 id）。
+        private string PromptCandidateSelection(Editor ed, List<Dictionary<string, object>> candidates)
+        {
+            if (candidates == null || candidates.Count == 0)
+            {
+                return null;
+            }
+            var prompt = new PromptStringOptions(
+                $"\n输入要绑定/回写的已有物料编号 (1-{candidates.Count})，回车跳过并新建草稿: ")
+            {
+                AllowSpaces = false
+            };
+            var result = ed.GetString(prompt);
+            if (result.Status != PromptStatus.OK || string.IsNullOrWhiteSpace(result.StringResult))
+            {
+                return null;
+            }
+            if (!int.TryParse(result.StringResult.Trim(), out var index)
+                || index < 1 || index > candidates.Count)
+            {
+                ed.WriteMessage("\n编号无效，跳过绑定。");
+                return null;
+            }
+            var idText = MaterialAssistantCandidate.ExtractItemId(candidates[index - 1]);
+            if (string.IsNullOrWhiteSpace(idText))
+            {
+                ed.WriteMessage("\n该候选缺少有效 item id，无法绑定。");
+                return null;
+            }
+            return idText;
         }
 
         /// <summary>

@@ -89,6 +89,13 @@ REQUIRED_2018_FIELDS = (
     "PLMMATASSIST current state",
     "PLMMATASSIST draft check",
     "PLMMATASSIST create DWG write-back result",
+    "PLMMATASSIST bind selected item id",
+    "PLMMATASSIST bind diff preview endpoint observed",
+    "PLMMATASSIST bind diff preview log path",
+    "PLMMATASSIST bind cancel DWG unchanged check",
+    "PLMMATASSIST bind confirm write result",
+    "PLMMATASSIST bind apply-result endpoint observed",
+    "PLMMATASSIST bind apply-result outcome",
     "Reviewer",
     "Decision date",
     "Reason",
@@ -231,6 +238,29 @@ def validate(text: str, *, require_2024: bool = False) -> list[str]:
         failures,
         "PLMMATASSIST create DWG write-back result must record no DWG write-back",
     )
+    # Phase 4 existing-item bind/write-back branch.
+    _add_if(
+        "/diff/preview"
+        not in _field(fields, "PLMMATASSIST bind diff preview endpoint observed"),
+        failures,
+        "PLMMATASSIST bind diff preview endpoint observed must include /diff/preview",
+    )
+    _add_if(
+        "/audit/apply-result"
+        not in _field(fields, "PLMMATASSIST bind apply-result endpoint observed"),
+        failures,
+        "PLMMATASSIST bind apply-result endpoint observed must include /audit/apply-result",
+    )
+    _add_if(
+        "ok" not in _field(fields, "PLMMATASSIST bind apply-result outcome").lower(),
+        failures,
+        "PLMMATASSIST bind apply-result outcome must record ok",
+    )
+    for name in (
+        "PLMMATASSIST bind cancel DWG unchanged check",
+        "PLMMATASSIST bind confirm write result",
+    ):
+        _require_pass(fields, failures, name)
 
     for name in (
         "AutoCAD 2018 support complete",

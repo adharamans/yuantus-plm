@@ -98,6 +98,7 @@
     <Compile Include="DedupConfig.cs" />
     <Compile Include="DedupPlugin.cs" />
     <Compile Include="ICadMaterialFieldAdapter.cs" />
+    <Compile Include="MaterialAssistantCandidate.cs" />
     <Compile Include="MaterialSyncDiffPreviewWindow.xaml.cs">
       <DependentUpon>MaterialSyncDiffPreviewWindow.xaml</DependentUpon>
     </Compile>

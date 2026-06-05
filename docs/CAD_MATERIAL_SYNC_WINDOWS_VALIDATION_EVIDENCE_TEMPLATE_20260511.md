@@ -135,6 +135,13 @@ PLMMATASSIST created state:
 PLMMATASSIST current state:
 PLMMATASSIST draft check:
 PLMMATASSIST create DWG write-back result:
+PLMMATASSIST bind selected item id:
+PLMMATASSIST bind diff preview endpoint observed:
+PLMMATASSIST bind diff preview log path:
+PLMMATASSIST bind cancel DWG unchanged check:
+PLMMATASSIST bind confirm write result:
+PLMMATASSIST bind apply-result endpoint observed:
+PLMMATASSIST bind apply-result outcome:
 ```
 
 Acceptance requirements:
@@ -148,6 +155,15 @@ Acceptance requirements:
   `item_id`, `item_number`, `state`, `current_state`, and `draft_check`.
 - The created item satisfies the Phase 2 lifecycle start-state/Draft check.
 - Create does not write DWG fields in this phase.
+
+Existing-item bind/write-back branch (Phase 4):
+
+- Selecting an existing candidate by number reaches `/diff/preview` for that
+  `item_id` (the selected item is the write-back source, not the assistant draft).
+- The bind cancel path (closing the diff preview) writes no DWG fields.
+- The bind confirm path writes only the confirmed `write_cad_fields` and creates
+  no new PLM item.
+- The apply result is audited through `/audit/apply-result` with `outcome=ok`.
 
 ## 8. AutoCAD 2024 Regression Evidence
 

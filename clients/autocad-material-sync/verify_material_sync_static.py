@@ -445,20 +445,40 @@ def check_material_assistant_command_contract() -> None:
     require('CommandParameter = "PLMMATASSIST"' in plugin_cs, "Ribbon missing PLMMATASSIST")
     require("PLMMATASSIST   - 物料助手" in plugin_cs, "DEDUPHELP should describe PLMMATASSIST")
 
-    # conservative-flow contract, SCOPED to the PLMMATASSIST method body only.
-    # DedupPlugin.cs legitimately calls ApplyFields in PLMMATCOMPOSE/PUSH/PULL,
-    # so a whole-file ApplyFields assertion would fail by construction.
+    # Conservative-flow contract, SCOPED to the PLMMATASSIST method body only.
+    # Phase 4: PLMMATASSIST now has two branches in one method body -- an existing-item
+    # bind branch reusing the /diff/preview write-back chain, and a separate
+    # confirm-gated create branch. ApplyFields IS now expected (bind branch); the old
+    # "ApplyFields not in body" assertion is intentionally removed. DedupPlugin.cs also
+    # calls ApplyFields in PLMMATCOMPOSE/PUSH/PULL, so this stays scoped to the slice.
     body = _command_body(plugin_cs, "PLMMATASSIST")
     require("ExtractFields(doc)" in body, "PLMMATASSIST must extract current CAD fields")
     require("ResolveAsync(" in body, "PLMMATASSIST must call ResolveAsync")
-    require("CreateAsync(" in body, "PLMMATASSIST must call CreateAsync (confirm-gated)")
-    require("GetKeywords(" in body, "PLMMATASSIST must gate create behind an explicit keyword confirmation")
+    require("PromptCandidateSelection(" in body, "PLMMATASSIST bind branch must require explicit candidate selection")
+    require("DiffPreviewAsync(" in body, "PLMMATASSIST bind branch must reuse helper-forwarded DiffPreviewAsync")
+    require("MaterialSyncDiffPreviewWindow" in body, "PLMMATASSIST bind branch must show the diff preview confirmation window")
+    require("ApplyFields(" in body, "PLMMATASSIST bind branch must write confirmed fields via ApplyFields")
+    require("ReportApplyResultSafely" in body, "PLMMATASSIST bind branch must audit via ReportApplyResultSafely (/audit/apply-result)")
+    require("CreateAsync(" in body, "PLMMATASSIST must keep the confirm-gated create branch")
+    require("GetKeywords(" in body, "PLMMATASSIST create branch must gate create behind an explicit keyword confirmation")
     require("AllowNone = true" in body, "PLMMATASSIST create prompt must set AllowNone = true so Enter falls back to the default (No)")
-    require("ApplyFields(" not in body, "PLMMATASSIST must not write DWG fields (assistant/create returns no cad_fields)")
     pos_extract = body.find("ExtractFields(doc)")
     pos_resolve = body.find("ResolveAsync(")
+    pos_select = body.find("PromptCandidateSelection(")
+    pos_diff = body.find("DiffPreviewAsync(")
+    pos_window = body.find("MaterialSyncDiffPreviewWindow")
+    pos_apply = body.find("ApplyFields(")
     pos_create = body.find("CreateAsync(")
-    require(0 <= pos_extract < pos_resolve < pos_create, "PLMMATASSIST order must be extract -> resolve -> create")
+    require(
+        0 <= pos_extract < pos_resolve < pos_select < pos_diff < pos_window < pos_apply,
+        "PLMMATASSIST bind order must be extract -> resolve -> select -> diff preview -> window -> apply",
+    )
+    # "no DWG write-back" now scopes to the CREATE branch only: there must be no
+    # ApplyFields from CreateAsync onward (the bind branch writes and returns first).
+    require(
+        "ApplyFields(" not in body[pos_create:],
+        "PLMMATASSIST create branch (from CreateAsync) must not write DWG fields",
+    )
 
 
 def main() -> int:

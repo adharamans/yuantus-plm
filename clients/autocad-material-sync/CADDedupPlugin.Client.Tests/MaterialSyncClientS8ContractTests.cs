@@ -108,6 +108,31 @@ namespace CADDedupPlugin.Client.Tests
         }
 
         [Fact]
+        public void test_material_assistant_candidate_extract_item_id_accepts_usable_id()
+        {
+            Assert.Equal("item-123", MaterialAssistantCandidate.ExtractItemId(
+                new Dictionary<string, object> { ["id"] = "item-123", ["score"] = 0.91 }));
+            // JSON-backed value (resolve payloads arrive as JToken-wrapped values)
+            Assert.Equal("item-9", MaterialAssistantCandidate.ExtractItemId(
+                new Dictionary<string, object> { ["id"] = new JValue("item-9") }));
+        }
+
+        [Fact]
+        public void test_material_assistant_candidate_extract_item_id_rejects_unusable_id()
+        {
+            // Phase 4 §5.4: never infer an id; missing/null/blank id yields null so the
+            // bind branch is skipped rather than guessing from other fields.
+            Assert.Null(MaterialAssistantCandidate.ExtractItemId(null));
+            Assert.Null(MaterialAssistantCandidate.ExtractItemId(new Dictionary<string, object>()));
+            Assert.Null(MaterialAssistantCandidate.ExtractItemId(
+                new Dictionary<string, object> { ["id"] = null }));
+            Assert.Null(MaterialAssistantCandidate.ExtractItemId(
+                new Dictionary<string, object> { ["id"] = "  " }));
+            Assert.Null(MaterialAssistantCandidate.ExtractItemId(
+                new Dictionary<string, object> { ["material_number"] = "MAT-1", ["name"] = "板A" }));
+        }
+
+        [Fact]
         public void test_material_sync_auxiliary_methods_remain_explicit_legacy_direct_calls()
         {
             var source = ReadRepoFile("clients/autocad-material-sync/CADDedupPlugin/MaterialSyncApiClient.cs");

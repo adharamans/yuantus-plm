@@ -13,6 +13,7 @@
   <ItemGroup>
     <Compile Include="..\CADDedupPlugin\DedupConfig.cs" Link="Plugin\DedupConfig.cs" />
     <Compile Include="..\CADDedupPlugin\MaterialSyncApiClient.cs" Link="Plugin\MaterialSyncApiClient.cs" />
+    <Compile Include="..\CADDedupPlugin\MaterialAssistantCandidate.cs" Link="Plugin\MaterialAssistantCandidate.cs" />
   </ItemGroup>
 
   <ItemGroup>

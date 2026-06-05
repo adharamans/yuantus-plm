@@ -105,6 +105,13 @@ def test_windows_evidence_template_is_blank_and_not_acceptance() -> None:
         "PLMMATASSIST resolve endpoint observed:",
         "PLMMATASSIST Enter default No result:",
         "PLMMATASSIST create DWG write-back result:",
+        "PLMMATASSIST bind selected item id:",
+        "PLMMATASSIST bind diff preview endpoint observed:",
+        "PLMMATASSIST bind diff preview log path:",
+        "PLMMATASSIST bind cancel DWG unchanged check:",
+        "PLMMATASSIST bind confirm write result:",
+        "PLMMATASSIST bind apply-result endpoint observed:",
+        "PLMMATASSIST bind apply-result outcome:",
         "AutoCAD 2018 support complete: no",
         "Real DWG write-back validated: no",
         "Windows client runtime accepted: no",
@@ -196,6 +203,13 @@ def _minimal_real_2018_evidence(*, regression_complete: bool = False) -> str:
         "PLMMATASSIST current state: draft-state-id",
         "PLMMATASSIST draft check: passed lifecycle start-state aligned",
         "PLMMATASSIST create DWG write-back result: no DWG write-back observed",
+        "PLMMATASSIST bind selected item id: item-123",
+        "PLMMATASSIST bind diff preview endpoint observed: /diff/preview",
+        "PLMMATASSIST bind diff preview log path: evidence/plmmatassist-bind-diff.png",
+        "PLMMATASSIST bind cancel DWG unchanged check: passed unchanged",
+        "PLMMATASSIST bind confirm write result: passed wrote confirmed fields",
+        "PLMMATASSIST bind apply-result endpoint observed: /audit/apply-result",
+        "PLMMATASSIST bind apply-result outcome: ok",
         "AutoCAD regression version: 2024",
         f"AutoCAD 2024 ACADVER output: {regression_fields['AutoCAD 2024 ACADVER output']}",
         f"AutoCAD 2024 build result: {regression_fields['AutoCAD 2024 build result']}",
@@ -262,6 +276,62 @@ def test_windows_evidence_validator_rejects_missing_plmmatassist_runtime_evidenc
     assert cp.returncode == 1
     assert "PLMMATASSIST resolve endpoint observed must be filled" in cp.stdout
     assert "PLMMATASSIST create DWG write-back result must be filled" in cp.stdout
+
+
+def test_windows_evidence_validator_rejects_missing_plmmatassist_bind_evidence(tmp_path: Path) -> None:
+    evidence = tmp_path / "missing-bind-cad-material-windows-evidence.md"
+    evidence.write_text(
+        _minimal_real_2018_evidence().replace(
+            "PLMMATASSIST bind selected item id: item-123\n",
+            "",
+        ).replace(
+            "PLMMATASSIST bind diff preview endpoint observed: /diff/preview\n",
+            "",
+        ).replace(
+            "PLMMATASSIST bind apply-result outcome: ok\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+
+    cp = _run_validator(evidence)
+
+    assert cp.returncode == 1
+    assert "PLMMATASSIST bind selected item id must be filled" in cp.stdout
+    assert "PLMMATASSIST bind diff preview endpoint observed must be filled" in cp.stdout
+    assert "PLMMATASSIST bind apply-result outcome must be filled" in cp.stdout
+
+
+def test_windows_evidence_validator_rejects_wrong_plmmatassist_bind_semantics(tmp_path: Path) -> None:
+    evidence = tmp_path / "wrong-bind-cad-material-windows-evidence.md"
+    evidence.write_text(
+        _minimal_real_2018_evidence().replace(
+            "PLMMATASSIST bind diff preview endpoint observed: /diff/preview",
+            "PLMMATASSIST bind diff preview endpoint observed: /material/assistant/resolve",
+        ).replace(
+            "PLMMATASSIST bind cancel DWG unchanged check: passed unchanged",
+            "PLMMATASSIST bind cancel DWG unchanged check: failed changed",
+        ).replace(
+            "PLMMATASSIST bind confirm write result: passed wrote confirmed fields",
+            "PLMMATASSIST bind confirm write result: wrote unconfirmed fields",
+        ).replace(
+            "PLMMATASSIST bind apply-result endpoint observed: /audit/apply-result",
+            "PLMMATASSIST bind apply-result endpoint observed: /material/assistant/create",
+        ).replace(
+            "PLMMATASSIST bind apply-result outcome: ok",
+            "PLMMATASSIST bind apply-result outcome: failed",
+        ),
+        encoding="utf-8",
+    )
+
+    cp = _run_validator(evidence)
+
+    assert cp.returncode == 1
+    assert "PLMMATASSIST bind diff preview endpoint observed must include /diff/preview" in cp.stdout
+    assert "PLMMATASSIST bind apply-result endpoint observed must include /audit/apply-result" in cp.stdout
+    assert "PLMMATASSIST bind apply-result outcome must record ok" in cp.stdout
+    assert "PLMMATASSIST bind cancel DWG unchanged check must record a passed check" in cp.stdout
+    assert "PLMMATASSIST bind confirm write result must record a passed check" in cp.stdout
 
 
 def test_windows_evidence_validator_rejects_incomplete_2024_claim(tmp_path: Path) -> None:
