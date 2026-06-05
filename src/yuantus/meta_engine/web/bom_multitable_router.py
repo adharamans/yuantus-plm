@@ -1,10 +1,11 @@
 """PLM-COLLAB-P3-A: BOM multi-table governed projection route.
 
 ``GET /api/v1/bom/multitable/{part_id}/context`` -- a governed READ-ONLY projection of a
-part + its direct BOM lines into a review-table context (the consumer side is P3-C). Order
-is PINNED: authenticate (get_current_user) -> is_entitled("bom_multitable") -> ONLY THEN
-query the part -> PLM read permission -> project. An unentitled caller gets ``context:null``
-+ upgrade affordance and the part is NEVER queried, so object existence is not leaked.
+part + its FULL (flattened) BOM tree into a review-table context (the consumer side is
+P3-C). Order is PINNED: authenticate (get_current_user) -> is_entitled("bom_multitable") ->
+ONLY THEN query the part -> Part-type guard -> PLM read permission -> project. An unentitled
+caller gets ``context:null`` + upgrade affordance and the part is NEVER queried, so object
+existence is not leaked.
 
 ADVISORY-style entitlement gate is the single ``is_entitled`` check (no second license read,
 no ``license_data`` authorization). NO write-back, NO audit, NO embed. ``bom_multitable`` is
@@ -45,10 +46,12 @@ def bom_multitable_context(
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Read-only BOM-context projection. PINNED order: auth -> entitled -> part -> permission.
+    """Read-only BOM-context projection. PINNED order: auth -> entitled -> part -> Part-type
+    -> permission.
 
     Unentitled -> ``context: null`` + upgrade affordance, WITHOUT touching the part (no
-    existence leak). Entitled but part absent -> 404; read permission denied -> 403.
+    existence leak). Entitled but part absent -> 404; a non-Part Item -> 400; read permission
+    denied -> 403.
     """
     if not EntitlementService(db).is_entitled(FEATURE_KEY):
         # Do NOT look up the part -- unentitled callers must not learn whether it exists.
@@ -57,6 +60,11 @@ def bom_multitable_context(
     root = db.get(Item, part_id)
     if root is None:
         raise HTTPException(status_code=404, detail="Part not found")
+    # The endpoint is {part_id} and the projection is a Part BOM review; a non-Part Item is
+    # a bad request (mirrors bom_tree_router's `item_type_id != "Part"` 400 guard). Parts
+    # (and BOM-line targets) are item_type_id == "Part" throughout the engine.
+    if root.item_type_id != "Part":
+        raise HTTPException(status_code=400, detail="Item is not a Part")
 
     perm = MetaPermissionService(db)
     user_id = str(user.id)

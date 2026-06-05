@@ -64,8 +64,12 @@ This `ItemType≈table / property≈field / Item≈record` isomorphism is the ca
 `contracts/pacts/metasheet2-yuantus-plm.json`):
 `/api/v1/bom/{id}/tree`, `/where-used`, `/substitutes`, `/bom/compare`, `/bom/compare/schema`.
 
-**Minimal-cut object set (F-A):** the **BOM tree of one Part** (`/bom/{id}/tree`) projected into a
-review table — parent Part as context, each child BOM line (a "Part BOM" relationship-Item) as a row. `where-used`,
+**Minimal-cut object set (F-A):** the **full BOM tree of one Part** (`/bom/{id}/tree`, bounded depth)
+FLATTENED (pre-order) into a review table — the Part as the context row, and **every** descendant BOM line
+(a "Part BOM" relationship-Item, at any level) as a row tagged with `level` + `path` (an ancestor
+item_number BREADCRUMB — NOT a hierarchy key, since item_number isn't unique across a BOM; P3-C indents by
+`level` + the pre-order sequence). Sub-assemblies are not dropped within a bounded depth (`max_depth`, default
+10, echoed; -1 for unbounded). `where-used`,
 `substitutes`, `compare` are review aids, deferred past the minimal cut unless trivially additive.
 
 ---
@@ -88,9 +92,11 @@ provenance, and MetaSheet is NEVER the authority for them.
   (`relationship/legacy_models.py`) is NOT the current BOM write/read source; `max_quantity` there
   is a type-level constraint on `RelationshipType`, not the per-line quantity.)
 - Curated `properties` (the AML-declared read-only Part attributes relevant to review).
-- **Provenance markers on every snapshot row** (铁律 5): `source_version` / `source_updated_at` /
-  `sync_status` so MetaSheet can detect staleness (mirrors P2-C's `source_updated_at` +
-  `sync_status:"snapshot"`).
+- **Provenance markers on the envelope AND every snapshot row** (铁律 5): `source_version` /
+  `source_updated_at` / `sync_status`, so MetaSheet can detect staleness per row (mirrors P2-C's
+  `source_updated_at` + `sync_status:"snapshot"`). `source_updated_at` falls back `modified_on || created_on`
+  (Item.updated_at has no default, else a fresh row reads null); per line it is the LATER of the child-Item's
+  and the relationship-Item's last touch, so a quantity edit OR a child state/generation change both surface.
 
 **MetaSheet-local collaboration fields (editable, MetaSheet-authoritative, NOT projected back):**
 - `owner` / assignee, review `status`, `tags`, `note`/comments, `due_date`, review opinion.
@@ -147,8 +153,9 @@ inside the PLM BOM screen").
 ## 6. Minimal sellable scope (F-A = the "BOM review table" skeleton)
 
 **In (the sellable skeleton):**
-- Yuantus: a governed READ-ONLY BOM-context projection endpoint (P3-A) — one Part's BOM tree as a
-  review snapshot with provenance markers, entitlement-gated by `is_entitled("bom_multitable")`.
+- Yuantus: a governed READ-ONLY BOM-context projection endpoint (P3-A) — one Part's full BOM tree,
+  flattened (level/path) into a review snapshot with envelope + per-row provenance markers, entitlement-gated
+  by `is_entitled("bom_multitable")` and Part-type-guarded (non-Part → 400).
 - Yuantus: light `bom_multitable` + advertise it in the capability manifest (P3-B).
 - metasheet2: consume the BOM capability + render a read-only BOM review table with MetaSheet-local
   collaboration fields (P3-C), degrading by `supported`/`entitled` (reuse C1/C2/C3).
@@ -183,7 +190,7 @@ risk out of the first sellable cut.
 
 | Slice | Scope | Entry | Exit |
 |---|---|---|---|
-| **P3-A** Yuantus BOM governed projection | read-only BOM-context snapshot endpoint (like P2-C, object = BOM/Part); provenance markers; entitlement-gated; NO write-back, NO embed | this package ratified | endpoint + endpoint/service tests on main; the EXISTING provider pact stays green (the new projection has NO consumer pact interaction yet — P3-C adds it, after which provider verification pins the projection contract) |
+| **P3-A** Yuantus BOM governed projection | `GET /api/v1/bom/multitable/{part_id}/context` (like P2-C, object = BOM/Part): full BOM tree flattened with `level`/`path`, curated read-only fields + envelope/per-row provenance; order auth → `is_entitled` → part → Part-type (400) → read perm; unentitled → `context:null` (no existence leak); NO write-back, NO embed | this package ratified | endpoint + endpoint/service tests on main; the EXISTING provider pact stays green (the new projection has NO consumer pact interaction yet — P3-C adds it, after which provider verification pins the projection contract) |
 | **P3-B** `bom_multitable` SKU + capabilities | light the reserved key to an independent SKU; manifest descriptor (supported/api_version/scenarios) | P3-A endpoint exists | lit + advertised; entitlement tests; route/pin updated |
 | **P3-C** metasheet2 consume BOM capability | backend adapter method + relay route + frontend read-only review table with collaboration fields; degrade by supported/entitled (reuse C1/C2/C3) | P3-A/B on main | review table renders; vitest specs; CI green |
 | **P3-D** embed / collaboration surface | identity spine (short-token / DingTalk IdP), `apiTokenAuth` base-scope, iframe slot; BOM table inside the PLM BOM screen; PLM fields still read-only, write-back only via governed endpoint | P3-C shipped + spine decision | embedded review surface; auth-gated iframe |

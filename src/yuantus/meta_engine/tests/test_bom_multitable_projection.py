@@ -10,17 +10,20 @@ later slice lights it, so the entitled-path tests TEST-ONLY light it by mapping 
 to ``plm.collab`` (monkeypatch ``FEATURE_APP_NAMES``) + adding a matching ``AppLicense``.
 This exercises the REAL ``EntitlementService.is_entitled`` query path, not a stub.
 
-Pins (the owner-listed P3-A obligations):
+Pins (the owner-listed P3-A obligations + review follow-ups):
 - GET unauthenticated -> 401 (auth is the outermost gate, before entitlement).
 - GET unentitled -> ``context: null`` + upgrade affordance, IDENTICAL for an existing and
   a non-existent part: the part is never queried (no existence leak) AND PLM permission is
-  never checked (pinned order: auth -> is_entitled -> part -> permission).
-- GET entitled -> CURATED read-only snapshot: ONLY the review fields, and NONE of the raw
-  ``Item.to_dict()`` internals (config_id / current_version_id / source_id / related_id /
-  permission_id / is_current / item_type_id) -- asserted via EXACT key sets, which is only
-  meaningful because the snapshot is built from a REAL Item through the REAL get_tree.
-- GET entitled + missing part -> 404 (before permission). + permission denied -> 403.
-- the router exposes exactly the 1 route (app-level 700 pinned elsewhere).
+  never checked (pinned order: auth -> is_entitled -> part -> Part-type -> permission).
+- GET entitled -> CURATED read-only snapshot of the FULL (flattened) BOM tree: ONLY the
+  review fields + level/path + per-row provenance, and NONE of the raw ``Item.to_dict()``
+  internals (config_id / current_version_id / source_id / related_id / permission_id /
+  is_current / item_type_id) -- asserted via EXACT key sets, which is only meaningful
+  because the snapshot is built from REAL Items through the REAL get_tree.
+- Second-level BOM lines are NOT silently dropped (level/path correct); provenance is on the
+  envelope AND every row, and source_updated_at falls back to created_on (never null).
+- GET entitled + missing part -> 404; non-Part Item -> 400; permission denied -> 403.
+- the router exposes exactly the 1 route, and the LIVE app owns that path with this router.
 """
 from __future__ import annotations
 
@@ -33,7 +36,7 @@ from sqlalchemy.pool import StaticPool
 
 # Importing the app registers ALL ORM models on Base.metadata (Item's FK web), so
 # create_all below builds the full schema.
-from yuantus.api.app import create_app  # noqa: F401  (import side-effect: model registration)
+from yuantus.api.app import create_app
 from yuantus.api.dependencies.auth import get_current_user
 from yuantus.config import get_settings
 from yuantus.database import get_db
@@ -47,25 +50,24 @@ from yuantus.meta_engine.web.bom_multitable_router import bom_multitable_router
 FEATURE = "bom_multitable"
 APP = "plm.collab"
 TENANT = "default"
+ROUTE_PATH = "/api/v1/bom/multitable/{part_id}/context"
 
 _USER = type("_User", (), {"id": 7, "roles": ["engineer"], "is_superuser": False})()
 
+# Curated row keys (the FULL allowed surface per row).
+_PART_KEYS = {"part_id", "item_number", "name", "state", "generation"}
+_LINE_KEYS = {
+    "item_number", "name", "state", "generation",
+    "quantity", "uom", "find_num", "refdes",
+    "level", "path",
+    "source_version", "source_updated_at", "sync_status",
+}
+
 # The complete raw-internal surface of Item.to_dict() that MUST NOT reach MetaSheet.
 _LEAKY_KEYS = {
-    "id",
-    "item_type_id",
-    "config_id",
-    "is_current",
-    "current_state",
-    "current_version_id",
-    "created_by_id",
-    "created_on",
-    "modified_by_id",
-    "modified_on",
-    "owner_id",
-    "permission_id",
-    "source_id",
-    "related_id",
+    "id", "item_type_id", "config_id", "is_current", "current_state",
+    "current_version_id", "created_by_id", "created_on", "modified_by_id",
+    "modified_on", "owner_id", "permission_id", "source_id", "related_id",
 }
 
 
@@ -128,51 +130,48 @@ def _allow_permission(monkeypatch, *, allow=True):
     )
 
 
+def _part(item_id, *, item_number, name, state, generation, item_type="Part"):
+    return Item(
+        id=item_id,
+        item_type_id=item_type,
+        config_id=item_id,
+        generation=generation,
+        is_current=True,
+        state=state,
+        properties={"item_number": item_number, "name": name},
+    )
+
+
+def _bom_line(rel_id, *, parent, child, quantity, uom, find_num, refdes):
+    return Item(
+        id=rel_id,
+        item_type_id="Part BOM",
+        config_id=rel_id,
+        is_current=True,
+        source_id=parent,
+        related_id=child,
+        properties={"quantity": quantity, "uom": uom, "find_num": find_num, "refdes": refdes},
+    )
+
+
 def _make_bom(db_session):
-    """A real 2-level BOM: part P1 -[Part BOM rel R1]-> child C1, all is_current."""
-    db_session.add(
-        Item(
-            id="P1",
-            item_type_id="Part",
-            config_id="P1",
-            generation=3,
-            is_current=True,
-            state="Released",
-            properties={"item_number": "P-001", "name": "Assembly"},
-        )
-    )
-    db_session.add(
-        Item(
-            id="C1",
-            item_type_id="Part",
-            config_id="C1",
-            generation=1,
-            is_current=True,
-            state="Draft",
-            properties={"item_number": "C-001", "name": "Bracket"},
-        )
-    )
-    db_session.add(
-        Item(
-            id="R1",
-            item_type_id="Part BOM",
-            config_id="R1",
-            is_current=True,
-            source_id="P1",
-            related_id="C1",
-            properties={"quantity": 2, "uom": "EA", "find_num": "10", "refdes": "R1,R2"},
-        )
-    )
+    """A real 2-level BOM: P1 -[R1]-> C1 -[R2]-> D1, all is_current.
+
+    P1 (gen 3) is the root Part; C1 (gen 1) a level-1 line; D1 (gen 2) a level-2 line under
+    C1 -- so the flatten must emit BOTH levels (the level-2 line must NOT be dropped).
+    """
+    db_session.add(_part("P1", item_number="P-001", name="Assembly", state="Released", generation=3))
+    db_session.add(_part("C1", item_number="C-001", name="Bracket", state="Draft", generation=1))
+    db_session.add(_part("D1", item_number="D-001", name="Screw", state="Released", generation=2))
+    db_session.add(_bom_line("R1", parent="P1", child="C1", quantity=2, uom="EA", find_num="10", refdes="R1,R2"))
+    db_session.add(_bom_line("R2", parent="C1", child="D1", quantity=4, uom="EA", find_num="20", refdes="R3"))
     db_session.commit()
-
-
-URL = "/api/v1/bom/multitable/{part_id}/context"
 
 
 # --- auth ---------------------------------------------------------------------
 
 def test_get_unauthenticated_is_401(db_session):
-    r = _client(db_session, user="unauth").get(URL.format(part_id="P1"))
+    r = _client(db_session, user="unauth").get(ROUTE_PATH.format(part_id="P1"))
     assert r.status_code == 401
 
 
@@ -192,8 +191,8 @@ def test_get_unentitled_does_not_leak_part_existence_or_check_permission(
     monkeypatch.setattr(MetaPermissionService, "check_permission", _explode)
 
     client = _client(db_session)
-    existing = client.get(URL.format(part_id="P1"))
-    missing = client.get(URL.format(part_id="P999"))
+    existing = client.get(ROUTE_PATH.format(part_id="P1"))
+    missing = client.get(ROUTE_PATH.format(part_id="P999"))
     assert existing.status_code == 200 and missing.status_code == 200
     assert existing.json() == missing.json()
     body = existing.json()
@@ -203,80 +202,111 @@ def test_get_unentitled_does_not_leak_part_existence_or_check_permission(
     assert body["context"] is None
 
 
-# --- entitled: curated read-only snapshot -------------------------------------
+# --- entitled: curated read-only flattened-tree snapshot ----------------------
 
-def test_get_entitled_returns_curated_snapshot_without_internal_fields(
-    db_session, monkeypatch
-):
+def test_get_entitled_returns_curated_flattened_tree_snapshot(db_session, monkeypatch):
     _light_entitlement(monkeypatch, db_session)
     _allow_permission(monkeypatch)
     _make_bom(db_session)
 
-    body = _client(db_session).get(URL.format(part_id="P1")).json()
+    body = _client(db_session).get(ROUTE_PATH.format(part_id="P1")).json()
     assert body["entitled"] is True
     assert body["upgrade"]["available"] is False
 
     ctx = body["context"]
+    # envelope provenance (the root Part's) is RETAINED at the top level
+    assert ctx["source_version"] == 3  # part.generation
     assert ctx["sync_status"] == "snapshot"
     assert ctx["template_key"] == "bom_review"
-    assert ctx["source_version"] == 3  # part.generation, the 铁律-5 provenance marker
+    assert ctx["max_depth"] == 10
+    # fresh Part has no updated_at -> source_updated_at falls back to created_on (NOT null)
+    assert isinstance(ctx["source_updated_at"], str) and ctx["source_updated_at"]
 
-    # part: EXACTLY the curated review keys -- no raw to_dict() internals leak through.
+    # part: EXACTLY the curated identity keys -- no provenance baggage, no to_dict internals.
     part = ctx["part"]
-    assert set(part.keys()) == {"part_id", "item_number", "name", "state", "generation"}
+    assert set(part.keys()) == _PART_KEYS
     assert part == {
-        "part_id": "P1",
-        "item_number": "P-001",
-        "name": "Assembly",
-        "state": "Released",
-        "generation": 3,
+        "part_id": "P1", "item_number": "P-001", "name": "Assembly",
+        "state": "Released", "generation": 3,
     }
     assert not (_LEAKY_KEYS & set(part.keys()))
 
-    # one BOM line, again EXACTLY the curated keys (item fields + relationship props).
-    assert len(ctx["lines"]) == 1
-    line = ctx["lines"][0]
-    assert set(line.keys()) == {
-        "item_number",
-        "name",
-        "state",
-        "generation",
-        "quantity",
-        "uom",
-        "find_num",
-        "refdes",
-    }
-    assert line == {
-        "item_number": "C-001",
-        "name": "Bracket",
-        "state": "Draft",
-        "generation": 1,
-        "quantity": 2,
-        "uom": "EA",
-        "find_num": "10",
-        "refdes": "R1,R2",
-    }
-    assert not (_LEAKY_KEYS & set(line.keys()))
+    # FULL flattened tree: two lines, pre-order (level-1 C1 then level-2 D1).
+    lines = ctx["lines"]
+    assert len(lines) == 2
+    for line in lines:
+        assert set(line.keys()) == _LINE_KEYS
+        assert not (_LEAKY_KEYS & set(line.keys()))
+        assert line["sync_status"] == "snapshot"
+        # per-row provenance is never null (created_on fallback)
+        assert isinstance(line["source_updated_at"], str) and line["source_updated_at"]
+
+    c1, d1 = lines
+    # path is the ancestor ITEM_NUMBER chain (joins to the item_number column), not raw ids
+    assert c1["item_number"] == "C-001" and c1["level"] == 1 and c1["path"] == ["P-001"]
+    assert c1["quantity"] == 2 and c1["uom"] == "EA" and c1["find_num"] == "10" and c1["refdes"] == "R1,R2"
+    assert c1["source_version"] == 1  # C1.generation (the displayed one)
+
+    assert d1["item_number"] == "D-001" and d1["level"] == 2 and d1["path"] == ["P-001", "C-001"]
+    assert d1["quantity"] == 4 and d1["source_version"] == 2  # D1.generation
+
+
+def test_second_level_bom_line_is_not_dropped(db_session, monkeypatch):
+    # Owner pin: depth>1 must NOT be silently truncated. The level-2 line (D1 under C1)
+    # must appear, tagged level=2 with the full ancestor path.
+    _light_entitlement(monkeypatch, db_session)
+    _allow_permission(monkeypatch)
+    _make_bom(db_session)
+
+    lines = _client(db_session).get(ROUTE_PATH.format(part_id="P1")).json()["context"]["lines"]
+    by_num = {ln["item_number"]: ln for ln in lines}
+    assert "D-001" in by_num, "level-2 BOM line was dropped"
+    assert by_num["D-001"]["level"] == 2
+    assert by_num["D-001"]["path"] == ["P-001", "C-001"]
 
 
 def test_get_entitled_missing_part_is_404(db_session, monkeypatch):
-    # Entitled + permission allowed, but the part is absent -> 404 (raised BEFORE the
-    # permission gate; existence is allowed to be revealed once entitled).
     _light_entitlement(monkeypatch, db_session)
     _allow_permission(monkeypatch)
-    r = _client(db_session).get(URL.format(part_id="NOPE"))
+    r = _client(db_session).get(ROUTE_PATH.format(part_id="NOPE"))
     assert r.status_code == 404
+
+
+def test_get_entitled_non_part_item_is_400(db_session, monkeypatch):
+    # The endpoint is a Part BOM review; a non-Part Item is a bad request (before permission).
+    _light_entitlement(monkeypatch, db_session)
+    _allow_permission(monkeypatch)
+    db_session.add(_part("DOC1", item_number="DOC-1", name="Spec", state="Released", generation=1, item_type="Document"))
+    db_session.commit()
+    r = _client(db_session).get(ROUTE_PATH.format(part_id="DOC1"))
+    assert r.status_code == 400
 
 
 def test_get_entitled_permission_denied_is_403(db_session, monkeypatch):
     _light_entitlement(monkeypatch, db_session)
     _allow_permission(monkeypatch, allow=False)
     _make_bom(db_session)
-    r = _client(db_session).get(URL.format(part_id="P1"))
+    r = _client(db_session).get(ROUTE_PATH.format(part_id="P1"))
     assert r.status_code == 403
 
 
-# --- route surface ------------------------------------------------------------
+# --- route surface + live-app ownership ---------------------------------------
 
 def test_router_exposes_exactly_one_route():
     assert len(bom_multitable_router.routes) == 1
+
+
+def test_live_app_owns_the_route_with_this_router():
+    # Guard against a mis-mount / missing mount in app.py being caught only indirectly via
+    # the route-count pin: assert the LIVE app exposes the exact path, GET, owned by this
+    # router's handler.
+    app = create_app()
+    matches = [
+        r for r in app.routes
+        if getattr(r, "path", None) == "/api/v1/bom/multitable/{part_id}/context"
+    ]
+    assert len(matches) == 1, "exactly one route must own the BOM multi-table context path"
+    route = matches[0]
+    assert "GET" in route.methods
+    assert route.endpoint.__name__ == "bom_multitable_context"
+    assert route.endpoint.__module__ == "yuantus.meta_engine.web.bom_multitable_router"
