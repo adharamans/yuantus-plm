@@ -174,7 +174,10 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   (GET /approvals/automation/eco/capabilities), unconditional.
     # - 699: + 1 PLM-COLLAB-P2.5 integration capability manifest
     #   (GET /integrations/capabilities), unconditional.
-    assert len(app.routes) == 699
+    # - 701: + 2 WP1.3 CAD 2D/3D staleness routes (GET
+    #   /cad/items/{item_id}/staleness; POST .../staleness/recompute), both
+    #   unconditional.
+    assert len(app.routes) == 701
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:
