@@ -437,3 +437,43 @@ class RelationshipService:
                 entry["min_depth"] = min(entry["min_depth"], node["depth"])
         for child in node.get("children", []):
             self._flatten_node(child, agg, order)
+
+    def get_reachable_items(
+        self,
+        root_id: str,
+        kinds: Optional[List[str]] = None,
+        max_depth: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Bounded O(V+E) unique-item reachability from ``root_id`` via the given
+        containment kinds within ``max_depth`` (root included). Uses a visited-set
+        BFS, so -- unlike ``get_relationship_tree`` -- it does NOT re-expand shared
+        parts and cannot blow up on diamond-heavy assemblies. First discovery is
+        shortest-path (BFS), so ``min_depth``/``first_path`` are the shortest. This
+        is the safe basis for whole-assembly scans (e.g. stale-drawings)."""
+        from collections import deque
+
+        kinds = tuple(kinds) if kinds else (self.ASSEMBLY,)
+        result: Dict[str, Dict[str, Any]] = {}
+        enqueued = {root_id}
+        queue = deque([(root_id, 0, [root_id], [])])
+        while queue:
+            item_id, depth, path, rel_path = queue.popleft()
+            result[item_id] = {
+                **self._item_summary(item_id),
+                "min_depth": depth,
+                "first_path": list(path),
+                "first_relationship_path": list(rel_path),
+            }
+            if depth >= max_depth:
+                continue
+            for kind in kinds:
+                for edge in self.get_relationships(
+                    item_id, direction="outgoing", relationship_type_name=kind
+                ):
+                    child = edge.related_id
+                    if child not in enqueued:  # visited-set: each item once (cycle/shared-safe)
+                        enqueued.add(child)
+                        queue.append(
+                            (child, depth + 1, path + [child], rel_path + [edge.id])
+                        )
+        return list(result.values())
