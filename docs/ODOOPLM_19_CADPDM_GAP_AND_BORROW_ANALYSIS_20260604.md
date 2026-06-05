@@ -137,7 +137,7 @@
 - 有 `cad_change_log` / `cad_history_router` / `cad_review_router`,但都是单文件维度,**没有"图纸相对其模型过期"这一跨文档不变量**。
 
 **借鉴建议(P0,依赖 A1)**
-1. 在 `DOC_2D3D` 关系上引入派生标志 `needs_update_from_source`(对应 `must_update_from_cad`),由两端版本/文件的更新时间比较得出。
+1. 在 `DOC_2D3D` 关系上引入派生标志 `needs_update_from_source`(对应 `must_update_from_cad`),由两端版本/文件的更新时间比较得出。 🛑 *(WP1.0 覆写:实际不建 `DOC_2D3D` 关系;过期由同一 Part 上 `drawing` vs `native_cad` 文件角色的时间戳比较得出,标志写在 `VersionFile`/版本 `properties`。见顶部勘误。)*
 2. 引入"**保存批次**"概念(对应 `dbThread`):CAD 导入/检入服务一次提交打一个 `import_batch_id`,同批次内的 2D/3D 互不判过期。`cad_import_router` / `cad_checkin_router` 是落点。
 3. 暴露"过期图纸"扫描端点,纳入 release-readiness 规则(B2 联动:模型已改但图纸未更新 → 阻止发布)。
 
@@ -232,7 +232,7 @@
 
 **Phase 1 — CAD-PDM 关系底座(P0,A1+A2)**
 - 种子化文档关系类型(DOC_ASSEMBLY / DOC_2D3D / DOC_REFERENCE / DOC_PACKAGE),复用 `RelationshipService`。 🛑 *(WP1.0 覆写:仅 `ASSEMBLY`/`REFERENCE`(Part↔Part);2D↔3D=文件角色。以 taskbook 为准。)*
-- 在 DOC_2D3D 上做"过期"派生 + 引入 `import_batch_id`(对应 dbThread)防误判;接 `cad_import_router`/`cad_checkin_router`。
+- 在 DOC_2D3D 上做"过期"派生 + 引入 `import_batch_id`(对应 dbThread)防误判;接 `cad_import_router`/`cad_checkin_router`。 🛑 *(WP1.0 覆写:无 `DOC_2D3D`;过期走文件角色比较,`import_batch_id` 仍保留。以 taskbook 为准。)*
 - 验收:能查"一个 3D 的全部图纸/引用/装配父子";模型改后其图纸被标过期;同批保存不误标。
 
 **Phase 2 — 发布治理收口(P1,B1+B2)**
