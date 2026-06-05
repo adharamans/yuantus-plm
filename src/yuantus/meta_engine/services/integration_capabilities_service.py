@@ -46,8 +46,9 @@ _CACHE_SCOPE: Dict[str, str] = {"supported": "global", "entitled": "tenant"}
 # Integration-relevant features the handshake advertises. The rich descriptor
 # (api_version / scenarios / actions / action_status) is emitted ONLY when the feature
 # is SUPPORTED (lit). Keys MUST be a subset of FEATURE_APP_NAMES (a test pins this) so
-# is_entitled never sees an unknown key. ``bom_multitable`` is reserved-but-unlit -> a
-# minimal entry until a later phase lights it.
+# is_entitled never sees an unknown key. ``bom_multitable`` is lit in P3-B (its own SKU);
+# it advertises the read-only ``bom_review`` scenario (the P3-A projection) with NO actions
+# -- it is a read surface, not an action surface like approval_automation.
 _FEATURE_DESCRIPTORS: Dict[str, Dict[str, Any]] = {
     "approval_automation": {
         "api_version": "v1",
@@ -55,7 +56,10 @@ _FEATURE_DESCRIPTORS: Dict[str, Dict[str, Any]] = {
         "actions": sorted(ACTION_ALLOWLIST),
         "action_status": "stubbed",
     },
-    "bom_multitable": {},
+    "bom_multitable": {
+        "api_version": "v1",
+        "scenarios": ["bom_review"],
+    },
 }
 
 

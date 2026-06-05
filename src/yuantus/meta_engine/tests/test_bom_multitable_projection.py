@@ -5,10 +5,11 @@ to an in-memory SQLite session and ``get_current_user`` overridden to drive the 
 gate. The full schema is created (Item's FK web) by importing the app to register all
 models, then ``create_all``. Tenancy is single-mode -> resolver yields "default".
 
-``bom_multitable`` is a RESERVED entitlement key (maps to no app -> always False) until a
-later slice lights it, so the entitled-path tests TEST-ONLY light it by mapping the key
-to ``plm.collab`` (monkeypatch ``FEATURE_APP_NAMES``) + adding a matching ``AppLicense``.
-This exercises the REAL ``EntitlementService.is_entitled`` query path, not a stub.
+``bom_multitable`` is gated by ``EntitlementService.is_entitled``. The entitled-path tests
+TEST-ONLY force it by mapping the key to ``plm.collab`` (monkeypatch ``FEATURE_APP_NAMES``)
++ adding a matching ``AppLicense`` -- isolating these projection tests from the production
+SKU wiring (``plm.bom_multitable``, lit in P3-B) while still exercising the REAL is_entitled
+query path, not a stub.
 
 Pins (the owner-listed P3-A obligations + review follow-ups):
 - GET unauthenticated -> 401 (auth is the outermost gate, before entitlement).
@@ -112,10 +113,11 @@ def _client(db_session, *, user="auth"):
 
 
 def _light_entitlement(monkeypatch, db_session):
-    """TEST-ONLY: light the reserved ``bom_multitable`` key + add a matching license.
+    """TEST-ONLY: force-entitle ``bom_multitable`` + add a matching license.
 
     Maps the key to ``plm.collab`` so the REAL is_entitled query path runs and matches the
-    license below (single-mode tenant == "default"). Auto-reverted by monkeypatch.
+    license below (single-mode tenant == "default"), isolated from the production
+    ``plm.bom_multitable`` SKU. Auto-reverted by monkeypatch.
     """
     monkeypatch.setitem(es.FEATURE_APP_NAMES, FEATURE, frozenset({APP}))
     db_session.add(

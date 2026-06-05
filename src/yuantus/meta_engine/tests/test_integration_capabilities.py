@@ -9,7 +9,8 @@ Pins (the owner-ratified shape + invariants):
 - approval_automation (lit): supported true; unentitled -> entitled false; entitled ->
   the rich descriptor (api_version "v1", scenarios [eco], actions [notify],
   action_status "stubbed").
-- bom_multitable (reserved/unlit): supported false, api_version null, entitled false.
+- bom_multitable (lit, P3-B): supported true, api_version v1, scenarios [bom_review], NO
+  actions; unentitled -> entitled false; entitled ONLY by plm.bom_multitable (not plm.collab).
 - every feature carries cache_scope {supported:"global", entitled:"tenant"}.
 - ``supported`` is DERIVED from FEATURE_APP_NAMES lit-ness (not hardcoded).
 - descriptor keys are a subset of FEATURE_APP_NAMES (so is_entitled never sees an
@@ -99,12 +100,14 @@ def test_unentitled_supported_but_not_entitled(db_session):
     # approval_automation is lit -> supported; no license -> not entitled
     assert feats["approval_automation"]["supported"] is True
     assert feats["approval_automation"]["entitled"] is False
-    # bom_multitable is reserved/unlit -> not supported, api_version null
-    assert feats["bom_multitable"]["supported"] is False
-    assert feats["bom_multitable"]["api_version"] is None
-    assert feats["bom_multitable"]["entitled"] is False
-    # reserved feature carries no rich descriptor
-    assert "actions" not in feats["bom_multitable"]
+    # bom_multitable is lit (P3-B) -> supported with its read-only descriptor; no license
+    # here -> not entitled. It is a READ surface, so it advertises NO actions.
+    bm = feats["bom_multitable"]
+    assert bm["supported"] is True
+    assert bm["api_version"] == "v1"
+    assert bm["scenarios"] == ["bom_review"]
+    assert bm["entitled"] is False
+    assert "actions" not in bm and "action_status" not in bm
 
 
 def test_entitled_emits_rich_descriptor(db_session):
@@ -115,6 +118,28 @@ def test_entitled_emits_rich_descriptor(db_session):
     assert feat["scenarios"] == ["eco"]
     assert feat["actions"] == ["notify"]
     assert feat["action_status"] == "stubbed"
+
+
+def test_bom_multitable_entitled_by_its_own_sku_only(db_session):
+    # P3-B: the bom_multitable SKU (plm.bom_multitable) entitles it; the read descriptor
+    # carries scenarios [bom_review] and -- as a read surface -- no actions/action_status.
+    _add_license(db_session, app_name="plm.bom_multitable")
+    feats = _client(db_session).get(CAPS).json()["features"]
+    bm = feats["bom_multitable"]
+    assert bm["supported"] is True and bm["entitled"] is True
+    assert bm["api_version"] == "v1"
+    assert bm["scenarios"] == ["bom_review"]
+    assert "actions" not in bm and "action_status" not in bm
+    # independence: lighting/entitling bom_multitable did NOT entitle approval_automation
+    assert feats["approval_automation"]["entitled"] is False
+
+
+def test_bom_multitable_not_entitled_by_collab_license(db_session):
+    # the plm.collab SKU must NOT entitle bom_multitable (independent SKU, not bundled).
+    _add_license(db_session, app_name="plm.collab")
+    bm = _client(db_session).get(CAPS).json()["features"]["bom_multitable"]
+    assert bm["supported"] is True  # supported = lit-ness (tenant-independent)
+    assert bm["entitled"] is False  # but a different SKU's license does not entitle it
 
 
 def test_every_feature_declares_cache_scope(db_session):

@@ -136,7 +136,23 @@ def test_unknown_feature_key_raises(session):
 
 def test_reserved_but_unlit_feature_returns_false(session):
     # a valid plm.collab license exists, but a reserved key maps to no app -> False
+    # (automation_enterprise is still reserved; bom_multitable was lit in P3-B)
     _lic(session, tenant_id="acme")
+    tenant_id_var.set("acme")
+    assert EntitlementService(session).is_entitled("automation_enterprise") is False
+
+
+def test_bom_multitable_lit_to_its_own_independent_sku(session):
+    # P3-B: bom_multitable is lit, unlocked ONLY by its own SKU app_name plm.bom_multitable.
+    _lic(session, tenant_id="acme", app_name="plm.bom_multitable")
+    tenant_id_var.set("acme")
+    assert EntitlementService(session).is_entitled("bom_multitable") is True
+
+
+def test_bom_multitable_not_unlocked_by_collab_license(session):
+    # Independence: the plm.collab SKU does NOT entitle bom_multitable (not bundled, not a
+    # reuse of plm_collaboration_pro -- same discipline as approval_automation in P2-A).
+    _lic(session, tenant_id="acme", app_name="plm.collab")
     tenant_id_var.set("acme")
     assert EntitlementService(session).is_entitled("bom_multitable") is False
 
@@ -168,7 +184,7 @@ def test_reserved_key_also_raises_on_non_single_missing_tenant(session, monkeypa
     monkeypatch.setenv("YUANTUS_TENANCY_MODE", "db-per-tenant")
     get_settings.cache_clear()
     with pytest.raises(ValueError, match="tenant context is required"):
-        EntitlementService(session).is_entitled("bom_multitable")
+        EntitlementService(session).is_entitled("automation_enterprise")
 
 
 def test_kernel_is_service_only_no_router():

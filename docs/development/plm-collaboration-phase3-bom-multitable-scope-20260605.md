@@ -138,12 +138,12 @@ inside the PLM BOM screen").
 
 ## 5. Capability manifest + entitlement (extend, don't reinvent)
 
-- **SKU lighting (P3-B):** `bom_multitable` is currently a RESERVED key →
-  `FEATURE_APP_NAMES["bom_multitable"] = frozenset()`
-  (`src/yuantus/meta_engine/app_framework/entitlement_service.py:36`, always False). P3-B lights it
-  to an **independent SKU** app_name (e.g. `plm.bom_multitable`), exactly as P2-A lit
-  `approval_automation → {"plm.approval_automation"}`. Timing: light it when P3-A's projection
-  endpoint exists (so an entitled tenant has something to consume) — not before.
+- **SKU lighting (P3-B) — DONE:** `bom_multitable` was a RESERVED key
+  (`FEATURE_APP_NAMES["bom_multitable"] = frozenset()`, always False); P3-B **lit** it to its
+  **independent SKU** `FEATURE_APP_NAMES["bom_multitable"] = frozenset({"plm.bom_multitable"})`,
+  exactly as P2-A lit `approval_automation → {"plm.approval_automation"}` (NOT bundled into
+  plm.collab, NOT reusing plm_collaboration_pro). Timed after P3-A's projection endpoint exists
+  (so an entitled tenant has something to consume).
 - **Capability manifest (P2.5 extension):** the integration manifest
   (`GET /api/v1/integrations/capabilities`) already advertises every `FEATURE_APP_NAMES` key with
   `supported` derived from lit-ness. Lighting `bom_multitable` automatically flips its `supported`;
@@ -194,7 +194,7 @@ risk out of the first sellable cut.
 | Slice | Scope | Entry | Exit |
 |---|---|---|---|
 | **P3-A** Yuantus BOM governed projection | `GET /api/v1/bom/multitable/{part_id}/context` (like P2-C, object = BOM/Part): full BOM tree (`depth=-1`, no truncation), restricted to `"Part BOM"` relationships, flattened with `bom_line_id` (stable row key) + `part_id` (child part key) + `level` + `path` (ancestor part-ids) + `path_labels` (item_numbers), curated read-only fields + envelope/per-row provenance; order auth → `is_entitled` → part → Part-type (400) → read perm; unentitled → `context:null` (no existence leak); NO write-back, NO embed | this package ratified | endpoint + endpoint/service tests on main; the EXISTING provider pact stays green (the new projection has NO consumer pact interaction yet — P3-C adds it, after which provider verification pins the projection contract) |
-| **P3-B** `bom_multitable` SKU + capabilities | light the reserved key to an independent SKU; manifest descriptor (supported/api_version/scenarios) | P3-A endpoint exists | lit + advertised; entitlement tests; route/pin updated |
+| **P3-B** `bom_multitable` SKU + capabilities | light the reserved key to an independent SKU (`plm.bom_multitable`); manifest descriptor (supported/api_version/scenarios:[bom_review], no actions) | P3-A endpoint exists | lit to `plm.bom_multitable`; manifest advertises supported/api_version/scenarios; entitlement + manifest tests incl. independence from plm.collab; NO new route → **route pin UNCHANGED (702)** |
 | **P3-C** metasheet2 consume BOM capability | backend adapter method + relay route + frontend read-only review table with collaboration fields; degrade by supported/entitled (reuse C1/C2/C3) | P3-A/B on main | review table renders; vitest specs; CI green |
 | **P3-D** embed / collaboration surface | identity spine (short-token / DingTalk IdP), `apiTokenAuth` base-scope, iframe slot; BOM table inside the PLM BOM screen; PLM fields still read-only, write-back only via governed endpoint | P3-C shipped + spine decision | embedded review surface; auth-gated iframe |
 

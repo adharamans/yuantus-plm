@@ -7,8 +7,9 @@ read path -- a NULL-tenant or other-tenant license can never unlock the current
 tenant, and a non-single deployment without tenant context raises (it is not
 swallowed into a plain False).
 
-Lit keys: ``plm_collaboration_pro`` (P1-B) and ``approval_automation`` (P2-A, an
-independent SKU -> ``plm.approval_automation``). The other canonical feature keys are
+Lit keys: ``plm_collaboration_pro`` (P1-B), ``approval_automation`` (P2-A ->
+``plm.approval_automation``) and ``bom_multitable`` (P3-B -> ``plm.bom_multitable``) --
+each an independent, separately-sellable SKU. The other canonical feature keys are
 accepted (so a typo is caught, not silently treated as unlicensed) but map to an
 empty app-name set -> always False until a later slice lights them. ``license_data``
 is NOT an authorization source.
@@ -31,9 +32,11 @@ FEATURE_APP_NAMES: Mapping[str, FrozenSet[str]] = {
     # PLM-COLLAB-P2-A: approval automation is an independent, separately-sellable SKU
     # -- it is NOT bundled into plm.collab and does NOT reuse plm_collaboration_pro.
     "approval_automation": frozenset({"plm.approval_automation"}),
+    # PLM-COLLAB-P3-B: BOM multi-table is its OWN independent SKU -- NOT bundled into
+    # plm.collab, NOT reusing plm_collaboration_pro (same discipline as approval_automation).
+    "bom_multitable": frozenset({"plm.bom_multitable"}),
     # reserved (canonical 6.1 vocabulary) -- accepted but not license-unlockable yet:
     "plm": frozenset(),
-    "bom_multitable": frozenset(),
     "automation_enterprise": frozenset(),
     "plm_offline_license": frozenset(),
 }
