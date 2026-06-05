@@ -454,6 +454,7 @@ def check_material_assistant_command_contract() -> None:
     body = _command_body(plugin_cs, "PLMMATASSIST")
     require("ExtractFields(doc)" in body, "PLMMATASSIST must extract current CAD fields")
     require("ResolveAsync(" in body, "PLMMATASSIST must call ResolveAsync")
+    require("PromptCandidateSelection(" in body, "PLMMATASSIST bind branch must require explicit candidate selection")
     require("DiffPreviewAsync(" in body, "PLMMATASSIST bind branch must reuse helper-forwarded DiffPreviewAsync")
     require("MaterialSyncDiffPreviewWindow" in body, "PLMMATASSIST bind branch must show the diff preview confirmation window")
     require("ApplyFields(" in body, "PLMMATASSIST bind branch must write confirmed fields via ApplyFields")
@@ -463,13 +464,14 @@ def check_material_assistant_command_contract() -> None:
     require("AllowNone = true" in body, "PLMMATASSIST create prompt must set AllowNone = true so Enter falls back to the default (No)")
     pos_extract = body.find("ExtractFields(doc)")
     pos_resolve = body.find("ResolveAsync(")
+    pos_select = body.find("PromptCandidateSelection(")
     pos_diff = body.find("DiffPreviewAsync(")
     pos_window = body.find("MaterialSyncDiffPreviewWindow")
     pos_apply = body.find("ApplyFields(")
     pos_create = body.find("CreateAsync(")
     require(
-        0 <= pos_extract < pos_resolve < pos_diff < pos_window < pos_apply,
-        "PLMMATASSIST bind order must be extract -> resolve -> diff preview -> window -> apply",
+        0 <= pos_extract < pos_resolve < pos_select < pos_diff < pos_window < pos_apply,
+        "PLMMATASSIST bind order must be extract -> resolve -> select -> diff preview -> window -> apply",
     )
     # "no DWG write-back" now scopes to the CREATE branch only: there must be no
     # ApplyFields from CreateAsync onward (the bind branch writes and returns first).
