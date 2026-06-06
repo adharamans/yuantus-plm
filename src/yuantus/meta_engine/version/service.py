@@ -328,6 +328,10 @@ class VersionService:
             is_current=target_ver.is_current,  # Inherit current status (if target was current, new one becomes current)
             is_released=False,
             predecessor_id=target_ver.id,
+            # B1 (D5): inherit the target's branch -- do NOT let it default to "main".
+            # Otherwise a branch-target merge would land as a mainline open draft and
+            # collide with the D4b (item_id, branch_name) open-current invariant.
+            branch_name=target_ver.branch_name,
             properties=copy.deepcopy(merged_props) if merged_props else None,
             created_by_id=user_id,
             created_at=datetime.utcnow(),
@@ -361,6 +365,17 @@ class VersionService:
         current_ver = (
             self.session.query(ItemVersion).filter_by(id=item.current_version_id).one()
         )
+        # B1 (D4): only a released version may spawn a revision. A line may hold at
+        # most one open draft (enforced race-proof by the DB partial-unique on
+        # is_current + not is_released); revising an in-work draft would fork the
+        # line, so refuse early with a friendly error. Iterate a draft in place via
+        # checkout/checkin, not a new revision. (merge_branch() is a separate branch
+        # workflow and is intentionally NOT subject to this guard -- see D5.)
+        if not current_ver.is_released:
+            raise VersionError(
+                "Cannot revise an unreleased (in-work) version; release or discard "
+                "the open draft first"
+            )
         self._assert_source_version_checkout_available(current_ver, user_id)
 
         # Calculate new revision
@@ -420,6 +435,17 @@ class VersionService:
         current_ver = (
             self.session.query(ItemVersion).filter_by(id=item.current_version_id).one()
         )
+        # B1 (D4): only a released version may spawn a revision. A line may hold at
+        # most one open draft (enforced race-proof by the DB partial-unique on
+        # is_current + not is_released); revising an in-work draft would fork the
+        # line, so refuse early with a friendly error. Iterate a draft in place via
+        # checkout/checkin, not a new revision. (merge_branch() is a separate branch
+        # workflow and is intentionally NOT subject to this guard -- see D5.)
+        if not current_ver.is_released:
+            raise VersionError(
+                "Cannot revise an unreleased (in-work) version; release or discard "
+                "the open draft first"
+            )
         self._assert_source_version_checkout_available(current_ver, user_id)
 
         next_gen = current_ver.generation + 1
@@ -497,6 +523,33 @@ class VersionService:
         current_ver.state = "Released"
         current_ver.checked_out_by_id = None
         current_ver.checked_out_at = None
+
+        # B1 (D2): supersede the immediate prior released version on this line. When
+        # vN+1 is released, vN (predecessor) goes Released -> Superseded. It keeps
+        # is_released=True (it WAS released, per Q-A); is_superseded/is_current then
+        # distinguish active vs historical released. Only the immediate predecessor
+        # that is still an active released version is touched (older ancestors were
+        # superseded inductively when their successor released); the
+        # `not is_superseded` guard stops the seeder's Suspend->Release re-cycle from
+        # re-superseding an already-superseded version. release() is the SOLE runtime
+        # is_released setter (promote- and ECO-originated releases both route here).
+        if current_ver.predecessor_id:
+            predecessor = self.session.get(ItemVersion, current_ver.predecessor_id)
+            if (
+                predecessor is not None
+                and predecessor.is_released
+                and not predecessor.is_superseded
+            ):
+                predecessor.is_superseded = True
+                predecessor.state = "Superseded"
+                self.session.add(predecessor)
+                self._log_history(
+                    predecessor,
+                    "supersede",
+                    user_id,
+                    f"Superseded by {current_ver.version_label}",
+                )
+
         self.file_version_service.release_all_file_locks(current_ver.id)
 
         # Lock item properties if needed? Item properties are usually master, maybe synced.
@@ -504,6 +557,28 @@ class VersionService:
         self.session.add(current_ver)
         self._log_history(current_ver, "release", user_id, "Version Released")
         return current_ver
+
+    def is_under_modification(self, item_id: str) -> bool:
+        """B1 (D3): derived "this line is being revised" signal -- read-time only,
+        no stored state. True iff the current version is an open (unreleased) draft
+        AND the line has a prior released version (i.e. a released version is in the
+        middle of being revised). A brand-new item with only a never-released Draft
+        is NOT under modification."""
+        item = self.session.get(Item, item_id)
+        if item is None or not item.current_version_id:
+            return False
+        current = self.session.get(ItemVersion, item.current_version_id)
+        if current is None or current.is_released:
+            return False
+        return (
+            self.session.query(ItemVersion.id)
+            .filter(
+                ItemVersion.item_id == item_id,
+                ItemVersion.is_released.is_(True),
+            )
+            .first()
+            is not None
+        )
 
     def get_history(self, item_id: str) -> List[VersionHistory]:
         """

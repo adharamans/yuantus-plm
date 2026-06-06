@@ -225,7 +225,10 @@ def test_t15_recompute_does_not_rewrite_historical_version_snapshots(session):
     v_hist = "P15-V1"
     v_curr = "P15-V2"
     session.add(
-        ItemVersion(id=v_hist, item_id="P15", generation=1, revision="A", state="Released")
+        ItemVersion(
+            id=v_hist, item_id="P15", generation=1, revision="A", state="Released",
+            is_current=False, is_released=True,  # B1: historical, non-current released
+        )
     )
     session.add(
         ItemVersion(id=v_curr, item_id="P15", generation=1, revision="B", state="Draft")
@@ -469,7 +472,10 @@ def test_sync_version_files_to_item_refuses_non_current_version(session):
     v_hist = "PNC-V1"
     v_curr = "PNC-V2"
     session.add(
-        ItemVersion(id=v_hist, item_id="PNC", generation=1, revision="A", state="Released")
+        ItemVersion(
+            id=v_hist, item_id="PNC", generation=1, revision="A", state="Released",
+            is_current=False, is_released=True,  # B1: historical, non-current released
+        )
     )
     session.add(
         ItemVersion(id=v_curr, item_id="PNC", generation=1, revision="B", state="Draft")
