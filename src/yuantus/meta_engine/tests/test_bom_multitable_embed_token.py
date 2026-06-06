@@ -10,8 +10,9 @@ fed via `YUANTUS_EMBED_TOKEN_SIGNING_KEY` and the minted token is verified with 
 
 Pins: unauthenticated -> 401; unentitled -> no token, part NEVER queried, permission NEVER
 checked; missing part -> 404; non-Part -> 400; permission denied -> 403; not configured -> 503
-(fail-closed); cross-origin -> 403; wildcard '*' is NEVER honored; success -> a verifiable token
-with the full claim set (aud == requested origin) + a jti-trackable AuditLog row (never the
+(fail-closed); an invalid signing key -> 503 + zero audit; the TTL is capped; cross-origin -> 403;
+wildcard '*' is NEVER honored; success -> a verifiable token with the full claim set (aud == the
+service audience, embed_origin == the requested origin) + a jti-trackable AuditLog row (never the
 token itself); the router owns exactly 2 routes and the live app owns the POST path.
 """
 from __future__ import annotations

@@ -70,9 +70,12 @@ P3-D's embed token is the spine's core. The contract (each clause is a P3-D acce
   mechanism is a P3-D decision — reuse the P1-C Ed25519 discipline or a scoped server secret;
   never guessable, never derived from `license_data`, which is not an authorization source).
 - **Origin-pinned (cross-origin allowlist), and the allowlist must be a real allowlist.** The
-  token's audience is pinned to the allowed embed origin(s); the iframe host enforces the
-  `allowedOrigins` allowlist + postMessage origin checks (the existing `MultitableEmbedHost.vue`
-  mechanism). A token presented from a non-allowlisted origin is rejected. **Two concrete traps
+  JWT `aud` is the recipient SERVICE (P3-D1 ships it as `EMBED_TOKEN_AUDIENCE`, default
+  `metasheet2.embed`, so P3-D2 can do STANDARD RFC-7519 audience validation); the embed origin
+  is a SEPARATE `embed_origin` claim, validated against the allowlist independently (do NOT put
+  the origin in `aud`). The iframe host also enforces the `allowedOrigins` allowlist + postMessage
+  origin checks (the existing `MultitableEmbedHost.vue` mechanism); a token / message from a
+  non-allowlisted origin is rejected. **Two concrete traps
   in the current host that P3-D MUST close:** (i) `MultitableEmbedHost.isOriginAllowed`
   short-circuits to `true` when `allowedOrigins` contains `'*'` — the **production embed config
   MUST forbid `'*'`** (an explicit PLM origin only); (ii) `postToParent` today does

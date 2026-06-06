@@ -362,7 +362,7 @@ class Settings(BaseSettings):
     )
     EMBED_ALLOWED_ORIGINS: str = Field(
         default="",
-        description="Comma-separated allowlist of embed origins (token aud). Empty = none allowed (fail-closed). Production must NOT use '*'.",
+        description="Comma-separated allowlist of embed origins (matched against the token's embed_origin claim; the JWT aud is the service audience, see EMBED_TOKEN_AUDIENCE). Empty = none allowed (fail-closed). Production must NOT use '*'.",
     )
 
     LOG_FORMAT: str = Field(
