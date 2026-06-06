@@ -162,6 +162,7 @@ class TestVersionService:
             revision="A",
             version_label="1.A",
             is_current=True,
+            is_released=True,  # B1: revise/new_generation require a released source
         )
 
         # Mock queries
@@ -197,6 +198,7 @@ class TestVersionService:
             revision="A",
             version_label="1.A",
             is_current=True,
+            is_released=True,  # B1: revise/new_generation require a released source
         )
 
         item_query = MagicMock()
@@ -231,6 +233,7 @@ class TestVersionService:
             revision="A",
             version_label="1.A",
             is_current=True,
+            is_released=True,  # B1: revise/new_generation require a released source
             checked_out_by_id=9,
         )
 
@@ -336,6 +339,7 @@ class TestVersionService:
             revision="A",
             version_label="1.A",
             is_current=True,
+            is_released=True,  # B1: revise/new_generation require a released source
         )
 
         item_query = MagicMock()
@@ -370,6 +374,7 @@ class TestVersionService:
             revision="A",
             version_label="1.A",
             is_current=True,
+            is_released=True,  # B1: revise/new_generation require a released source
             checked_out_by_id=9,
         )
 

@@ -18,6 +18,9 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     JSON,
+    false,
+    true,
+    text,
 )
 from sqlalchemy.orm import relationship, foreign
 from sqlalchemy.dialects.postgresql import JSONB
@@ -68,8 +71,18 @@ class ItemVersion(Base):
     state = Column(String(50), default="Draft")
 
     # Flags
-    is_current = Column(Boolean, default=True, index=True)
-    is_released = Column(Boolean, default=False, index=True)
+    is_current = Column(
+        Boolean, nullable=False, server_default=true(), default=True, index=True
+    )
+    is_released = Column(
+        Boolean, nullable=False, server_default=false(), default=False, index=True
+    )
+    # B1: version replacement signal. Set True on the immediate prior released
+    # version when a newer version on the same line is released
+    # (VersionService.release). "active released" = is_released AND NOT is_superseded.
+    is_superseded = Column(
+        Boolean, nullable=False, server_default=false(), default=False, index=True
+    )
 
     # Release Info
     released_at = Column(DateTime, nullable=True)
@@ -83,7 +96,9 @@ class ItemVersion(Base):
     predecessor_id = Column(String, ForeignKey("meta_item_versions.id"), nullable=True)
 
     # Branching
-    branch_name = Column(String(100), default="main")
+    branch_name = Column(
+        String(100), nullable=False, server_default="main", default="main"
+    )
     branched_from_id = Column(
         String, ForeignKey("meta_item_versions.id"), nullable=True
     )
@@ -99,6 +114,23 @@ class ItemVersion(Base):
     file_count = Column(Integer, default=0)
     primary_file_id = Column(String, nullable=True)
     thumbnail_data = Column(Text, nullable=True)  # Base64 encoded thumbnail
+
+    # B1 (D4b): concurrent-revision guard at the DB level. At most ONE open
+    # (unreleased) current version per item line + branch — makes a concurrent
+    # double-revise race impossible (the app-guard in revise()/new_generation()
+    # gives the friendly early 400; this is the race-proof backstop). COALESCE keeps
+    # it NULL-safe even if a legacy row slipped a NULL branch_name (columns are also
+    # NOT NULL + server_default). Verified to build+enforce via create_all on SQLite.
+    __table_args__ = (
+        Index(
+            "uq_itemversion_open_current_per_line",
+            "item_id",
+            text("coalesce(branch_name, 'main')"),
+            unique=True,
+            sqlite_where=text("is_current = 1 AND is_released = 0"),
+            postgresql_where=text("is_current IS TRUE AND is_released IS NOT TRUE"),
+        ),
+    )
 
     # Relationships
     # item = relationship("Item", back_populates="versions") # Defined in Item
