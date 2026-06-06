@@ -340,6 +340,25 @@ class Settings(BaseSettings):
         default=0, description="JWT exp leeway seconds"
     )
 
+    # PLM-COLLAB-P3-D1: embed-token minting (Ed25519, asymmetric). The signing PRIVATE key is
+    # Yuantus-only and NEVER committed; a consumer verifies offline with the matching PUBLIC
+    # key. Empty signing key = minting disabled (fail-closed).
+    EMBED_TOKEN_SIGNING_KEY: str = Field(
+        default="",
+        description="base64 raw Ed25519 PRIVATE key (32-byte seed) for signing embed tokens; empty = minting disabled (fail-closed). NEVER commit.",
+    )
+    EMBED_TOKEN_KEY_ID: str = Field(
+        default="embed-1",
+        description="kid for the embed-token signing key (rotation / consumer-side key lookup).",
+    )
+    EMBED_TOKEN_TTL_SECONDS: int = Field(
+        default=120, description="Embed token TTL seconds (short-lived)."
+    )
+    EMBED_ALLOWED_ORIGINS: str = Field(
+        default="",
+        description="Comma-separated allowlist of embed origins (token aud). Empty = none allowed (fail-closed). Production must NOT use '*'.",
+    )
+
     LOG_FORMAT: str = Field(
         default="text",
         description="Request log format: 'text' (legacy) or 'json' (structured per-request log line)",
