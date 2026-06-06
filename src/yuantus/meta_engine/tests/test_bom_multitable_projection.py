@@ -345,8 +345,9 @@ def test_get_entitled_permission_denied_is_403(db_session, monkeypatch):
 
 # --- route surface + live-app ownership ---------------------------------------
 
-def test_router_exposes_exactly_one_route():
-    assert len(bom_multitable_router.routes) == 1
+def test_router_exposes_the_context_and_embed_token_routes():
+    # P3-A added the GET context route; P3-D1 added the POST embed-token route.
+    assert len(bom_multitable_router.routes) == 2
 
 
 def test_live_app_owns_the_route_with_this_router():
