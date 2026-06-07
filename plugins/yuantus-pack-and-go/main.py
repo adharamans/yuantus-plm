@@ -1149,10 +1149,16 @@ def _resolve_source_path(
     file_service: FileService,
     file: FileContainer,
     temp_dir: Path,
-) -> Tuple[str, Optional[Path]]:
+    download: bool = True,
+) -> Tuple[Optional[str], Optional[Path]]:
     local_path = file_service.get_local_path(file.system_path)
     if local_path and os.path.exists(local_path):
         return local_path, None
+
+    # Manifest-first dry-run: never fetch a remote blob just to build a preview. On a local-cache miss
+    # there is no source path; the caller falls back to file.file_size for the size (no download, no temp).
+    if not download:
+        return None, None
 
     temp_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(file.filename).suffix or ""
@@ -1224,7 +1230,8 @@ def build_pack_and_go_package(
     output_dir: Path,
     file_service: Optional[FileService] = None,
     require_locked_versions: bool = False,
-) -> PackAndGoResult:
+) -> "PackAndGoResult | Dict[str, Any]":
+    # dry_run returns the manifest dict (no zip); the normal path returns PackAndGoResult.
     from sqlalchemy.orm import joinedload
     from yuantus.meta_engine.models.file import ItemFile
     from yuantus.meta_engine.models.item import Item
@@ -1593,12 +1600,16 @@ def build_pack_and_go_package(
                 strategy=collision_strategy,
             )
             output_filename = Path(package_path).name
-            source_path, temp_path = _resolve_source_path(file_service, file, temp_dir)
+            # dry_run is manifest-first: do NOT download remote blobs (no temp_path added). A local-cache
+            # hit may still be stat'd for size; a miss leaves source_path None and falls back to file_size.
+            source_path, temp_path = _resolve_source_path(
+                file_service, file, temp_dir, download=not dry_run
+            )
             if temp_path:
                 temp_paths.append(temp_path)
 
             size = int(file.file_size or 0)
-            if not size:
+            if not size and source_path:
                 try:
                     size = int(Path(source_path).stat().st_size)
                 except OSError:
@@ -1623,7 +1634,9 @@ def build_pack_and_go_package(
                     item_revision=revision,
                     internal_ref=internal_ref,
                     source_version_id=effective_source_version_id,
-                    source_path=source_path,
+                    # "" placeholder on a dry-run cache miss (never zipped, absent from the manifest);
+                    # a real path on the zip path so zipf.write has the bytes.
+                    source_path=source_path or "",
                     # A4-R1: drawing-role only; warn-not-exclude (entry stays in the
                     # bundle). model_import_batch_id is file-scope-consistent context.
                     needs_update=(

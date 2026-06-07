@@ -62,6 +62,22 @@ class _FakeFileService:
         return self._local
 
 
+class _NoDownloadFileService:
+    """Cache-miss probe for manifest-first dry-run: no local cache, and download_file fails loudly if
+    reached — dry_run must NOT fetch remote blobs just to build a preview (the P1 regression guard)."""
+
+    def file_exists(self, system_path):  # noqa: D401
+        return True
+
+    def get_local_path(self, system_path):
+        return None
+
+    def download_file(self, system_path, handle):  # noqa: D401
+        raise AssertionError(
+            "dry_run must be manifest-first: download_file was called on a local-cache miss"
+        )
+
+
 @pytest.fixture()
 def session(tmp_path):
     engine = create_engine(
@@ -259,3 +275,24 @@ def test_model_batch_prefers_native_cad_over_other_3d(session, fake_fs):
 
     manifest = _build(session, fake_fs, "P")
     assert _drawing_entry(manifest)["model_import_batch_id"] == "C"  # native_cad, not G
+
+
+# ---------- P1 regression: dry-run is manifest-first (must not download) -------
+def test_dry_run_does_not_download_on_cache_miss(session):
+    # With NO local cache, building a dry-run preview must NOT fall through to download_file — otherwise a
+    # large-assembly preview becomes N synchronous S3/MinIO fetches (heavy I/O / 504). The fake's
+    # download_file raises, so reaching it fails this test (RED before the fix); the manifest must still build.
+    _item(session, "P")
+    _fc(session, "P-model", "3d")
+    session.add(ItemFile(item_id="P", file_id="P-model", file_role="native_cad",
+                         import_batch_id="C"))
+    session.commit()
+
+    pattern = os.path.join(tempfile.gettempdir(), "yuantus_packgo_*")
+    before = set(glob.glob(pattern))
+    manifest = _build(session, _NoDownloadFileService(), "P")  # raises if it tries to download
+    after = set(glob.glob(pattern))
+
+    assert isinstance(manifest, dict)  # dry_run returned the manifest, not a zip result
+    assert any(f["file_id"] == "P-model" for f in manifest["files"])  # the file is still in the preview
+    assert after <= before  # no temp dir created/leaked (download never reached)

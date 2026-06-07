@@ -53,15 +53,17 @@ traversal-engine swap, **no new route**, no migration.
 
 ## Verification (Python 3.11 venv, requirements.lock)
 
-- `test_plugin_pack_and_go_stale_dryrun.py` → **7 passed** (calls
+- `test_plugin_pack_and_go_stale_dryrun.py` → **8 passed** (calls
   `build_pack_and_go_package(dry_run=True)` with an injected fake file_service +
   seeded item/model/drawing): item-scope staleness fields + `model_import_batch_id`;
   summary distinct from `version_lock_summary` + warn-not-exclude; CSV carries the
   four columns; non-drawing entry has no staleness; **version-scope reads from
   `VersionFile`** (D6); **dry-run leaks no temp dir**; **`model_import_batch_id`
-  prefers the 3D `native_cad` model over a 3D geometry** (WP1.3 model M).
-- Full pack-and-go suite (5 files) → **78 passed**; workflow YAML/trigger contracts →
-  pass.
+  prefers the 3D `native_cad` model over a 3D geometry** (WP1.3 model M); **dry-run is
+  manifest-first — a local-cache miss must NOT download** (P1 regression: a
+  `get_local_path→None` + `download_file`-raises fake; the manifest still builds, no temp dir).
+- Full pack-and-go suite (5 files) → **79 passed** (78 + the manifest-first
+  regression test); workflow YAML/trigger contracts → pass.
 - Route-count **706 unchanged** (no route); no migration (head stays
   `b1_supersede_001`).
 
