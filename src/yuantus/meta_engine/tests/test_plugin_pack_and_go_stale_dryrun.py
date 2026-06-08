@@ -11,7 +11,6 @@ injected fake file_service + seeded items/files:
 
 from __future__ import annotations
 
-import glob
 import importlib.util
 import os
 import sys
@@ -96,6 +95,23 @@ def fake_fs(tmp_path):
     blob = tmp_path / "blob.bin"
     blob.write_bytes(b"x")
     return _FakeFileService(str(blob))
+
+
+@pytest.fixture()
+def tracked_temp_dirs(monkeypatch):
+    """Track the gather temp dir(s) THIS run creates by spying on `tempfile.mkdtemp` (the plugin uses
+    `tempfile.mkdtemp(prefix="yuantus_packgo_")`). Precise + concurrency-safe — a global
+    `glob(gettempdir(), "yuantus_packgo_*")` can race a parallel pack-and-go run on the same host."""
+    created: list[str] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def _spy(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        created.append(path)
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _spy)
+    return created
 
 
 def _item(session, iid: str, *, current_version_id: str | None = None) -> Item:
@@ -241,7 +257,7 @@ def test_version_scope_reads_staleness_from_versionfile(session, fake_fs):
     assert dwg["model_import_batch_id"] == "C"
 
 
-def test_dry_run_does_not_leak_temp_dir(session, fake_fs):
+def test_dry_run_does_not_leak_temp_dir(session, fake_fs, tracked_temp_dirs):
     # The normal path cleans the gather temp dir post-zip; dry-run skips the zip, so
     # it must clean up itself or each call leaks a temp dir.
     _item(session, "P")
@@ -249,11 +265,10 @@ def test_dry_run_does_not_leak_temp_dir(session, fake_fs):
     session.add(ItemFile(item_id="P", file_id="P-model", file_role="native_cad",
                          import_batch_id="C"))
     session.commit()
-    pattern = os.path.join(tempfile.gettempdir(), "yuantus_packgo_*")
-    before = set(glob.glob(pattern))
     _build(session, fake_fs, "P")
-    after = set(glob.glob(pattern))
-    assert after <= before  # no NEW temp dir left behind
+    # every gather temp dir THIS run created must be gone (precise; no global-glob race)
+    assert tracked_temp_dirs, "expected the gather to create a temp dir"
+    assert all(not os.path.exists(d) for d in tracked_temp_dirs)
 
 
 def test_model_batch_prefers_native_cad_over_other_3d(session, fake_fs):
@@ -278,7 +293,7 @@ def test_model_batch_prefers_native_cad_over_other_3d(session, fake_fs):
 
 
 # ---------- P1 regression: dry-run is manifest-first (must not download) -------
-def test_dry_run_does_not_download_on_cache_miss(session):
+def test_dry_run_does_not_download_on_cache_miss(session, tracked_temp_dirs):
     # With NO local cache, building a dry-run preview must NOT fall through to download_file — otherwise a
     # large-assembly preview becomes N synchronous S3/MinIO fetches (heavy I/O / 504). The fake's
     # download_file raises, so reaching it fails this test (RED before the fix); the manifest must still build.
@@ -288,11 +303,8 @@ def test_dry_run_does_not_download_on_cache_miss(session):
                          import_batch_id="C"))
     session.commit()
 
-    pattern = os.path.join(tempfile.gettempdir(), "yuantus_packgo_*")
-    before = set(glob.glob(pattern))
     manifest = _build(session, _NoDownloadFileService(), "P")  # raises if it tries to download
-    after = set(glob.glob(pattern))
 
     assert isinstance(manifest, dict)  # dry_run returned the manifest, not a zip result
     assert any(f["file_id"] == "P-model" for f in manifest["files"])  # the file is still in the preview
-    assert after <= before  # no temp dir created/leaked (download never reached)
+    assert all(not os.path.exists(d) for d in tracked_temp_dirs)  # no temp dir leaked (download never reached)
