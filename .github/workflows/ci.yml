@@ -266,6 +266,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_approval_request_router_contracts.py \
             src/yuantus/meta_engine/tests/test_approval_request_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_approvals_router_decomposition_closeout_contracts.py \
+            src/yuantus/meta_engine/tests/test_assembly_promotion_service.py \
             src/yuantus/meta_engine/tests/test_bom_children_router_contracts.py \
             src/yuantus/meta_engine/tests/test_bom_compare_router_contracts.py \
             src/yuantus/meta_engine/tests/test_bom_multitable_embed_token.py \

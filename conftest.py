@@ -13,6 +13,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_cad_stale_drawings.py",
     "src/yuantus/meta_engine/tests/test_manufacturing_mbom_routing.py",
     "src/yuantus/meta_engine/tests/test_ir_rule_adapter.py",
+    "src/yuantus/meta_engine/tests/test_assembly_promotion_service.py",
     "src/yuantus/meta_engine/tests/test_baseline_release_diagnostics.py",
     "src/yuantus/meta_engine/tests/test_item_release_gate.py",
     "src/yuantus/meta_engine/tests/test_version_supersede_b1.py",

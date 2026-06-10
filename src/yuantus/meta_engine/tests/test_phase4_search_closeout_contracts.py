@@ -186,7 +186,8 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     # - 706: + 1 PLM-COLLAB-P3-D1 embed-token mint (POST /bom/multitable/{part_id}/embed-token),
     #   unconditional route (the gate lives INSIDE the handler, not as a separate route).
     # - 707: + 1 CAD-PDM Superseded read-surface route (GET /versions/items/{item_id}/versions).
-    assert len(app.routes) == 707
+    # - 708: + 1 CAD-PDM B2b assembly promotion route (POST /pdm/items/{root_id}/promote-assembly).
+    assert len(app.routes) == 708
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:
