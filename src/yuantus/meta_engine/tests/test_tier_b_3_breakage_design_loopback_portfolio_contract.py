@@ -238,10 +238,10 @@ def test_phase4_route_count_pin_still_lives_at_706():
     # integration capability manifest) -> 701 (WP1.3 CAD 2D/3D staleness) -> 702
     # (P3-A BOM multi-table projection) -> 704 (WP1.2 PDM traversal) -> 705
     # (WP1.2 stale-drawings) -> 706 (P3-D1 embed-token mint) -> 707
-    # (CAD-PDM Superseded read-surface).
+    # (CAD-PDM Superseded read-surface) -> 708 (CAD-PDM B2b assembly promotion).
     text = _PHASE4_TEST.read_text()
-    assert "len(app.routes) == 707" in text, (
-        "phase-4 route-count pin (707) must still exist as the "
+    assert "len(app.routes) == 708" in text, (
+        "phase-4 route-count pin (708) must still exist as the "
         "authoritative assertion."
     )
 
