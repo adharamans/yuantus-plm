@@ -87,6 +87,16 @@ def test_dxf_falls_back_to_cadml_when_render_service_fails(monkeypatch, tmp_path
     assert fc.preview_path
 
 
+def test_dxf_blank_render_falls_back_to_cadml(monkeypatch, tmp_path):
+    # Render service returns empty/garbage (not a usable PNG) → must fall back,
+    # not store junk (F1: gate on parseable min-size PNG).
+    result, fc, render_client, cadml_client, conv = _run(
+        monkeypatch, tmp_path, "dxf", render_ok=False)
+    assert result["ok"] is True
+    render_client.render_preview_sync.assert_called_once()
+    cadml_client.render_cad_preview_sync.assert_called_once()  # fell back
+
+
 def test_dwg_does_not_use_render_service(monkeypatch, tmp_path):
     # render service v0 rejects .dwg → DWG must skip it and use CAD-ML.
     result, fc, render_client, cadml_client, conv = _run(monkeypatch, tmp_path, "dwg")

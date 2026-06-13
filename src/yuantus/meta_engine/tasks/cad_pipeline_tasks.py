@@ -733,6 +733,11 @@ def cad_preview(payload: Dict[str, Any], session: Session) -> Dict[str, Any]:
                 preview_bytes = _ensure_preview_min_size(
                     preview_bytes, min_size=512, label="render service DXF"
                 )
+                # Gate on a parseable, large-enough PNG: a misbehaving gateway
+                # could return 200 with a non-image body, which raise_for_status
+                # won't catch. Reject it so we fall back instead of storing junk.
+                if not _preview_meets_min_size(preview_bytes, min_size=512):
+                    raise ValueError("render service returned an unusable preview")
             except Exception as exc:
                 logger.warning("Render service preview failed, falling back: %s", exc)
                 preview_bytes = None
