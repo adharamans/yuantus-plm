@@ -299,6 +299,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_cad_material_sync_solidworks_windows_evidence_contracts.py \
             src/yuantus/meta_engine/tests/test_cad_material_sync_solidworks_windows_runbook_contracts.py \
             src/yuantus/meta_engine/tests/test_cad_mesh_stats_router_contracts.py \
+            src/yuantus/meta_engine/tests/test_cad_preview_render_service.py \
             src/yuantus/meta_engine/tests/test_cad_properties_router_contracts.py \
             src/yuantus/meta_engine/tests/test_cad_review_router_contracts.py \
             src/yuantus/meta_engine/tests/test_cad_stale_drawings.py \
