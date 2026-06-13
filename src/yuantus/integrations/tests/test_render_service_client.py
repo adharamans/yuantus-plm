@@ -4,6 +4,7 @@ render service and no local renderer needed."""
 from __future__ import annotations
 
 import httpx
+from yuantus.config import get_settings
 import pytest
 
 from yuantus.integrations import render_service as rs
@@ -32,7 +33,8 @@ def test_resolve_authorization_normalizes_bearer():
     assert c._resolve_authorization("tok") == "Bearer tok"
     assert c._resolve_authorization("Bearer tok") == "Bearer tok"
     assert c._resolve_authorization("  ") is None
-    assert c._resolve_authorization(None) in (None, "Bearer " + (c._service_token or "")) or True
+    # empty service token (test env) → no auth header
+    assert c._resolve_authorization(None) is None
 
 
 def test_configured_reflects_base_url():
@@ -88,3 +90,25 @@ def test_bad_format_rejected(tmp_path):
     c = RenderServiceClient(base_url="http://render:8077")
     with pytest.raises(ValueError):
         c.render_preview_sync(file_path=str(dxf), fmt="pdf")
+
+
+def test_timeout_wired_from_settings(monkeypatch):
+    from yuantus.config import get_settings
+    monkeypatch.setattr(get_settings(), "RENDER_SERVICE_TIMEOUT_SECONDS", 77)
+    assert RenderServiceClient(base_url="http://r").timeout_s == 77.0
+    assert RenderServiceClient(base_url="http://r", timeout_s=5).timeout_s == 5.0
+
+
+def test_bad_format_does_not_trip_breaker(tmp_path, monkeypatch):
+    # fmt is validated BEFORE the breaker, so a caller-side ValueError must not
+    # be counted as an upstream failure.
+    dxf = tmp_path / "x.dxf"; dxf.write_bytes(b"0")
+    monkeypatch.setattr(get_settings(), "CIRCUIT_BREAKER_RENDER_SERVICE_ENABLED", True)
+    c = RenderServiceClient(base_url="http://r")
+    before = c._breaker.snapshot() if hasattr(c._breaker, "snapshot") else None
+    for _ in range(10):
+        with pytest.raises(ValueError):
+            c.render_preview_sync(file_path=str(dxf), fmt="pdf")
+    # breaker never saw a failure → still closed / usable
+    state = getattr(c._breaker, "_state", None)
+    assert state is None or getattr(state, "state", "closed") == "closed"

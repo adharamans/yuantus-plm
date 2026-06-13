@@ -68,15 +68,17 @@ def build_render_service_breaker() -> CircuitBreaker:
 
 
 _ALLOWED_FORMATS = ("png", "svg")
-_MEDIA = {"png": "image/png", "svg": "image/svg+xml"}
 
 
 class RenderServiceClient:
-    def __init__(self, *, base_url: Optional[str] = None, timeout_s: float = 30.0) -> None:
+    def __init__(self, *, base_url: Optional[str] = None, timeout_s: Optional[float] = None) -> None:
         settings = get_settings()
         self.base_url = (base_url or settings.RENDER_SERVICE_BASE_URL).rstrip("/")
         self._service_token = settings.RENDER_SERVICE_SERVICE_TOKEN
-        self.timeout_s = timeout_s
+        self.timeout_s = (
+            timeout_s if timeout_s is not None
+            else float(settings.RENDER_SERVICE_TIMEOUT_SECONDS)
+        )
         self._breaker = build_render_service_breaker()
 
     @property
@@ -102,6 +104,10 @@ class RenderServiceClient:
     ) -> bytes:
         """Render `file_path` (a DXF) to image bytes via the render service.
         Wrapped by the circuit breaker (4xx re-raised, 5xx/timeouts counted)."""
+        # Caller-side validation BEFORE the breaker, so a bad arg can't be
+        # misclassified as an upstream failure and trip protection.
+        if fmt not in _ALLOWED_FORMATS:
+            raise ValueError("fmt must be one of %s" % (_ALLOWED_FORMATS,))
         return self._breaker.call_sync(
             self._render_preview_sync_inner,
             file_path=file_path,
@@ -124,8 +130,6 @@ class RenderServiceClient:
         bg: str,
         authorization: Optional[str],
     ) -> bytes:
-        if fmt not in _ALLOWED_FORMATS:
-            raise ValueError("fmt must be one of %s" % (_ALLOWED_FORMATS,))
         headers = build_outbound_headers(
             authorization=self._resolve_authorization(authorization)
         ).as_dict()
