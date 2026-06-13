@@ -190,6 +190,29 @@ class Settings(BaseSettings):
         default="",
         description="Optional service token (JWT) for CAD ML Platform integrations",
     )
+    # VemCAD render service (high-fidelity DXF → PNG/SVG). Empty = disabled;
+    # cad_preview then keeps its existing CAD-ML / connector path.
+    RENDER_SERVICE_BASE_URL: str = Field(
+        default="",
+        description="VemCAD render service base URL (e.g. http://render:8077); empty disables it",
+    )
+    RENDER_SERVICE_SERVICE_TOKEN: str = Field(
+        default="",
+        description="Optional Bearer token for the render service (Phase 1 service is internal/no-auth)",
+    )
+    RENDER_SERVICE_TIMEOUT_SECONDS: int = Field(
+        default=30, description="Render service request timeout (seconds)"
+    )
+    # Circuit breaker (default off, status quo) — mirrors the CAD-ML P6 policy.
+    CIRCUIT_BREAKER_RENDER_SERVICE_ENABLED: bool = Field(
+        default=False,
+        description="Enable circuit breaker for the render service client (default off)",
+    )
+    CIRCUIT_BREAKER_RENDER_SERVICE_FAILURE_THRESHOLD: int = Field(default=5)
+    CIRCUIT_BREAKER_RENDER_SERVICE_WINDOW_SECONDS: int = Field(default=60)
+    CIRCUIT_BREAKER_RENDER_SERVICE_RECOVERY_SECONDS: int = Field(default=30)
+    CIRCUIT_BREAKER_RENDER_SERVICE_HALF_OPEN_MAX_CALLS: int = Field(default=1)
+    CIRCUIT_BREAKER_RENDER_SERVICE_BACKOFF_MAX_SECONDS: int = Field(default=600)
     CAD_EXTRACTOR_BASE_URL: str = Field(
         default="",
         description="Optional CAD extractor service base URL",
