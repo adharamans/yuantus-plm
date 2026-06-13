@@ -23,6 +23,7 @@ from yuantus.config import (
     normalize_cad_connector_mode,
 )
 from yuantus.integrations.cad_ml import CadMLClient
+from yuantus.integrations.render_service import RenderServiceClient
 from yuantus.integrations.dedup_vision import DedupVisionClient
 from yuantus.integrations.cad_connector import CadConnectorClient
 from yuantus.meta_engine.dedup.service import DedupService
@@ -716,7 +717,29 @@ def cad_preview(payload: Dict[str, Any], session: Session) -> Dict[str, Any]:
         authorization = _build_authorization_header(
             payload.get("authorization") or settings.CAD_ML_SERVICE_TOKEN
         )
-        if ext in {"dwg", "dxf"} and settings.CAD_ML_BASE_URL:
+        # Preferred: the VemCAD high-fidelity render service (DXF only — its v0
+        # rejects .dwg; a DWG keeps the CAD-ML / local path below). Render is
+        # done HERE in the task body and the bytes flow through the shared store
+        # logic; preview_data is never pre-set elsewhere (that would early-skip).
+        if ext == "dxf" and settings.RENDER_SERVICE_BASE_URL:
+            try:
+                preview_bytes = RenderServiceClient().render_preview_sync(
+                    file_path=source_path,
+                    filename=file_container.filename,
+                    fmt="png",
+                    bg="white",
+                    authorization=payload.get("authorization"),
+                )
+                preview_bytes = _ensure_preview_min_size(
+                    preview_bytes, min_size=512, label="render service DXF"
+                )
+            except Exception as exc:
+                logger.warning("Render service preview failed, falling back: %s", exc)
+                preview_bytes = None
+
+        # Fallback: CAD-ML render (handles DWG too) — only if the render service
+        # didn't already produce a preview.
+        if preview_bytes is None and ext in {"dwg", "dxf"} and settings.CAD_ML_BASE_URL:
             try:
                 client = CadMLClient()
                 preview_bytes = client.render_cad_preview_sync(
