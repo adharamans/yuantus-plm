@@ -79,6 +79,35 @@ def test_render_containers_visual_diff_cleans_up_s3_temps(tmp_path):
     assert all(not os.path.exists(p) for p in made)   # temps cleaned up
 
 
+def test_render_containers_visual_diff_cleans_temp_a_when_b_fails(tmp_path):
+    # Rev A downloads a temp, then Rev B's download raises: Rev A's temp must
+    # STILL be cleaned (regression for the append-after-both leak — discriminates
+    # the bug from the fix, unlike the happy-path cleanup test above).
+    a, b = _container("a"), _container("b")
+    made = []
+
+    def fake_download(_fs, system_path, suffix=""):
+        if "drawing_b" in system_path:          # second resolve fails after A's temp exists
+            raise RuntimeError("s3 fetch failed for Rev B")
+        p = tmp_path / f"tmpA{suffix}"
+        p.write_bytes(b"x")
+        made.append(str(p))
+        return str(p)
+
+    with patch.object(cpt, "FileService", MagicMock()), \
+         patch.object(cpt, "_ensure_source_exists", MagicMock()), \
+         patch.object(cpt, "_is_s3_storage", return_value=True), \
+         patch.object(cpt, "_vault_base_path", return_value=str(tmp_path)), \
+         patch.object(cpt, "_download_to_temp", side_effect=fake_download), \
+         patch.object(cpt, "RenderServiceClient", MagicMock()):
+        with pytest.raises(RuntimeError):
+            cpt.render_containers_visual_diff(MagicMock(), a, b)
+
+    import os
+    assert len(made) == 1                        # only Rev A's temp was created
+    assert not os.path.exists(made[0])           # ...and cleaned despite B failing
+
+
 # ── route guards (call the handler directly; Depends bypassed) ──
 def _settings(base_url="http://render:8077"):
     return SimpleNamespace(RENDER_SERVICE_BASE_URL=base_url)
@@ -143,3 +172,16 @@ def test_route_502_when_render_fails():
             visual_diff_cad_render(file_id="a", other_file_id="b",
                                    user=MagicMock(), db=db)
     assert ei.value.status_code == 502
+
+
+def test_route_404_when_source_blob_missing():
+    # A missing source blob is our-data-gone (JobFatalError), not an upstream
+    # render failure → 404, not 502.
+    db = MagicMock(); db.get.return_value = _container("a")
+    with patch.object(router_mod, "get_settings", return_value=_settings()), \
+         patch.object(router_mod, "render_containers_visual_diff",
+                      side_effect=router_mod.JobFatalError("source file missing")):
+        with pytest.raises(HTTPException) as ei:
+            visual_diff_cad_render(file_id="a", other_file_id="b",
+                                   user=MagicMock(), db=db)
+    assert ei.value.status_code == 404

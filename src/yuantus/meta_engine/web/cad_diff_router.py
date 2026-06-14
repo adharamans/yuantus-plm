@@ -11,6 +11,7 @@ from yuantus.api.dependencies.auth import CurrentUser, get_current_user
 from yuantus.config import get_settings
 from yuantus.database import get_db
 from yuantus.meta_engine.models.file import FileContainer
+from yuantus.meta_engine.services.job_errors import JobFatalError
 from yuantus.meta_engine.tasks.cad_pipeline_tasks import render_containers_visual_diff
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,11 @@ def visual_diff_cad_render(
         result = render_containers_visual_diff(
             db, file_container, other_container, authorization=None
         )
+    except (JobFatalError, FileNotFoundError) as exc:
+        # A source blob is missing from our own storage — that's our-data-gone,
+        # not an upstream render failure, so 404 rather than a misleading 502.
+        logger.warning("CAD visual diff source missing: %s", exc)
+        raise HTTPException(status_code=404, detail="source file missing") from exc
     except Exception as exc:  # render service / breaker / IO failure → degrade
         logger.warning("CAD visual diff failed: %s", exc)
         raise HTTPException(status_code=502, detail="visual diff render failed") from exc

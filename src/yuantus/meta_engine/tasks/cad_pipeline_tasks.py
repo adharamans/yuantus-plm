@@ -661,13 +661,19 @@ def render_containers_visual_diff(
     _ensure_source_exists(file_service, container_b.system_path)
     temps: list[str] = []
     try:
+        # Append each temp the instant it is created — NOT after both resolve —
+        # so if Rev B's resolution fails after Rev A already downloaded a temp,
+        # the finally still cleans Rev A's temp (no orphan on disk).
         path_a, t_a = _resolve_source_for_render(
             session, file_service, container_a, use_s3=use_s3, vault_base_path=vault_base_path
         )
+        if t_a:
+            temps.append(t_a)
         path_b, t_b = _resolve_source_for_render(
             session, file_service, container_b, use_s3=use_s3, vault_base_path=vault_base_path
         )
-        temps += [t for t in (t_a, t_b) if t]
+        if t_b:
+            temps.append(t_b)
         return RenderServiceClient().render_diff_sync(
             file_a=path_a,
             file_b=path_b,
