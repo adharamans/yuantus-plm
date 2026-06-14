@@ -73,6 +73,57 @@ def test_render_preview_sync_posts_file_and_params(tmp_path, monkeypatch):
     assert seen["has_multipart"] is True
 
 
+def test_render_diff_sync_posts_two_files_and_returns_summary(tmp_path, monkeypatch):
+    a = tmp_path / "rev_a.dxf"; a.write_bytes(b"0\nSECTION\n2\nENTITIES\n0\nEOF\n")
+    b = tmp_path / "rev_b.dxf"; b.write_bytes(b"0\nSECTION\n2\nENTITIES\n0\nLINE\n0\nEOF\n")
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["params"] = dict(request.url.params)
+        body = request.content
+        seen["has_a"] = b"rev_a.dxf" in body
+        seen["has_b"] = b"rev_b.dxf" in body
+        return httpx.Response(
+            200,
+            content=b"\x89PNG\r\n\x1a\nDATA",
+            headers={
+                "content-type": "image/png",
+                "X-Diff-Comparable": "true",
+                "X-Diff-Changed-Fraction": "0.12",
+                "X-Diff-Added-Px": "10",
+                "X-Render-Cache": "miss",  # a non-diff header must NOT be captured
+            },
+        )
+
+    _mock_client(monkeypatch, handler)
+    c = RenderServiceClient(base_url="http://render:8077")
+    res = c.render_diff_sync(file_a=str(a), file_b=str(b), width=800, height=500, bg="white")
+    assert res.content.startswith(b"\x89PNG")
+    assert res.content_type.startswith("image/png")
+    assert seen["path"] == "/diff"
+    assert seen["params"] == {"width": "800", "height": "500", "bg": "white"}
+    assert seen["has_a"] and seen["has_b"]
+    lowered = {k.lower(): v for k, v in res.summary.items()}
+    assert lowered.get("x-diff-comparable") == "true"
+    assert lowered.get("x-diff-changed-fraction") == "0.12"
+    # only X-Diff-* headers are carried through, not other render headers
+    assert all(k.lower().startswith("x-diff-") for k in res.summary)
+
+
+def test_render_diff_sync_raises_on_4xx(tmp_path, monkeypatch):
+    a = tmp_path / "a.dxf"; a.write_bytes(b"x")
+    b = tmp_path / "b.dxf"; b.write_bytes(b"y")
+
+    def handler(request):
+        return httpx.Response(415, json={"status": "error", "error_code": "UNSUPPORTED_INPUT"})
+
+    _mock_client(monkeypatch, handler)
+    c = RenderServiceClient(base_url="http://render:8077")
+    with pytest.raises(httpx.HTTPStatusError):
+        c.render_diff_sync(file_a=str(a), file_b=str(b))
+
+
 def test_render_preview_sync_raises_on_4xx(tmp_path, monkeypatch):
     dxf = tmp_path / "x.dxf"; dxf.write_bytes(b"junk")
 

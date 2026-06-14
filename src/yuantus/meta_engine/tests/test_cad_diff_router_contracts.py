@@ -11,6 +11,7 @@ from yuantus.meta_engine.web.cad_router import router as cad_router
 
 _CAD_DIFF_ROUTE_KEYS = {
     ("GET", "/cad/files/{file_id}/diff"),
+    ("GET", "/cad/files/{file_id}/visual-diff"),
 }
 
 

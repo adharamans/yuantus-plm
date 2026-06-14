@@ -620,6 +620,70 @@ def _normalize_ocr_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _resolve_source_for_render(
+    session: Session,
+    file_service: FileService,
+    file_container: FileContainer,
+    *,
+    use_s3: bool,
+    vault_base_path: str,
+) -> tuple[str, Optional[str]]:
+    """Resolve a FileContainer's source to a local path for rendering, mirroring
+    cad_preview: S3 → download to a temp file (returned so the caller can clean
+    it up); local → the vault path (no temp)."""
+    if use_s3:
+        ext = file_container.get_extension() or ""
+        tmp = _download_to_temp(
+            file_service, file_container.system_path, suffix=f".{ext}" if ext else ""
+        )
+        return tmp, tmp
+    converter = CADConverterService(session, vault_base_path=vault_base_path)
+    return converter._get_file_path(file_container), None
+
+
+def render_containers_visual_diff(
+    session: Session,
+    container_a: FileContainer,
+    container_b: FileContainer,
+    *,
+    authorization: Optional[str] = None,
+):
+    """Render a version visual diff of two DXF revisions (Rev A = container_a,
+    Rev B = container_b) via the render service POST /diff. Resolves each source
+    to a local path (S3 download or vault path), calls RenderServiceClient, and
+    cleans up any temp downloads. Returns the RenderDiffResult; render-service /
+    breaker / IO errors propagate (the route maps them to HTTP). The caller
+    guarantees the render service is configured and both sources are DXF."""
+    file_service = FileService()
+    use_s3 = _is_s3_storage()
+    vault_base_path = _vault_base_path()
+    _ensure_source_exists(file_service, container_a.system_path)
+    _ensure_source_exists(file_service, container_b.system_path)
+    temps: list[str] = []
+    try:
+        path_a, t_a = _resolve_source_for_render(
+            session, file_service, container_a, use_s3=use_s3, vault_base_path=vault_base_path
+        )
+        path_b, t_b = _resolve_source_for_render(
+            session, file_service, container_b, use_s3=use_s3, vault_base_path=vault_base_path
+        )
+        temps += [t for t in (t_a, t_b) if t]
+        return RenderServiceClient().render_diff_sync(
+            file_a=path_a,
+            file_b=path_b,
+            filename_a=container_a.filename,
+            filename_b=container_b.filename,
+            bg="white",
+            authorization=authorization,
+        )
+    finally:
+        for tmp in temps:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
 def cad_preview(payload: Dict[str, Any], session: Session) -> Dict[str, Any]:
     file_id = str(payload.get("file_id") or "").strip()
     if not file_id:

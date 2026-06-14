@@ -13,7 +13,8 @@ query params format=png|svg, width, height, bg; returns the image bytes.
 from __future__ import annotations
 
 import os
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Dict, Optional
 
 import httpx
 
@@ -68,6 +69,16 @@ def build_render_service_breaker() -> CircuitBreaker:
 
 
 _ALLOWED_FORMATS = ("png", "svg")
+
+
+@dataclass
+class RenderDiffResult:
+    """A /diff response: the body (PNG overlay when comparable, else the JSON
+    summary) plus the X-Diff-* summary headers, passed through verbatim."""
+
+    content: bytes
+    content_type: str
+    summary: Dict[str, str] = field(default_factory=dict)
 
 
 class RenderServiceClient:
@@ -145,3 +156,71 @@ class RenderServiceClient:
                 )
             resp.raise_for_status()
             return resp.content
+
+    def render_diff_sync(
+        self,
+        *,
+        file_a: str,
+        file_b: str,
+        filename_a: Optional[str] = None,
+        filename_b: Optional[str] = None,
+        width: int = 2400,
+        height: int = 1697,
+        bg: str = "white",
+        authorization: Optional[str] = None,
+    ) -> RenderDiffResult:
+        """Render a version visual diff (Rev A = file_a, Rev B = file_b, both
+        DXF) via the render service POST /diff. Returns the overlay PNG (when
+        comparable) or the JSON summary (not-comparable / both-blank) plus the
+        X-Diff-* summary headers. Wrapped by the circuit breaker (4xx re-raised,
+        5xx/timeouts counted)."""
+        return self._breaker.call_sync(
+            self._render_diff_sync_inner,
+            file_a=file_a,
+            file_b=file_b,
+            filename_a=filename_a,
+            filename_b=filename_b,
+            width=width,
+            height=height,
+            bg=bg,
+            authorization=authorization,
+        )
+
+    def _render_diff_sync_inner(
+        self,
+        *,
+        file_a: str,
+        file_b: str,
+        filename_a: Optional[str],
+        filename_b: Optional[str],
+        width: int,
+        height: int,
+        bg: str,
+        authorization: Optional[str],
+    ) -> RenderDiffResult:
+        headers = build_outbound_headers(
+            authorization=self._resolve_authorization(authorization)
+        ).as_dict()
+        name_a = filename_a or os.path.basename(file_a)
+        name_b = filename_b or os.path.basename(file_b)
+        params = {"width": str(width), "height": str(height), "bg": bg}
+        with httpx.Client(base_url=self.base_url, timeout=self.timeout_s) as client:
+            with open(file_a, "rb") as fa, open(file_b, "rb") as fb:
+                resp = client.post(
+                    "/diff",
+                    params=params,
+                    files={
+                        "file_a": (name_a, fa, "application/octet-stream"),
+                        "file_b": (name_b, fb, "application/octet-stream"),
+                    },
+                    headers=headers,
+                )
+            resp.raise_for_status()
+            summary = {
+                k: v for k, v in resp.headers.items() if k.lower().startswith("x-diff-")
+            }
+            return RenderDiffResult(
+                content=resp.content,
+                content_type=resp.headers.get("content-type", "application/octet-stream"),
+                summary=summary,
+            )
