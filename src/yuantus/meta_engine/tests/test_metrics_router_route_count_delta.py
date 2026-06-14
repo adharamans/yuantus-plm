@@ -34,10 +34,13 @@ from yuantus.api.app import create_app
 #   (GET /api/v1/versions/items/{item_id}/versions) -- unconditional.
 # 708 = 707 + 1 CAD-PDM B2b assembly promotion route
 #   (POST /api/v1/pdm/items/{root_id}/promote-assembly) -- unconditional.
+# 709 = 708 + 1 L1 visual-diff route
+#   (GET /api/v1/cad/files/{file_id}/visual-diff) -- unconditional (gated by
+#   RENDER_SERVICE_BASE_URL inside the handler, not as a separate route).
 # NOTE: this pin had drifted STALE at 676 (never bumped through the 677/678
 # route additions) and is not in the CI contracts list / no-DB allowlist, so the
 # drift went unobserved until the R2 routes slice reconciled it.
-EXPECTED_TOTAL_ROUTES = 708
+EXPECTED_TOTAL_ROUTES = 709
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
