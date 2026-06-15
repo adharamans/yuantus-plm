@@ -441,6 +441,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_file_viewer_router_contracts.py \
             src/yuantus/meta_engine/tests/test_graphql_item_number_alias_contracts.py \
             src/yuantus/meta_engine/tests/test_integration_capabilities.py \
+            src/yuantus/meta_engine/tests/test_item_number_immutable.py \
             src/yuantus/meta_engine/tests/test_item_release_gate.py \
             src/yuantus/meta_engine/tests/test_job_queue_tx_boundary_contracts.py \
             src/yuantus/meta_engine/tests/test_license_import.py \

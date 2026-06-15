@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, Any, TYPE_CHECKING
 from .base import BaseOperation
 from ..models.item import Item
@@ -10,6 +11,11 @@ from yuantus.meta_engine.services.item_number_keys import (
     ensure_item_number_aliases,
     get_item_number,
 )
+
+logger = logging.getLogger(__name__)
+
+# WP3.2 (B3): roles permitted to override item_number immutability (with audit).
+_ITEM_NUMBER_OVERRIDE_ROLES = frozenset({"admin", "superuser"})
 
 if TYPE_CHECKING:
     from ..models.meta_schema import ItemType
@@ -40,6 +46,27 @@ class UpdateOperation(BaseOperation):
         locked, locked_state = is_item_locked(self.session, item, item_type)
         if locked:
             raise StateLockedError(locked_state or (item.state or "unknown"), item_type.id)
+
+        # WP3.2 (B3): item_number / number is immutable once assigned. A normal update
+        # may not change a non-empty existing number to a different non-empty value;
+        # only an admin / superuser may override, and the override is audited. (First
+        # assignment, no-op re-submits, and edits to other fields are unaffected.)
+        existing_number = get_item_number(item.properties or {})
+        incoming_number = get_item_number(aml.properties or {})
+        if existing_number and incoming_number and incoming_number != existing_number:
+            if not (_ITEM_NUMBER_OVERRIDE_ROLES & set(self.roles or [])):
+                raise ValidationError(
+                    "item_number is immutable once assigned", field="item_number"
+                )
+            logger.warning(
+                "item_number immutability overridden: item_id=%s existing=%r "
+                "incoming=%r actor=%s roles=%s",
+                item.id,
+                existing_number,
+                incoming_number,
+                self.user_id,
+                sorted(set(self.roles or [])),
+            )
 
         merged = dict(item.properties or {})
         merged.update(aml.properties or {})

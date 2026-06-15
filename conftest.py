@@ -18,6 +18,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_assembly_promotion_service.py",
     "src/yuantus/meta_engine/tests/test_baseline_release_diagnostics.py",
     "src/yuantus/meta_engine/tests/test_item_release_gate.py",
+    "src/yuantus/meta_engine/tests/test_item_number_immutable.py",
     "src/yuantus/meta_engine/tests/test_version_supersede_b1.py",
     "src/yuantus/meta_engine/tests/test_version_supersede_read_surface.py",
     "src/yuantus/meta_engine/tests/test_release_validation_directory.py",
