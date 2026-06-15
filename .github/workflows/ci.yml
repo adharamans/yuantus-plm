@@ -306,6 +306,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_cad_stale_drawings.py \
             src/yuantus/meta_engine/tests/test_cad_sync_template_router_contracts.py \
             src/yuantus/meta_engine/tests/test_cad_view_state_router_contracts.py \
+            src/yuantus/meta_engine/tests/test_cad_visual_diff_route_integration.py \
             src/yuantus/meta_engine/tests/test_ci_change_scope_contracts.py \
             src/yuantus/meta_engine/tests/test_ci_contracts_branch_closeout_summary.py \
             src/yuantus/meta_engine/tests/test_ci_contracts_breakage_worker_handlers.py \
