@@ -557,6 +557,12 @@ class VersionService:
         current_ver.checked_out_by_id = None
         current_ver.checked_out_at = None
         clear_checkout_context(current_ver)
+        # P1A (ECM publish hook-point hardening): stamp release provenance on the version
+        # being released. release() is the canonical runtime is_released writer, so this is
+        # the single place released_at/released_by_id are set. Only the just-released version
+        # is stamped -- the superseded predecessor below keeps its own original provenance.
+        current_ver.released_at = datetime.utcnow()
+        current_ver.released_by_id = user_id
 
         # B1 (D2): supersede the immediate prior released version on this line. When
         # vN+1 is released, vN (predecessor) goes Released -> Superseded. It keeps
