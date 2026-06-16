@@ -26,6 +26,7 @@ def import_all_models() -> None:
     from yuantus.meta_engine.models import parallel_tasks as _parallel_tasks  # noqa: F401
     from yuantus.meta_engine.dedup import models as _dedup  # noqa: F401
     from yuantus.meta_engine.erp_publication import models as _erp_publication  # noqa: F401
+    from yuantus.meta_engine.ecm_publication import models as _ecm_publication  # noqa: F401
     from yuantus.meta_engine.manufacturing import models as _manufacturing  # noqa: F401
     from yuantus.meta_engine.reports import models as _reports  # noqa: F401
     from yuantus.meta_engine.esign import models as _esign  # noqa: F401

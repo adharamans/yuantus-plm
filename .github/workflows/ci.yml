@@ -418,6 +418,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_document_sync_retention_router_contracts.py \
             src/yuantus/meta_engine/tests/test_document_sync_retention_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_document_sync_router_decomposition_closeout_contracts.py \
+            src/yuantus/meta_engine/tests/test_ecm_publication_enqueue.py \
             src/yuantus/meta_engine/tests/test_eco_approval_ops_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_approval_workflow_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_change_analysis_router_contracts.py \

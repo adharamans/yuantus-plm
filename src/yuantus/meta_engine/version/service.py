@@ -6,6 +6,7 @@ Manages Item revisions, generations, checkouts, and history.
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import copy
+import logging
 import uuid
 
 from sqlalchemy.orm import Session
@@ -26,6 +27,8 @@ from yuantus.meta_engine.version.checkout_context import (
 from yuantus.meta_engine.models.item import Item
 from yuantus.meta_engine.models.effectivity import Effectivity
 from yuantus.meta_engine.version.file_service import VersionFileService, VersionFileError
+
+logger = logging.getLogger(__name__)
 
 
 class VersionError(Exception):
@@ -596,7 +599,53 @@ class VersionService:
 
         self.session.add(current_ver)
         self._log_history(current_ver, "release", user_id, "Version Released")
+        # ECM-P1B: enqueue the released version's controlled files for ECM publication.
+        # Exception-safe + non-blocking (gated, SAVEPOINT, never throws into release).
+        self._enqueue_ecm_publication(current_ver, user_id)
         return current_ver
+
+    def _enqueue_ecm_publication(self, version: ItemVersion, user_id: int) -> None:
+        """ECM-P1B: enqueue the released version's controlled files for async ECM
+        publication. NEVER fails the release: the global kill-switch (off by default)
+        short-circuits; the entitlement gate is exception-safe (``is_entitled`` raises on
+        an unregistered key / missing tenant context -> treat as not entitled); the
+        enqueue runs under a SAVEPOINT so any error rolls back only the enqueue and the
+        release stays committed. No remote I/O, no file byte reads (D3)."""
+        try:
+            from yuantus.config import get_settings
+
+            if not get_settings().ECM_PUBLISH_ENABLED:
+                return
+        except Exception:  # pragma: no cover - settings should always resolve
+            return
+
+        try:
+            from yuantus.meta_engine.app_framework.entitlement_service import (
+                EntitlementService,
+            )
+
+            if not EntitlementService(self.session).is_entitled("ecm_publish"):
+                return
+        except Exception:
+            # unknown key during rollout / missing tenant context / any error -> not
+            # entitled. Must never propagate into the release transaction.
+            return
+
+        try:
+            with self.session.begin_nested():
+                from yuantus.meta_engine.ecm_publication.service import (
+                    EcmPublicationOutboxService,
+                )
+
+                EcmPublicationOutboxService(self.session).enqueue_release(
+                    version, user_id=user_id
+                )
+        except Exception:
+            logger.warning(
+                "ECM publication enqueue failed for version %s (release unaffected)",
+                getattr(version, "id", "?"),
+                exc_info=True,
+            )
 
     def is_under_modification(self, item_id: str) -> bool:
         """B1 (D3): derived "this line is being revised" signal -- read-time only,

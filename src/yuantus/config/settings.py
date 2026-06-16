@@ -461,6 +461,14 @@ class Settings(BaseSettings):
         default=False,
         description="Disable latest-released write guard globally; this is a hard disable.",
     )
+    ECM_PUBLISH_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Global kill-switch for PLM->ECM publication enqueue on release (ECM-P1B). "
+            "Default OFF: even entitled tenants do not enqueue until ops enables it. The "
+            "per-tenant license gate (is_entitled('ecm_publish')) applies ON TOP of this."
+        ),
+    )
     SUSPENDED_GUARD_DISABLED: bool = Field(
         default=False,
         description="Disable suspended-state write guard globally; this is a hard disable.",
