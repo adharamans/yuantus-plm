@@ -421,6 +421,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_ecm_publication_adapter.py \
             src/yuantus/meta_engine/tests/test_ecm_publication_enqueue.py \
             src/yuantus/meta_engine/tests/test_ecm_publication_worker.py \
+            src/yuantus/meta_engine/tests/test_ecm_publication_worker_cli.py \
             src/yuantus/meta_engine/tests/test_eco_approval_ops_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_approval_workflow_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_change_analysis_router_contracts.py \
