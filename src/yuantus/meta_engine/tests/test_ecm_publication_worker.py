@@ -362,6 +362,13 @@ def test_revalidate_exception_consumes_attempt_and_dead_letters(session):
 
 def test_no_adapter_override_resolves_null_and_sends(session):
     # worker with NO injected adapter -> registry resolves Null -> sends.
+    # Pin the isolation invariant: if a stray YUANTUS_PUBLICATION_ECM_TARGET_SYSTEM
+    # ever leaked into the env, resolve_adapter would return a LIVE CMIS adapter and
+    # the next line would open a real socket -- assert Null FIRST so it fails loudly.
+    from yuantus.meta_engine.ecm_publication.adapter import NullEcmPublicationAdapter
+    from yuantus.meta_engine.ecm_publication.adapter_registry import resolve_adapter
+
+    assert isinstance(resolve_adapter("athena"), NullEcmPublicationAdapter)
     _, _, row = _enqueue_one(session)
     _worker(adapter=None).run_once_with_session(session)
     session.refresh(row)

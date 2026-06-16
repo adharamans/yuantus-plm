@@ -1,11 +1,10 @@
-"""Resolve an EcmPublicationAdapter for a target_system (ECM-P1C).
+"""Resolve an EcmPublicationAdapter for a target_system.
 
-In P1C the SOLE return is the no-I/O Null adapter -- so dev/CI never accidentally
-performs a real external write to Athena. The settings-gated branch that would
-return the real Athena CMIS adapter is the P1D EXTENSION POINT and is deliberately
-NOT wired here: the real connector is DEFERRED until Phase 0 (U1-U5) per the P0
-refresh taskbook (D6) and does not yet exist, so importing/returning it now would
-fail.
+Routing is OFF by default: the resolver returns the no-I/O Null adapter unless
+``PUBLICATION_ECM_TARGET_SYSTEM`` is configured AND matches the row's
+``target_system`` -- so dev/CI never accidentally performs a real external write to
+Athena. The configured branch lazy-imports the real Athena CMIS adapter (ECM-P1D
+skeleton); its CMIS wire mapping is validated against a live Athena in Phase 0.
 """
 from __future__ import annotations
 
@@ -21,11 +20,21 @@ from yuantus.meta_engine.ecm_publication.adapter import (
 def resolve_adapter(
     target_system: Optional[str], *, settings: Any = None
 ) -> EcmPublicationAdapter:
-    # get_settings() is read for forward-compatibility with the P1D gate; the
-    # `settings` kwarg lets tests inject a SimpleNamespace.
-    _ = settings or get_settings()
-    # P1D EXTENSION POINT (deferred): when the real Athena CMIS connector lands,
-    # gate it here on the configured ECM target + CMIS base-url matching
-    # `target_system`, and lazy-import the real adapter so the common Null path
-    # never imports the CMIS client. Until then, always Null.
+    s = settings or get_settings()
+    configured = (getattr(s, "PUBLICATION_ECM_TARGET_SYSTEM", "") or "").strip()
+    # Fail CLOSED to Null if there is no reachable base URL, so a half-configured
+    # deployment can never spin a live adapter pointing at a bogus host (which would
+    # churn the at-least-once outbox forever). Mirrors the erp resolver's base-url guard.
+    base = (
+        getattr(s, "PUBLICATION_ECM_BASE_URL", "")
+        or getattr(s, "ATHENA_BASE_URL", "")
+        or ""
+    ).strip()
+    if configured and base and (target_system or "").strip() == configured:
+        # Lazy import so the common Null path never imports httpx / the CMIS client.
+        from yuantus.meta_engine.ecm_publication.cmis_adapter import (
+            AthenaCmisPublicationAdapter,
+        )
+
+        return AthenaCmisPublicationAdapter(settings=s)
     return NullEcmPublicationAdapter()

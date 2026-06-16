@@ -560,6 +560,39 @@ class Settings(BaseSettings):
     PUBLICATION_ERP_TIMEOUT_SECONDS: float = Field(
         default=30.0, description="PLM->ERP publication HTTP timeout (seconds)"
     )
+    # ECM-P1D (skeleton): the real Athena CMIS publication connector. The CONNECTION
+    # reuses the existing ATHENA_BASE_URL / ATHENA_SERVICE_TOKEN. Routing is OFF by
+    # default: resolve_adapter returns the Null adapter unless PUBLICATION_ECM_TARGET_SYSTEM
+    # is set AND matches the row's target_system. The CMIS wire mapping below is
+    # PROVISIONAL pending Phase 0 live validation (U1-U5).
+    PUBLICATION_ECM_TARGET_SYSTEM: str = Field(
+        default="",
+        description="target_system routed to the Athena CMIS connector (empty = Null adapter only)",
+    )
+    PUBLICATION_ECM_BASE_URL: str = Field(
+        default="",
+        description="Optional override base URL for ECM publishing (empty = reuse ATHENA_BASE_URL)",
+    )
+    PUBLICATION_ECM_SERVICE_TOKEN: str = Field(
+        default="",
+        description="Optional override bearer token for ECM publishing (empty = reuse ATHENA_SERVICE_TOKEN; never logged)",
+    )
+    PUBLICATION_ECM_PATH: str = Field(
+        default="/cmis/browser",
+        description="Athena CMIS endpoint path (provisional; finalized in Phase 0)",
+    )
+    PUBLICATION_ECM_REPOSITORY_ID: str = Field(
+        default="", description="Athena CMIS repository id (provisional)"
+    )
+    PUBLICATION_ECM_ROOT_FOLDER_PATH: str = Field(
+        default="/PLM", description="Athena CMIS root folder for published records (provisional)"
+    )
+    PUBLICATION_ECM_OBJECT_TYPE_ID: str = Field(
+        default="cmis:document", description="Athena CMIS object type id (provisional)"
+    )
+    PUBLICATION_ECM_TIMEOUT_SECONDS: float = Field(
+        default=30.0, description="PLM->ECM (Athena CMIS) publication HTTP timeout (seconds)"
+    )
     METRICS_ENABLED: bool = Field(
         default=True,
         description="Serve `/api/v1/metrics` (Prometheus text format). When False the endpoint returns 404; instrumentation always records in-memory.",
