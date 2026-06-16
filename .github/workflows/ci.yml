@@ -444,6 +444,9 @@ jobs:
             src/yuantus/meta_engine/tests/test_item_number_immutable.py \
             src/yuantus/meta_engine/tests/test_item_release_gate.py \
             src/yuantus/meta_engine/tests/test_job_queue_tx_boundary_contracts.py \
+            src/yuantus/meta_engine/tests/test_latest_released_guard.py \
+            src/yuantus/meta_engine/tests/test_latest_released_guard_router.py \
+            src/yuantus/meta_engine/tests/test_latest_released_write_paths.py \
             src/yuantus/meta_engine/tests/test_license_import.py \
             src/yuantus/meta_engine/tests/test_locale_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_maintenance_category_router_contracts.py \
