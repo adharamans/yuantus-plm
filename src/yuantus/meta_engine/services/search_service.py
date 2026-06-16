@@ -327,8 +327,11 @@ class SearchService:
         }
 
     def _item_is_latest_released(self, item: Item) -> bool:
-        """True iff the item is current AND its current ``ItemVersion`` is released.
-        (``is_released`` lives on the version, not the ``Item``.)"""
+        """True iff the item is current AND its current ``ItemVersion`` is both current
+        and released. Mirrors ``LatestReleasedGuardService._assert_version`` (which
+        requires ``version.is_current`` AND ``version.is_released``) -- the version
+        condition guards against dirty data where ``current_version_id`` points at a
+        non-current version. (``is_released`` lives on the version, not the ``Item``.)"""
         if not getattr(item, "is_current", False) or not item.current_version_id:
             return False
         if not self.session:
@@ -336,7 +339,7 @@ class SearchService:
         from yuantus.meta_engine.version.models import ItemVersion
 
         version = self.session.get(ItemVersion, item.current_version_id)
-        return bool(version and version.is_released)
+        return bool(version and version.is_released and version.is_current)
 
     def index_item(self, item: Item):
         """Index or update an item document."""
@@ -451,8 +454,14 @@ class SearchService:
         except Exception as e:
             logger.error(f"Search failed: {e}")
             if self.session:
+                # Preserve released_only on the ES-failure fallback -- otherwise an ES
+                # outage/timeout would fail OPEN and return drafts/WIP for a
+                # released_only=true query.
                 return self._search_fallback_db(
-                    query_string=query_string, filters=filters or {}, limit=limit
+                    query_string=query_string,
+                    filters=filters or {},
+                    limit=limit,
+                    released_only=released_only,
                 )
             raise
 
@@ -508,7 +517,8 @@ class SearchService:
             from yuantus.meta_engine.version.models import ItemVersion
 
             released_version_ids = select(ItemVersion.id).where(
-                ItemVersion.is_released.is_(True)
+                ItemVersion.is_released.is_(True),
+                ItemVersion.is_current.is_(True),
             )
             stmt = stmt.where(
                 Item.is_current.is_(True),
