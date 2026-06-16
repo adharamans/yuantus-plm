@@ -60,6 +60,14 @@ _FEATURE_DESCRIPTORS: Dict[str, Dict[str, Any]] = {
         "api_version": "v1",
         "scenarios": ["bom_review"],
     },
+    # ECM-P1B: PLM->ECM publish is a release-triggered EVENT surface (an outbox is
+    # enqueued on release), not an action or read surface -- it advertises the
+    # ``release_publish`` scenario with NO actions. ADVISORY only (the real gate is the
+    # ECM_PUBLISH_ENABLED kill-switch + is_entitled at the publish path, not this hint).
+    "ecm_publish": {
+        "api_version": "v1",
+        "scenarios": ["release_publish"],
+    },
 }
 
 

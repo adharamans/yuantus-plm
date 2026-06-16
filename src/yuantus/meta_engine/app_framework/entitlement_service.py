@@ -35,6 +35,9 @@ FEATURE_APP_NAMES: Mapping[str, FrozenSet[str]] = {
     # PLM-COLLAB-P3-B: BOM multi-table is its OWN independent SKU -- NOT bundled into
     # plm.collab, NOT reusing plm_collaboration_pro (same discipline as approval_automation).
     "bom_multitable": frozenset({"plm.bom_multitable"}),
+    # ECM-P1B: PLM->ECM publish is its OWN independent SKU (same discipline as
+    # approval_automation / bom_multitable -- NOT bundled into plm.collab).
+    "ecm_publish": frozenset({"plm.ecm_publish"}),
     # reserved (canonical 6.1 vocabulary) -- accepted but not license-unlockable yet:
     "plm": frozenset(),
     "automation_enterprise": frozenset(),
