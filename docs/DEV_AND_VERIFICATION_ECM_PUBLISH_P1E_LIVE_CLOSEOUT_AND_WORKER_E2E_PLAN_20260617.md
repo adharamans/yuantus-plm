@@ -46,6 +46,11 @@ docker exec \
   --prefix phase0-operator-20260617b-20260617T014651Z
 ```
 
+Note: this historical operator run explicitly set `SOURCE_REPOSITORY_ID=athena`.
+That value is acceptable for the smoke's idempotency namespace because it is stable, but
+the worker checklist below uses the PLM sender identity default (`yuantus-plm`) to keep
+the receiver repository id and sender/source identity clearly separated.
+
 Result:
 
 | Step | Assertion | Result |
@@ -119,7 +124,7 @@ export YUANTUS_PUBLICATION_ECM_BASE_URL='<athena-transfer-base-url>'
 export YUANTUS_PUBLICATION_ECM_TRANSFER_USER='<transfer-user>'
 export YUANTUS_PUBLICATION_ECM_TRANSFER_SECRET='<transfer-secret>'
 export YUANTUS_PUBLICATION_ECM_ROOT_FOLDER_ID='67410d46-5711-4136-a928-18c239918656'
-export YUANTUS_PUBLICATION_ECM_SOURCE_REPOSITORY_ID=athena
+export YUANTUS_PUBLICATION_ECM_SOURCE_REPOSITORY_ID=yuantus-plm
 ```
 
 2. Prepare a disposable PLM item version with one controlled file role
