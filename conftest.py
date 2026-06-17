@@ -51,6 +51,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_consumption_mes_ingest_credential.py",
     "src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_contract.py",
     "src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_runtime.py",
+    "src/yuantus/meta_engine/tests/test_consumption_mes_uom_conversion.py",
     "src/yuantus/meta_engine/tests/test_parallel_tasks_services.py",
     "src/yuantus/meta_engine/tests/test_pdm_relationship_traversal.py",
     "src/yuantus/meta_engine/tests/test_pdm_relationship_types.py",

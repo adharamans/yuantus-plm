@@ -10,10 +10,18 @@ from sqlalchemy.orm import Session
 from yuantus.api.dependencies.auth import CurrentUser, get_current_user
 from yuantus.api.dependencies.mes_ingest_auth import require_mes_ingest_credential
 from yuantus.database import get_db
+from dataclasses import replace
+
 from yuantus.meta_engine.models.parallel_tasks import ConsumptionPlan
 from yuantus.meta_engine.services.consumption_mes_contract import (
+    RESERVED_PROPERTIES_KEY,
     MesConsumptionEvent,
     map_mes_event_to_consumption_record_inputs,
+)
+from yuantus.meta_engine.services.consumption_uom_conversion import (
+    CONVERSION_TABLE_VERSION,
+    UnconvertibleUnitsError,
+    convert_quantity,
 )
 from yuantus.meta_engine.services.parallel_tasks_service import ConsumptionPlanService
 
@@ -388,31 +396,51 @@ async def ingest_mes_consumption_actual(
             message=str(exc),
             context={"plan_id": plan_id},
         )
-    # uom reconciliation: a MES event that DECLARES a uom disagreeing with the
-    # plan's unit would silently mis-count `variance` (which sums quantities
-    # regardless of unit). Reject it (don't convert, don't swallow) -- the same
-    # "surface, never silently mis-number" stance as the idempotency conflict.
-    # When the event omits uom it implicitly uses the plan's unit (lenient).
-    # The plan is loaded once here and reused (identity-map cached) by the
-    # subsequent add_actual lookup, so this adds no extra round-trip; a
+    # uom reconciliation + conversion (R2.1 -> R2.4). A DECLARED event.uom is
+    # reconciled against the plan's unit: same unit (or omitted) -> pass through;
+    # different-but-convertible (same dimension) -> CONVERT the quantity into the
+    # plan's unit (variance stays unit-consistent) and record the conversion in the
+    # audit envelope; genuinely unconvertible (different dimension / unknown unit)
+    # -> 422, no write. Conversion happens BEFORE ingest, so the stored quantity and
+    # the R2 conflict-compare both see the converted value; the idempotency key is
+    # unchanged (no qty/uom in it), so an equivalent-unit replay stays DUPLICATE.
+    # The plan is loaded once here and reused (identity-map cached) by add_actual; a
     # not-found plan is left to ingest_mes_consumption's 404.
     if event.uom is not None:
         plan = db.get(ConsumptionPlan, plan_id)
         if plan is not None and event.uom.strip().upper() != (
             (plan.uom or "EA").strip().upper()
         ):
-            _raise_api_error(
-                status_code=422,
-                code="consumption_mes_uom_mismatch",
-                message=(
-                    "event uom does not match the plan uom; send the plan's unit "
-                    "or omit uom (no unit conversion is performed)"
-                ),
-                context={
-                    "plan_id": plan_id,
-                    "plan_uom": plan.uom,
-                    "event_uom": event.uom,
-                },
+            try:
+                converted, factor = convert_quantity(
+                    event.actual_quantity, event.uom, plan.uom or "EA"
+                )
+            except UnconvertibleUnitsError:
+                _raise_api_error(
+                    status_code=422,
+                    code="consumption_mes_uom_unconvertible",
+                    message=(
+                        "event uom is not convertible to the plan uom (different "
+                        "dimension or unknown unit); send the plan's unit"
+                    ),
+                    context={
+                        "plan_id": plan_id,
+                        "plan_uom": plan.uom,
+                        "event_uom": event.uom,
+                    },
+                )
+            envelope = {
+                **inputs.properties.get(RESERVED_PROPERTIES_KEY, {}),
+                "original_uom": event.uom,
+                "original_quantity": event.actual_quantity,
+                "converted_to_uom": plan.uom,
+                "conversion_factor": factor,
+                "conversion_table_version": CONVERSION_TABLE_VERSION,
+            }
+            inputs = replace(
+                inputs,
+                actual_quantity=converted,
+                properties={**inputs.properties, RESERVED_PROPERTIES_KEY: envelope},
             )
     try:
         record, disposition = service.ingest_mes_consumption(inputs)

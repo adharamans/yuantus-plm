@@ -387,6 +387,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_consumption_mes_ingest_credential.py \
             src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_contract.py \
             src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_runtime.py \
+            src/yuantus/meta_engine/tests/test_consumption_mes_uom_conversion.py \
             src/yuantus/meta_engine/tests/test_cutted_parts_router_decomposition_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_cutted_parts_router_decomposition_r1_contracts.py \
             src/yuantus/meta_engine/tests/test_cutted_parts_router_exception_chaining.py \

@@ -117,9 +117,11 @@ def client(engine, Session):
     app.dependency_overrides.clear()
 
 
-def _seed_plan(db, *, planned=10.0):
+def _seed_plan(db, *, planned=10.0, uom="EA"):
     service = ConsumptionPlanService(db)
-    plan = service.create_plan(name="P", item_id="item-1", planned_quantity=planned)
+    plan = service.create_plan(
+        name="P", item_id="item-1", planned_quantity=planned, uom=uom
+    )
     db.commit()
     return plan
 
@@ -386,22 +388,21 @@ def test_route_reserved_attributes_key_400(client, db):
     assert resp.status_code == 400
 
 
-# --- uom reconciliation (R2.1) ---------------------------------------------
-def test_route_declared_uom_mismatch_is_422(client, db):
-    # plan default uom is "EA"; a declared divergent unit must be rejected, not
-    # silently summed into variance.
+# --- uom reconciliation + conversion (R2.1 -> R2.4) ------------------------
+def test_route_cross_dimension_uom_is_unconvertible_422(client, db):
+    # plan uom is "EA" (count); "kg" (mass) is a DIFFERENT dimension -> 422
+    # unconvertible, nothing written.
     plan = _seed_plan(db)
     resp = client.post(_url(plan.id), json=_body(plan.id, uom="kg"))
     assert resp.status_code == 422, resp.text
     detail = resp.json()["detail"]
-    assert detail["code"] == "consumption_mes_uom_mismatch"
+    assert detail["code"] == "consumption_mes_uom_unconvertible"
     assert detail["context"]["plan_uom"] == "EA"
     assert detail["context"]["event_uom"] == "kg"
-    assert db.query(ConsumptionRecord).count() == 0  # nothing written
+    assert db.query(ConsumptionRecord).count() == 0
 
 
 def test_route_matching_uom_is_accepted(client, db):
-    # same unit (case-insensitive) is fine.
     plan = _seed_plan(db)
     resp = client.post(_url(plan.id), json=_body(plan.id, uom="ea"))
     assert resp.status_code == 200, resp.text
@@ -409,13 +410,45 @@ def test_route_matching_uom_is_accepted(client, db):
 
 
 def test_route_omitted_uom_is_lenient(client, db):
-    # no declared uom -> implicitly the plan's unit; never rejected.
     plan = _seed_plan(db)
     resp = client.post(_url(plan.id), json=_body(plan.id))
     assert resp.status_code == 200, resp.text
 
 
-def test_route_uom_mismatch_on_missing_plan_is_404_not_422(client):
-    # a uom is declared but the plan does not exist -> 404 wins (no false 422).
+def test_route_uom_on_missing_plan_is_404_not_422(client):
     resp = client.post(_url("ghost"), json=_body("ghost", uom="kg"))
     assert resp.status_code == 404
+
+
+# --- R2.4 conversion (convert within a dimension) --------------------------
+def test_route_converts_g_to_kg_plan(client, db):
+    # plan in KG; an event in G is converted (1000 g -> 1.0 kg) and stored as 1.0.
+    plan = _seed_plan(db, uom="KG")
+    resp = client.post(_url(plan.id), json=_body(plan.id, uom="g", actual_quantity=1000.0))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["disposition"] == "CREATED"
+    rec = db.query(ConsumptionRecord).one()
+    assert rec.actual_quantity == 1.0  # converted into plan.uom
+    env = rec.properties["_ingestion"]
+    assert env["original_uom"] == "g" and env["original_quantity"] == 1000.0
+    assert env["converted_to_uom"] == "KG" and env["conversion_factor"] == 0.001
+
+
+def test_route_equivalent_unit_replay_is_duplicate(client, db):
+    # same mes_event_id: first 1 KG, then 1000 G against a KG plan -> both convert to
+    # 1.0 kg -> the second is a DUPLICATE (equivalent), not a conflict, one row.
+    plan = _seed_plan(db, uom="KG")
+    r1 = client.post(_url(plan.id), json=_body(plan.id, uom="KG", actual_quantity=1.0))
+    assert r1.json()["disposition"] == "CREATED"
+    r2 = client.post(_url(plan.id), json=_body(plan.id, uom="g", actual_quantity=1000.0))
+    assert r2.status_code == 200 and r2.json()["disposition"] == "DUPLICATE"
+    assert db.query(ConsumptionRecord).count() == 1
+
+
+def test_route_equivalent_key_different_converted_qty_is_conflict(client, db):
+    # same key, converted to a DIFFERENT quantity -> 409 conflict, no second row.
+    plan = _seed_plan(db, uom="KG")
+    client.post(_url(plan.id), json=_body(plan.id, uom="KG", actual_quantity=1.0))
+    resp = client.post(_url(plan.id), json=_body(plan.id, uom="g", actual_quantity=2000.0))
+    assert resp.status_code == 409, resp.text
+    assert db.query(ConsumptionRecord).count() == 1
