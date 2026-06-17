@@ -28,6 +28,7 @@ from sqlalchemy.pool import StaticPool
 
 from yuantus.api.app import create_app
 from yuantus.api.dependencies.auth import get_current_user
+from yuantus.api.dependencies.mes_ingest_auth import require_mes_ingest_credential
 from yuantus.database import get_db
 from yuantus.meta_engine.models.item import Item  # noqa: F401  (mapper registration)
 from yuantus.meta_engine.models.parallel_tasks import (
@@ -106,6 +107,11 @@ def client(engine, Session):
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_current_user] = lambda: _USER
+    # The mes-actuals route now authenticates via require_mes_ingest_credential
+    # (which yields its own tenant-scoped session). These R2/R2.1 behavior tests
+    # are not testing auth, so override it to yield the in-memory test session;
+    # the dedicated credential auth is covered by test_consumption_mes_ingest_credential.
+    app.dependency_overrides[require_mes_ingest_credential] = _override_db
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

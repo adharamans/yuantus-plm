@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -59,6 +60,20 @@ def _is_public_path(path: str, settings=None) -> bool:
     return False
 
 
+# Dedicated MES consumption ingest route (Consumption R2.2). It is whitelisted
+# from global JWT enforcement because it is a MACHINE entrypoint authenticated by
+# its own dedicated credential (api/dependencies/mes_ingest_auth). The pattern
+# matches ONLY .../plans/{plan_id}/mes-actuals -- a single plan_id segment -- and
+# must NOT be broadened to the rest of /consumption/*.
+_MES_INGEST_PATH_RE = re.compile(
+    r"^/api/v1/consumption/plans/[^/]+/mes-actuals/?$"
+)
+
+
+def _is_mes_ingest_path(path: str) -> bool:
+    return bool(_MES_INGEST_PATH_RE.match(path))
+
+
 def _is_tenant_only_path(path: str) -> bool:
     """
     Endpoints that are tenant-scoped and must not require an org context.
@@ -87,9 +102,13 @@ class AuthEnforcementMiddleware(BaseHTTPMiddleware):
         if mode != "required":
             return await call_next(request)
 
-        if request.method.upper() == "OPTIONS" or _is_public_path(
-            request.url.path, settings
+        if (
+            request.method.upper() == "OPTIONS"
+            or _is_public_path(request.url.path, settings)
+            or _is_mes_ingest_path(request.url.path)
         ):
+            # MES ingest is whitelisted from JWT: its own dedicated credential
+            # dependency is the sole, fail-closed auth (R2.2).
             return await call_next(request)
 
         token = _get_bearer_token(request)

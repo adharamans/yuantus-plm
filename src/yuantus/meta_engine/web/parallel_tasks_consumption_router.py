@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from yuantus.api.dependencies.auth import CurrentUser, get_current_user
+from yuantus.api.dependencies.mes_ingest_auth import require_mes_ingest_credential
 from yuantus.database import get_db
 from yuantus.meta_engine.models.parallel_tasks import ConsumptionPlan
 from yuantus.meta_engine.services.consumption_mes_contract import (
@@ -361,8 +362,7 @@ async def add_consumption_actual(
 async def ingest_mes_consumption_actual(
     plan_id: str,
     event: MesConsumptionEvent,
-    db: Session = Depends(get_db),
-    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(require_mes_ingest_credential),
 ):
     """MES -> ConsumptionRecord ingestion (R2). Typed, idempotent ingest of a
     single MES consumption event. Distinct from the generic manual `/actuals`

@@ -627,6 +627,30 @@ class Settings(BaseSettings):
             "Transfer Receiver (never logged)"
         ),
     )
+    # --- MES ingest credential / auth boundary (Consumption R2.2) ---
+    # Dedicated machine credential for POST /consumption/plans/{id}/mes-actuals.
+    # Fail-closed: the route is DISABLED (503) unless SECRET and TENANT_ID are both
+    # set. Runtime env names are YUANTUS_MES_INGEST_* (env_prefix). Restart-only
+    # (get_settings is lru_cached). USER/SECRET are never logged.
+    MES_INGEST_USER: str = Field(
+        default="",
+        description="X-MES-Ingest-User header value for MES ingest auth (never logged)",
+    )
+    MES_INGEST_SECRET: str = Field(
+        default="",
+        description="X-MES-Ingest-Secret header value for MES ingest auth (never logged)",
+    )
+    MES_INGEST_TENANT_ID: str = Field(
+        default="",
+        description=(
+            "Fixed tenant the MES ingest credential is bound to; the ingest route "
+            "pins this (never the x-tenant-id header). Empty => route disabled (503)."
+        ),
+    )
+    MES_INGEST_ORG_ID: str = Field(
+        default="",
+        description="Optional fixed org context for MES ingest (tenant is the isolation boundary)",
+    )
     PUBLICATION_ECM_PATH: str = Field(
         default="/cmis/browser",
         description="CMIS compliance-reference endpoint path; not used by Transfer Receiver",
