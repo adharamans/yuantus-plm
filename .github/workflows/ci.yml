@@ -425,6 +425,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_ecm_publication_worker_cli.py \
             src/yuantus/meta_engine/tests/test_ecm_transfer_receiver_adapter.py \
             src/yuantus/meta_engine/tests/test_ecm_transfer_receiver_phase0_smoke.py \
+            src/yuantus/meta_engine/tests/test_ecm_worker_e2e_smoke.py \
             src/yuantus/meta_engine/tests/test_eco_approval_ops_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_approval_workflow_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_change_analysis_router_contracts.py \
