@@ -209,7 +209,9 @@ def test_send_creates_item_version_folders_then_uploads_document():
     assert first_folder["parentFolderId"] == _ROOT
     assert first_folder["conflictPolicy"] == "SKIP"
     assert first_folder["sourceRepositoryId"] == "yuantus-plm"
-    assert second_folder["parentFolderId"] == _ITEM_FOLDER
+    # Wire parent stays at the receiver root for scope authorization; Athena
+    # resolves the actual nested parent from sourceParentNodeId mapping.
+    assert second_folder["parentFolderId"] == _ROOT
     assert second_folder["sourceParentNodeId"] == first_folder["sourceNodeId"]
 
     doc = requests[2]
@@ -218,6 +220,7 @@ def test_send_creates_item_version_folders_then_uploads_document():
     assert headers["x-athena-transfer-secret"] == "secret"
     assert "authorization" not in headers
     body = doc.content.decode("latin-1")
+    assert 'name="parentFolderId"\r\n\r\n' + _ROOT in body
     assert 'name="conflictPolicy"' in body and "SKIP" in body
     assert 'name="sourceLastModifiedAt"' in body and "2026-06-16T12:30:45" in body
     assert 'filename="gear.step"' in body and "hello-athena" in body

@@ -327,13 +327,15 @@ class AthenaTransferReceiverAdapter(EcmPublicationAdapter):
 
     def _dispatch(self, payload: dict) -> SendResult:
         folders = payload.get("folders") or {}
-        item_folder_id = self._ensure_folder(folders.get("item") or {}, payload["root_folder_id"])
+        self._ensure_folder(folders.get("item") or {}, payload["root_folder_id"])
         version_folder = dict(folders.get("version") or {})
-        version_folder["parent_folder_id"] = item_folder_id
-        version_folder_id = self._ensure_folder(version_folder, item_folder_id)
+        # The Transfer Receiver authorizes the literal parentFolderId before it
+        # resolves sourceParentNodeId. Keep the wire parent scoped to the receiver
+        # root and let sourceParentNodeId resolve the actual item/version nesting.
+        self._ensure_folder(version_folder, payload["root_folder_id"])
         content = self._read_content(payload)
         data = {
-            "parentFolderId": version_folder_id,
+            "parentFolderId": payload["root_folder_id"],
             "description": payload.get("description") or "",
             "conflictPolicy": payload["conflict_policy"],
             "sourceRepositoryId": payload["source_repository_id"],

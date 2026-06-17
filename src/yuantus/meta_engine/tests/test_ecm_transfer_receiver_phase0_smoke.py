@@ -101,6 +101,7 @@ def test_phase0_runs_verify_folders_create_replay_and_new_version(tmp_path: Path
             return httpx.Response(200, json={"repositoryId": "yuantus-plm"})
         if req.url.path.endswith("/folders"):
             payload = json.loads(req.content.decode("utf-8"))
+            assert payload["parentFolderId"] == "00000000-0000-0000-0000-000000000111"
             assert payload["conflictPolicy"] == "SKIP"
             assert payload["sourceRepositoryId"] == "yuantus-plm"
             assert payload["sourceLastModifiedAt"] == "2026-06-16T20:00:00"
@@ -116,6 +117,10 @@ def test_phase0_runs_verify_folders_create_replay_and_new_version(tmp_path: Path
         body = req.content.decode("latin-1")
         source_node_id = body.split('name="sourceNodeId"\r\n\r\n', 1)[1].split("\r\n", 1)[0]
         document_source_node_ids.append(source_node_id)
+        assert (
+            'name="parentFolderId"\r\n\r\n00000000-0000-0000-0000-000000000111'
+            in body
+        )
         assert 'name="sourceLastModifiedAt"\r\n\r\n2026-06-16T20:00:00' in body
         assert 'filename="gear.step"' in body
         assert "phase0-cad" in body

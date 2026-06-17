@@ -280,7 +280,7 @@ def run_phase0(
         kwargs["transport"] = transport
     with client_factory(**kwargs) as client:
         steps.append(_verify_root(client, config))
-        item_folder_id, step = _ensure_folder(
+        _item_folder_id, step = _ensure_folder(
             client,
             config,
             step="U2.item-folder",
@@ -289,21 +289,24 @@ def run_phase0(
             source_node_id=_folder_source_uuid(config.prefix),
         )
         steps.append(step)
-        version_folder_id, step = _ensure_folder(
+        _version_folder_id, step = _ensure_folder(
             client,
             config,
             step="U2.version-folder",
-            parent_folder_id=item_folder_id,
+            parent_folder_id=config.root_folder_id,
             name=version_id,
             source_node_id=_folder_source_uuid(config.prefix, version_id),
             source_parent_node_id=_folder_source_uuid(config.prefix),
         )
         steps.append(step)
+        # Receiver scope is checked against parentFolderId before
+        # sourceParentNodeId is resolved. Keep parentFolderId at the receiver
+        # root and let sourceParentNodeId map the actual version folder.
         document_id, step = _upload_document(
             client,
             config,
             step="U3.document-created",
-            parent_folder_id=version_folder_id,
+            parent_folder_id=config.root_folder_id,
             version_id=version_id,
             file_id=file_id,
             file_role=file_role,
@@ -315,7 +318,7 @@ def run_phase0(
             client,
             config,
             step="U4.replay-unchanged",
-            parent_folder_id=version_folder_id,
+            parent_folder_id=config.root_folder_id,
             version_id=version_id,
             file_id=file_id,
             file_role=file_role,
@@ -323,11 +326,11 @@ def run_phase0(
             expected_disposition="UNCHANGED",
         )
         steps.append(step)
-        version2_folder_id, step = _ensure_folder(
+        _version2_folder_id, step = _ensure_folder(
             client,
             config,
             step="U5.version2-folder",
-            parent_folder_id=item_folder_id,
+            parent_folder_id=config.root_folder_id,
             name=version2_id,
             source_node_id=_folder_source_uuid(config.prefix, version2_id),
             source_parent_node_id=_folder_source_uuid(config.prefix),
@@ -337,7 +340,7 @@ def run_phase0(
             client,
             config,
             step="U5.version2-created",
-            parent_folder_id=version2_folder_id,
+            parent_folder_id=config.root_folder_id,
             version_id=version2_id,
             file_id=file_id,
             file_role=file_role,
