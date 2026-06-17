@@ -27,6 +27,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     JSON,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -170,6 +171,47 @@ class ConsumptionRecord(Base):
     # unequal so legacy/manual rows coexist; non-null keys are globally unique),
     # mirroring this table's own BreakageIncident.eco_id / incident_code idiom.
     idempotency_key = Column(String(64), nullable=True, unique=True, index=True)
+
+
+class MesConsumptionInbox(Base):
+    """Durable inbound queue for async MES consumption ingestion (Consumption R2.5,
+    default-OFF). When `MES_INGEST_ASYNC` is on, the route persists the validated
+    raw event here and returns 202; the inbox worker drains it through the same
+    `ConsumptionPlanService.ingest_mes_consumption` as the sync path. The unique
+    `idempotency_key` makes accept idempotent (a replay is one inbox row)."""
+
+    __tablename__ = "meta_mes_consumption_inbox"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    # The R1-derived key = sha256(plan_id|source_type|mes_event_id); unique so a
+    # replayed delivery maps to one inbox row.
+    idempotency_key = Column(String(64), nullable=False, unique=True, index=True)
+    # Raw validated event (original uom/qty kept; conversion happens at PROCESS).
+    plan_id = Column(String, nullable=False, index=True)
+    mes_event_id = Column(String(200), nullable=False)
+    source_type = Column(String(60), nullable=False)
+    source_id = Column(String(120), nullable=True)
+    actual_quantity = Column(Float, nullable=False, default=0.0)
+    uom = Column(String(20), nullable=True)
+    recorded_at = Column(DateTime, nullable=True)
+    attributes = Column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    # Lifecycle: pending -> processed | conflict | failed (retryable reschedules).
+    state = Column(String(30), nullable=False, default="pending", index=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=5)
+    next_attempt_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    worker_id = Column(String, nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    error = Column(Text, nullable=True)
+    # The ConsumptionRecord this inbox row produced (set on processed).
+    record_id = Column(String, nullable=True)
+    properties = Column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
 
 class BreakageIncident(Base):

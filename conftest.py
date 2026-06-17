@@ -48,6 +48,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_ecm_transfer_receiver_phase0_smoke.py",
     "src/yuantus/meta_engine/tests/test_ecm_worker_e2e_smoke.py",
     "src/yuantus/meta_engine/tests/test_plm_ecm_publication_outbox_router.py",
+    "src/yuantus/meta_engine/tests/test_consumption_mes_inbox_service.py",
     "src/yuantus/meta_engine/tests/test_consumption_mes_ingest_credential.py",
     "src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_contract.py",
     "src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_runtime.py",
