@@ -181,9 +181,9 @@ def map_mes_event_to_consumption_record_inputs(
         "idempotency_key": idempotency_key,
         "mes_event_id": event.mes_event_id,
         "source_type": event.source_type,
-        # uom is accepted and echoed for observability only. R1 does NOT
-        # reconcile it against plan.uom (that would require a DB read in a
-        # pure mapper); reconciliation is a documented follow-up.
+        # uom is echoed for observability. This pure mapper does NOT reconcile
+        # it against plan.uom (that needs a DB read); the ingestion route does
+        # that reconciliation (R2.1) and rejects a declared-uom mismatch (422).
         "uom": event.uom,
     }
 

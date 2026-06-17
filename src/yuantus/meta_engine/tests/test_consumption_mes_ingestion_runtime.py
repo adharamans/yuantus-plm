@@ -358,3 +358,38 @@ def test_route_reserved_attributes_key_400(client, db):
         _url(plan.id), json=_body(plan.id, attributes={"_ingestion": {"x": 1}})
     )
     assert resp.status_code == 400
+
+
+# --- uom reconciliation (R2.1) ---------------------------------------------
+def test_route_declared_uom_mismatch_is_422(client, db):
+    # plan default uom is "EA"; a declared divergent unit must be rejected, not
+    # silently summed into variance.
+    plan = _seed_plan(db)
+    resp = client.post(_url(plan.id), json=_body(plan.id, uom="kg"))
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "consumption_mes_uom_mismatch"
+    assert detail["context"]["plan_uom"] == "EA"
+    assert detail["context"]["event_uom"] == "kg"
+    assert db.query(ConsumptionRecord).count() == 0  # nothing written
+
+
+def test_route_matching_uom_is_accepted(client, db):
+    # same unit (case-insensitive) is fine.
+    plan = _seed_plan(db)
+    resp = client.post(_url(plan.id), json=_body(plan.id, uom="ea"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["disposition"] == "CREATED"
+
+
+def test_route_omitted_uom_is_lenient(client, db):
+    # no declared uom -> implicitly the plan's unit; never rejected.
+    plan = _seed_plan(db)
+    resp = client.post(_url(plan.id), json=_body(plan.id))
+    assert resp.status_code == 200, resp.text
+
+
+def test_route_uom_mismatch_on_missing_plan_is_404_not_422(client):
+    # a uom is declared but the plan does not exist -> 404 wins (no false 422).
+    resp = client.post(_url("ghost"), json=_body("ghost", uom="kg"))
+    assert resp.status_code == 404
