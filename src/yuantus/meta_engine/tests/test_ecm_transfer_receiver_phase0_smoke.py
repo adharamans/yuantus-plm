@@ -31,7 +31,6 @@ def _env(file_path: Path) -> dict[str, str]:
         "YUANTUS_PUBLICATION_ECM_TRANSFER_USER": "plm-phase0",
         "YUANTUS_PUBLICATION_ECM_TRANSFER_SECRET": "super-secret",
         "YUANTUS_PUBLICATION_ECM_ROOT_FOLDER_ID": "00000000-0000-0000-0000-000000000111",
-        "YUANTUS_PUBLICATION_ECM_SOURCE_REPOSITORY_ID": "yuantus-plm",
         "YUANTUS_PUBLICATION_ECM_CONFLICT_POLICY": "SKIP",
         "YUANTUS_PUBLICATION_ECM_PHASE0_FILE": str(file_path),
     }
@@ -98,7 +97,7 @@ def test_phase0_runs_verify_folders_create_replay_and_new_version(tmp_path: Path
         assert "authorization" not in headers
         if req.url.path.endswith("/verify"):
             assert req.url.params["folderId"] == "00000000-0000-0000-0000-000000000111"
-            return httpx.Response(200, json={"repositoryId": "yuantus-plm"})
+            return httpx.Response(200, json={"repositoryId": "athena"})
         if req.url.path.endswith("/folders"):
             payload = json.loads(req.content.decode("utf-8"))
             assert payload["parentFolderId"] == "00000000-0000-0000-0000-000000000111"
@@ -151,6 +150,69 @@ def test_phase0_runs_verify_folders_create_replay_and_new_version(tmp_path: Path
     assert result["documents"]["v2"] != result["documents"]["v1"]
 
 
+def test_verify_repository_is_receiver_identity_not_source_identity(tmp_path: Path) -> None:
+    smoke = _load_script()
+    sample = tmp_path / "gear.step"
+    sample.write_bytes(b"phase0-cad")
+    config = smoke.config_from_env(
+        _env(sample),
+        prefix="phase0-test",
+        now=datetime(2026, 6, 16, 20, 0, 0, tzinfo=timezone.utc),
+    )
+    assert config.expected_repository_id == "athena"
+    assert config.source_repository_id == "yuantus-plm"
+    seen_source_ids: list[str] = []
+    folder_ids = iter(
+        [
+            "00000000-0000-0000-0000-000000000201",
+            "00000000-0000-0000-0000-000000000202",
+            "00000000-0000-0000-0000-000000000203",
+        ]
+    )
+    document_ids = iter(
+        [
+            "00000000-0000-0000-0000-000000000301",
+            "00000000-0000-0000-0000-000000000301",
+            "00000000-0000-0000-0000-000000000302",
+        ]
+    )
+    dispositions = iter(["CREATED", "UNCHANGED", "CREATED"])
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/verify"):
+            return httpx.Response(200, json={"repositoryId": "athena"})
+        if req.url.path.endswith("/folders"):
+            payload = json.loads(req.content.decode("utf-8"))
+            seen_source_ids.append(payload["sourceRepositoryId"])
+            return httpx.Response(
+                201,
+                json={
+                    "folderId": next(folder_ids),
+                    "folderName": payload["name"],
+                    "disposition": "CREATED",
+                },
+            )
+        assert req.url.path.endswith("/documents")
+        body = req.content.decode("latin-1")
+        seen_source_ids.append(
+            body.split('name="sourceRepositoryId"\r\n\r\n', 1)[1].split("\r\n", 1)[0]
+        )
+        return httpx.Response(
+            201,
+            json={
+                "documentId": next(document_ids),
+                "documentName": "gear.step",
+                "disposition": next(dispositions),
+            },
+        )
+
+    result = smoke.run_phase0(config, transport=httpx.MockTransport(handler))
+
+    assert result["status"] == "passed"
+    assert result["steps"][0]["repository_id"] == "athena"
+    assert set(seen_source_ids) == {"yuantus-plm"}
+
+
 def test_phase0_fails_when_replay_is_not_unchanged(tmp_path: Path) -> None:
     smoke = _load_script()
     sample = tmp_path / "gear.step"
@@ -163,7 +225,7 @@ def test_phase0_fails_when_replay_is_not_unchanged(tmp_path: Path) -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         nonlocal document_calls
         if req.url.path.endswith("/verify"):
-            return httpx.Response(200, json={"repositoryId": "yuantus-plm"})
+            return httpx.Response(200, json={"repositoryId": "athena"})
         if req.url.path.endswith("/folders"):
             return httpx.Response(201, json={"folderId": folder_id, "disposition": "CREATED"})
         document_calls += 1

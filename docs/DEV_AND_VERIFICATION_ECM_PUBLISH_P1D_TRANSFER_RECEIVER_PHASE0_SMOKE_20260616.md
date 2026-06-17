@@ -32,7 +32,10 @@ Live mode requires:
 - `YUANTUS_PUBLICATION_ECM_TRANSFER_USER`
 - `YUANTUS_PUBLICATION_ECM_TRANSFER_SECRET`
 - `YUANTUS_PUBLICATION_ECM_ROOT_FOLDER_ID`
-- `YUANTUS_PUBLICATION_ECM_SOURCE_REPOSITORY_ID` (defaults to `yuantus-plm`)
+- `YUANTUS_PUBLICATION_ECM_SOURCE_REPOSITORY_ID` (defaults to `yuantus-plm`; this is
+  the sender/source identity used in Transfer Receiver idempotency fields)
+- `YUANTUS_PUBLICATION_ECM_EXPECTED_REPOSITORY_ID` (defaults to `athena`; this is the
+  receiver repository id returned by `/verify`)
 - `YUANTUS_PUBLICATION_ECM_CONFLICT_POLICY` (defaults to `SKIP`)
 - `YUANTUS_PUBLICATION_ECM_PHASE0_FILE` or `--file`
 

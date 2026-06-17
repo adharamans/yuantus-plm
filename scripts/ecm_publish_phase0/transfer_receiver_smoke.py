@@ -36,6 +36,7 @@ class SmokeConfig:
     transfer_user: str
     transfer_secret: str
     root_folder_id: str
+    expected_repository_id: str
     source_repository_id: str
     conflict_policy: str
     file_path: Path | None
@@ -84,6 +85,9 @@ def config_from_env(
         transfer_user=_env_value(source, "PUBLICATION_ECM_TRANSFER_USER"),
         transfer_secret=_env_value(source, "PUBLICATION_ECM_TRANSFER_SECRET"),
         root_folder_id=_env_value(source, "PUBLICATION_ECM_ROOT_FOLDER_ID"),
+        expected_repository_id=(
+            _env_value(source, "PUBLICATION_ECM_EXPECTED_REPOSITORY_ID") or "athena"
+        ),
         source_repository_id=_env_value(source, "PUBLICATION_ECM_SOURCE_REPOSITORY_ID")
         or "yuantus-plm",
         conflict_policy=(
@@ -160,10 +164,10 @@ def _verify_root(client: httpx.Client, config: SmokeConfig) -> dict:
     )
     body = _json_response(response, "U1 verify", config)
     repository_id = body.get("repositoryId")
-    if repository_id != config.source_repository_id:
+    if repository_id != config.expected_repository_id:
         raise SmokeFailure(
             "U1 verify returned unexpected repositoryId "
-            f"{repository_id!r}; expected {config.source_repository_id!r}"
+            f"{repository_id!r}; expected {config.expected_repository_id!r}"
         )
     return {"id": "U1", "status": "passed", "repository_id": repository_id}
 
