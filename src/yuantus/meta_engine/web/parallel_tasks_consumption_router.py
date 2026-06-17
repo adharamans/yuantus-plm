@@ -4,10 +4,15 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from yuantus.api.dependencies.auth import CurrentUser, get_current_user
 from yuantus.database import get_db
+from yuantus.meta_engine.services.consumption_mes_contract import (
+    MesConsumptionEvent,
+    map_mes_event_to_consumption_record_inputs,
+)
 from yuantus.meta_engine.services.parallel_tasks_service import ConsumptionPlanService
 
 
@@ -342,6 +347,100 @@ async def add_consumption_actual(
             context={"plan_id": plan_id},
         )
     return {
+        "id": record.id,
+        "plan_id": record.plan_id,
+        "source_type": record.source_type,
+        "source_id": record.source_id,
+        "actual_quantity": record.actual_quantity,
+        "recorded_at": record.recorded_at.isoformat() if record.recorded_at else None,
+    }
+
+
+@parallel_tasks_consumption_router.post("/consumption/plans/{plan_id}/mes-actuals")
+async def ingest_mes_consumption_actual(
+    plan_id: str,
+    event: MesConsumptionEvent,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """MES -> ConsumptionRecord ingestion (R2). Typed, idempotent ingest of a
+    single MES consumption event. Distinct from the generic manual `/actuals`
+    route: it enforces replay idempotency via the unique `idempotency_key`
+    column so a retried at-least-once MES delivery never double-counts
+    `variance`. A same-key event with a divergent business payload
+    (`actual_quantity` / `source_id`) is a 409 conflict, never silently dropped.
+    """
+    if event.plan_id != plan_id:
+        _raise_api_error(
+            status_code=400,
+            code="consumption_mes_plan_id_mismatch",
+            message="event.plan_id must match the path plan_id",
+            context={"path_plan_id": plan_id, "body_plan_id": event.plan_id},
+        )
+    service = ConsumptionPlanService(db)
+    try:
+        inputs = map_mes_event_to_consumption_record_inputs(event)
+    except ValueError as exc:
+        _raise_api_error(
+            status_code=400,
+            code="consumption_mes_invalid_event",
+            message=str(exc),
+            context={"plan_id": plan_id},
+        )
+    try:
+        record, disposition = service.ingest_mes_consumption(inputs)
+    except ValueError as exc:
+        db.rollback()
+        _raise_api_error(
+            status_code=404,
+            code="consumption_plan_not_found",
+            message=str(exc),
+            context={"plan_id": plan_id},
+        )
+    except OperationalError:
+        # Transient/retryable DB failure (deadlock, serialization, connection
+        # blip) under concurrent ingest. This endpoint is at-least-once and
+        # idempotent, so a 5xx tells the producer to RETRY safely -- a 4xx here
+        # would tell it to drop the event, which (variance sums all rows) is a
+        # silent UNDERCOUNT, the symmetric failure to the double-count the
+        # idempotency design prevents.
+        db.rollback()
+        _raise_api_error(
+            status_code=503,
+            code="consumption_mes_ingest_unavailable",
+            message="transient database error; safe to retry (ingestion is idempotent)",
+            context={"plan_id": plan_id},
+        )
+    except Exception as exc:
+        # Any other unexpected error reaching here is server-side: the only
+        # client-caused failures (invalid event, plan-not-found) are handled
+        # above. Surface as 500 so an at-least-once producer can retry, never 4xx.
+        db.rollback()
+        _raise_api_error(
+            status_code=500,
+            code="consumption_mes_ingest_error",
+            message=str(exc),
+            context={"plan_id": plan_id},
+        )
+    if disposition == "CONFLICT":
+        db.rollback()
+        _raise_api_error(
+            status_code=409,
+            code="consumption_mes_idempotency_conflict",
+            message=(
+                "idempotency_key already recorded with a different payload; "
+                "send a corrected value as a new mes_event_id"
+            ),
+            context={
+                "plan_id": plan_id,
+                "idempotency_key": inputs.idempotency_key,
+                "existing_record_id": record.id,
+            },
+        )
+    db.commit()
+    return {
+        "disposition": disposition,
+        "idempotency_key": inputs.idempotency_key,
         "id": record.id,
         "plan_id": record.plan_id,
         "source_type": record.source_type,

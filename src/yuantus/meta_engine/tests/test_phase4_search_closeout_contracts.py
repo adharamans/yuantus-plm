@@ -189,7 +189,8 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     # - 708: + 1 CAD-PDM B2b assembly promotion route (POST /pdm/items/{root_id}/promote-assembly).
     # - 709: + 1 L1 visual-diff route (GET /cad/files/{file_id}/visual-diff).
     # - 712: + 3 ECM publication-outbox ops routes (ECM-P1C: list/get/replay).
-    assert len(app.routes) == 712
+    # - 713: + 1 MES consumption ingestion route (Consumption R2: POST mes-actuals).
+    assert len(app.routes) == 713
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

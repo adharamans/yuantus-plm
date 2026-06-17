@@ -337,7 +337,8 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
         session.close()
 
     # This slice still adds no route. Keep this secondary pin aligned with the
-    # current app-level route-count contract (712 after the 3 ECM-P1C
+    # current app-level route-count contract (713 after the 1 Consumption-R2 MES
+    # ingestion route; 712 after the 3 ECM-P1C
     # publication-outbox ops routes; 709 after the 1 L1 visual-diff
     # route; 708 after the 1 CAD-PDM B2b
     # assembly promotion route; 707 after the 1 CAD-PDM Superseded read-surface
@@ -347,7 +348,7 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
     from yuantus.api.app import create_app
 
     app = create_app()
-    assert len(app.routes) == 712
+    assert len(app.routes) == 713
 
 
 # ==========================================================================

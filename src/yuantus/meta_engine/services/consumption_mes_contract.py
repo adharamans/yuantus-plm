@@ -4,14 +4,16 @@ This module defines a *boundary*: the typed shape an external MES is
 expected to send, plus a pure mapper into the exact keyword arguments the
 existing ``ConsumptionPlanService.add_actual`` already accepts.
 
-It deliberately does NOT:
+This module is the pure boundary only. It does NOT:
 
-- expose any route or wire any runtime ingestion;
-- add or change any table / migration / tenant baseline;
-- enforce idempotency (the key is derived and recorded only);
-- change ``add_actual`` or ``variance`` semantics.
+- expose any route or wire any runtime ingestion (that is the R2 router/service);
+- enforce idempotency -- it derives the key and now carries it as a first-class
+  ``ConsumptionRecordInputs`` field (R2); the unique ``ConsumptionRecord.idempotency_key``
+  column + ``ConsumptionPlanService.ingest_mes_consumption`` are what *enforce* it;
+- change ``add_actual`` (manual path) or ``variance`` semantics.
 
-See ``docs/DEVELOPMENT_CLAUDE_TASK_ODOO18_CONSUMPTION_MES_INGESTION_CONTRACT_20260515.md``.
+See ``docs/DEVELOPMENT_CLAUDE_TASK_ODOO18_CONSUMPTION_MES_INGESTION_CONTRACT_20260515.md``
+(R1) and ``docs/DEVELOPMENT_CLAUDE_TASK_ODOO18_CONSUMPTION_MES_INGESTION_RUNTIME_R2_TASKBOOK_20260617.md`` (R2).
 """
 
 from __future__ import annotations
@@ -127,6 +129,7 @@ class ConsumptionRecordInputs:
     source_id: Optional[str]
     recorded_at: Optional[datetime]
     properties: Dict[str, Any]
+    idempotency_key: str
 
     def as_kwargs(self) -> Dict[str, Any]:
         return {
@@ -136,6 +139,7 @@ class ConsumptionRecordInputs:
             "source_id": self.source_id,
             "recorded_at": self.recorded_at,
             "properties": self.properties,
+            "idempotency_key": self.idempotency_key,
         }
 
 
@@ -190,4 +194,8 @@ def map_mes_event_to_consumption_record_inputs(
         source_id=event.source_id,
         recorded_at=event.recorded_at,
         properties=properties,
+        # R2: the key is also carried as a first-class field so the runtime can
+        # persist it on the unique column. It remains echoed inside
+        # `properties._ingestion` above for observability/back-compat.
+        idempotency_key=idempotency_key,
     )

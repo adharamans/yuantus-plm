@@ -163,6 +163,13 @@ class ConsumptionRecord(Base):
     actual_quantity = Column(Float, nullable=False, default=0.0)
     recorded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     properties = Column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    # MES-ingestion idempotency key (ECM-style per-event identity). NULL for the
+    # manual `/actuals` path (human entries are intentionally never deduped);
+    # the MES ingestion route sets the R1-derived sha256 hex. `nullable + unique`
+    # gives the wanted semantics on both SQLite and Postgres (NULLs compare
+    # unequal so legacy/manual rows coexist; non-null keys are globally unique),
+    # mirroring this table's own BreakageIncident.eco_id / incident_code idiom.
+    idempotency_key = Column(String(64), nullable=True, unique=True, index=True)
 
 
 class BreakageIncident(Base):

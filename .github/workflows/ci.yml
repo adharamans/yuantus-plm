@@ -384,6 +384,8 @@ jobs:
             src/yuantus/meta_engine/tests/test_ci_contracts_version_file_binding_viewer_uniqueness.py \
             src/yuantus/meta_engine/tests/test_ci_shell_scripts_syntax.py \
             src/yuantus/meta_engine/tests/test_config_superuser_guard_contracts.py \
+            src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_contract.py \
+            src/yuantus/meta_engine/tests/test_consumption_mes_ingestion_runtime.py \
             src/yuantus/meta_engine/tests/test_cutted_parts_router_decomposition_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_cutted_parts_router_decomposition_r1_contracts.py \
             src/yuantus/meta_engine/tests/test_cutted_parts_router_exception_chaining.py \

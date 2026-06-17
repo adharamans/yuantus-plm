@@ -19,6 +19,7 @@ _CONSUMPTION_ROUTE_KEYS = {
     ("POST", "/consumption/templates/versions/{plan_id}/state"),
     ("POST", "/consumption/templates/{template_key}/impact-preview"),
     ("POST", "/consumption/plans/{plan_id}/actuals"),
+    ("POST", "/consumption/plans/{plan_id}/mes-actuals"),
     ("GET", "/consumption/plans/{plan_id}/variance"),
     ("GET", "/consumption/dashboard"),
 }

@@ -239,10 +239,11 @@ def test_phase4_route_count_pin_still_lives_at_706():
     # (P3-A BOM multi-table projection) -> 704 (WP1.2 PDM traversal) -> 705
     # (WP1.2 stale-drawings) -> 706 (P3-D1 embed-token mint) -> 707
     # (CAD-PDM Superseded read-surface) -> 708 (CAD-PDM B2b assembly promotion)
-    # -> 709 (L1 visual-diff) -> 712 (ECM-P1C publication-outbox ops routes).
+    # -> 709 (L1 visual-diff) -> 712 (ECM-P1C publication-outbox ops routes)
+    # -> 713 (Consumption-R2 MES ingestion route).
     text = _PHASE4_TEST.read_text()
-    assert "len(app.routes) == 712" in text, (
-        "phase-4 route-count pin (712) must still exist as the "
+    assert "len(app.routes) == 713" in text, (
+        "phase-4 route-count pin (713) must still exist as the "
         "authoritative assertion."
     )
 

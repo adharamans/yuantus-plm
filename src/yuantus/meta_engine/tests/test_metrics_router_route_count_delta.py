@@ -43,7 +43,9 @@ from yuantus.api.app import create_app
 # NOTE: this pin had drifted STALE at 676 (never bumped through the 677/678
 # route additions) and is not in the CI contracts list / no-DB allowlist, so the
 # drift went unobserved until the R2 routes slice reconciled it.
-EXPECTED_TOTAL_ROUTES = 712
+# 713 = 712 + 1 MES consumption ingestion route (Consumption R2:
+#   POST /api/v1/consumption/plans/{plan_id}/mes-actuals).
+EXPECTED_TOTAL_ROUTES = 713
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

@@ -2907,7 +2907,13 @@ class ConsumptionPlanService:
         source_id: Optional[str] = None,
         recorded_at: Optional[datetime] = None,
         properties: Optional[Dict[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> ConsumptionRecord:
+        # `idempotency_key` defaults to None so the manual `/actuals` path is
+        # byte-for-byte unchanged (NULL key, never deduped). The MES ingestion
+        # path passes the R1-derived key; the unique column is what makes a
+        # retried MES delivery idempotent. The 1:1 mapper alignment is enforced
+        # by the drift tests in test_consumption_mes_ingestion_contract.py.
         plan = self.session.get(ConsumptionPlan, plan_id)
         if not plan:
             raise ValueError(f"Consumption plan not found: {plan_id}")
@@ -2919,10 +2925,57 @@ class ConsumptionPlanService:
             actual_quantity=float(actual_quantity),
             recorded_at=recorded_at or _utcnow(),
             properties=properties or {},
+            idempotency_key=idempotency_key,
         )
         self.session.add(record)
         self.session.flush()
         return record
+
+    def ingest_mes_consumption(
+        self, inputs: "ConsumptionRecordInputs"
+    ) -> "tuple[ConsumptionRecord, str]":
+        """Idempotent MES consumption ingest. Returns ``(record, disposition)``
+        where disposition is ``CREATED`` / ``DUPLICATE`` / ``CONFLICT``.
+
+        Race-safe by construction: it INSERTs inside a SAVEPOINT and lets the
+        unique ``idempotency_key`` constraint be the arbiter (never a
+        look-then-insert pre-check). On the unique violation ``begin_nested()``
+        rolls back **only to the savepoint**, re-reads the winning row by key,
+        and compares the **business payload** (``actual_quantity`` + ``source_id``
+        -- the latter is NOT in the key, so a same-key attribution change must
+        surface as a conflict, not be silently kept). Equal -> ``DUPLICATE``;
+        divergent -> ``CONFLICT``. A missing plan raises ``ValueError`` before
+        any insert.
+
+        Transaction safety: because the failed insert is unwound to a SAVEPOINT
+        (not a full ``session.rollback()``), this method is safe to call inside a
+        larger caller transaction -- a DUPLICATE/CONFLICT does NOT discard the
+        caller's other uncommitted writes. The caller still owns the final
+        commit/rollback (the route commits CREATED/DUPLICATE and 409s CONFLICT).
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            with self.session.begin_nested():
+                record = self.add_actual(**inputs.as_kwargs())
+        except IntegrityError:
+            # begin_nested() already rolled back to the SAVEPOINT; the outer
+            # transaction (and any prior caller writes) is intact and usable.
+            existing = (
+                self.session.query(ConsumptionRecord)
+                .filter(ConsumptionRecord.idempotency_key == inputs.idempotency_key)
+                .one_or_none()
+            )
+            if existing is None:
+                # Pathological (constraint fired but no row visible): do not
+                # swallow it as a success.
+                raise
+            same_payload = (
+                float(existing.actual_quantity or 0.0) == float(inputs.actual_quantity)
+                and (existing.source_id or None) == (inputs.source_id or None)
+            )
+            return existing, ("DUPLICATE" if same_payload else "CONFLICT")
+        return record, "CREATED"
 
     def variance(self, plan_id: str) -> Dict[str, Any]:
         plan = self.session.get(ConsumptionPlan, plan_id)
