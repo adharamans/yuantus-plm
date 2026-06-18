@@ -17,6 +17,18 @@ discipline is exactly what the stale TODO lists lacked.
 
 Sizes: S = ~1 PR, M = a few PRs / a thin taskbook, L = a multi-PR program.
 
+## 0.1 Progress update — 2026-06-17 autonomous run (PRs open, awaiting review/合)
+
+- **R2.3 source_type widening** (scrap/rework) → **#785** (adversarial verify clean).
+- **R2.4 uom conversion** → taskbook **#784** + impl **#786** (idempotency interaction manually verified).
+- **MES audit tenant-attribution follow-up** → **#787** (the R2.2 security nit).
+- **R2.5 async inbox+worker** → taskbook **this PR** (impl is a separate, ratified L slice).
+- **Re-verification correction**: the **jti revocation denylist is cross-repo-blocked**, not cleanly
+  Yuantus-actionable — the embed token is verified **OFFLINE by the consumer (metasheet2)**, so a
+  Yuantus-side denylist enforces nothing without a metasheet2 change, and it contradicts the
+  offline-verify design (which is *why* the model relies on the ≤600s TTL). It belongs with the
+  not-yet-opted SSO slice, alongside MetaSheet bridge. Re-classified below.
+
 ## 1. Delivered (recent, with PR refs)
 
 - **MES ingestion line** (the current active line) — secured end to end:
@@ -65,11 +77,13 @@ convert units → async. Each is bounded.
 Not freshly re-verified beyond a spot check this turn; the survey was mid-session. Confirm
 against live code first.
 
-- [ ] **PLM-COLLAB jti revocation denylist** · size **S** (Yuantus-side) · security. An embed
-  token can replay within its ≤600s TTL — `jti` is minted/recorded but there is no revocation
-  denylist. Yuantus-side denylist is local/unblocked; the consumer tenant cross-check is partly
-  in **metasheet2** (cross-repo), and the doc bundles it into a **not-yet-opted SSO slice**.
-  **RE-VERIFY**: the embed-token service may have changed.
+- [ ] **PLM-COLLAB jti revocation denylist** · security · **RE-CLASSIFIED 2026-06-17:
+  cross-repo-BLOCKED** (was "S, Yuantus-local"). Re-verification showed the embed token is
+  **verified OFFLINE by the consumer (metasheet2)** — Yuantus only mints. A Yuantus-side denylist
+  table/endpoint would enforce **nothing** (the offline consumer can't consult it), and online
+  revocation contradicts the offline-verify design that the ≤600s TTL exists to bound. Real
+  revocation needs a cross-repo decision (online verify, or a polled/synced revocation list) =
+  the not-yet-opted SSO slice. Not a clean Yuantus-only build.
 
 - [ ] **CAD-PDM C3 — date-BOM auto-obsolete + where-used propagation** · size **M–L** ·
   decision-gated. Confirmed open (no closing commit in `--all`). A genuine new feature (date
