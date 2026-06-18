@@ -8,8 +8,9 @@ on:
         type: string
         required: false
         default: "false"
-  schedule:
-    - cron: "0 2 * * *"
+  # Nightly schedule removed to conserve Actions minutes on the private repo. Regression still runs
+  # on push to main/master, on every PR, and on manual workflow_dispatch (re-add a `schedule:` here
+  # if periodic drift detection is wanted again).
   push:
     branches:
       - main

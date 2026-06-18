@@ -1,7 +1,7 @@
 # YuantusPLM (元图PLM)
 
-[![Release](https://img.shields.io/github/v/release/zensgit/yuantus-plm?display_name=tag)](https://github.com/zensgit/yuantus-plm/releases)
-[![License](https://img.shields.io/github/license/zensgit/yuantus-plm)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/adharamans/yuantus-plm?display_name=tag)](https://github.com/adharamans/yuantus-plm/releases)
+[![License](https://img.shields.io/github/license/adharamans/yuantus-plm)](LICENSE)
 
 Repository name: `yuantus-plm`  
 Product name: **YuantusPLM / 元图PLM**
