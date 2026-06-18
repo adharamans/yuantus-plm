@@ -1,6 +1,6 @@
 # YuantusPLM — Development Roadmap & TODO (current snapshot)
 
-Date: 2026-06-17 · Baseline: `main` @ `91da3591`
+Date: 2026-06-17 · Original snapshot baseline `main` @ `91da3591`; **updated through `main` @ `279b44e4`** (MES line merged).
 Status: **living snapshot** — the current **working roadmap** (execution entry point) as of this date.
 
 ## 0. Why this exists (read first)
@@ -17,12 +17,23 @@ discipline is exactly what the stale TODO lists lacked.
 
 Sizes: S = ~1 PR, M = a few PRs / a thin taskbook, L = a multi-PR program.
 
-## 0.1 Progress update — 2026-06-17 autonomous run (PRs open, awaiting review/合)
+## 0.1 Progress update — 2026-06-17 autonomous run (MERGED to main)
 
-- **R2.3 source_type widening** (scrap/rework) → **#785** (adversarial verify clean).
-- **R2.4 uom conversion** → taskbook **#784** + impl **#786** (idempotency interaction manually verified).
-- **MES audit tenant-attribution follow-up** → **#787** (the R2.2 security nit).
-- **R2.5 async inbox+worker** → taskbook **this PR** (impl is a separate, ratified L slice).
+The **MES ingestion line is end-to-end COMPLETE on main** (sync + async). Landed:
+
+- **R2.3 source_type widening** (scrap/rework) → **#785** (adversarial verify clean). **MERGED**.
+- **R2.4 uom conversion** → taskbook **#784** + impl **#786** (convert within a dimension, else 422). **MERGED**.
+- **MES audit tenant-attribution follow-up** → **#787** (the R2.2 security nit). **MERGED**.
+- **R2.5 async** → taskbook **#788** + inbox mechanism **#789** + wiring **#794** (default-off:
+  202-mode + inbox ops + worker drain; two real defects caught by adversarial verify and fixed —
+  the poison-row terminal-failure + the async uom-mismatch parity). **MERGED**.
+- **Tenant-baseline generator completeness + drift guard** → **#793** (a real new-tenant
+  provisioning bug surfaced by a merge-train dry-run: the generator omitted `approval_automation`,
+  so a regen dropped a per-tenant table; now complete + an order-independent subprocess drift guard
+  in CI). Supersedes the closed #790. **MERGED**.
+- Verified on merged main: route count **716**, single migration head `mes_inbox_001`, full
+  contract suite **113 passed**.
+- **C3 taskbook** → **#792** **MERGED** (impl still owner-deferred; see §3).
 - **Re-verification correction**: the **jti revocation denylist is cross-repo-blocked**, not cleanly
   Yuantus-actionable — the embed token is verified **OFFLINE by the consumer (metasheet2)**, so a
   Yuantus-side denylist enforces nothing without a metasheet2 change, and it contradicts the
@@ -39,38 +50,45 @@ Sizes: S = ~1 PR, M = a few PRs / a thin taskbook, L = a multi-PR program.
 - Broader programs already closed (verified during the survey): CAD Material Assistant Phases 1–4
   (#704/#707/#711/#721), OdooPLM parity, CAD-PDM borrow program.
 
-## 2. MES ingestion line — remaining (VERIFIED current; sequenced per owner decision)
+## 2. MES ingestion line — ✅ END-TO-END COMPLETE on main (2026-06-17)
 
-The active line. Order is owner-ratified: secure the entrypoint (done, R2.2) → widen sources →
-convert units → async. Each is bounded.
+The active line is **done and merged** (R1 → R2.2 previously; R2.3 → R2.5 this run). Order was
+owner-ratified: secure the entrypoint (R2.2) → widen sources (R2.3) → convert units (R2.4) →
+async (R2.5), plus the R2.2 audit-attribution follow-up. Items below kept for the record with
+their landing PRs. Verified on merged main: route count 716, single migration head
+`mes_inbox_001`, full contract suite 113 passed.
 
-- [ ] **R2.3 — `source_type` widening** · size **S** · *blocked only on a product decision*.
-  Widen `ALLOWED_SOURCE_TYPES` (today `frozenset({"mes","workorder"})`,
-  `services/consumption_mes_contract.py:41`) to additional **positive-consumption** sources only
-  (e.g. `scrap` / `rework`). **Need from owner**: which types + each one's meaning. No separate
-  taskbook once the list is set. Acceptance: DTO accepts the new types; the R1 contract drift
-  tests + `ALLOWED_…` assertion updated; idempotency/uom/variance unaffected; manual `/actuals`
-  untouched.
-  **Out of scope — do NOT fold in**: `return` / 冲销 / any reversal (negative) semantics. The
-  MES contract enforces `actual_quantity >= 0` (DTO `_finite_non_negative`) and `variance` only
-  **sums** (no reverse offset), so a reversal source cannot be a plain enum value — it needs its
-  own taskbook (negative quantity or an explicit offset mechanism + variance changes).
+- [x] **R2.3 — `source_type` widening** · **DONE #785**. `ALLOWED_SOURCE_TYPES` is now
+  `frozenset({"mes", "workorder", "scrap", "rework"})` (`services/consumption_mes_contract.py`) —
+  the two new **positive-consumption** sources are `scrap` (material consumed and scrapped during
+  the run) and `rework` (material consumed reprocessing a defect). The R1 contract drift tests +
+  the `ALLOWED_…` assertion were updated; idempotency / uom / variance and the manual `/actuals`
+  path are unaffected.
+  **Stayed out of scope (still a separate future taskbook)**: `return` / 冲销 / any reversal
+  (negative) semantics. The MES contract enforces `actual_quantity >= 0` (DTO
+  `_finite_non_negative`) and `variance` only **sums** (no reverse offset), so a reversal source
+  cannot be a plain enum value — it needs negative quantity or an explicit offset mechanism +
+  variance changes.
 
-- [ ] **R2.4 — unit conversion** · size **M** · *needs a thin taskbook first*. Today R2.1
-  **rejects** a declared-uom mismatch (`422`); conversion would instead convert `event.uom` →
-  `plan.uom`. Taskbook must lock: conversion-table source + versioning, rounding policy, which
-  unit pairs are in scope, and the failure mode for an unknown pair (keep the 422). Overlaps with
-  R2.1's "no unit conversion (out of scope)" note.
+- [x] **R2.4 — unit conversion** · **DONE #784 (taskbook) + #786 (impl)**. Converts `event.uom` →
+  `plan.uom` within a dimension; an unknown / cross-dimension pair keeps the **422**
+  (`consumption_mes_uom_unconvertible`). Versioned conversion table, 6-dp rounding, audit envelope.
 
-- [ ] **R2.5 — MES outbox/worker** · size **L** · **do last**. Async ingestion (decouple accept
-  from process), mirroring the ECM/erp outbox+worker pattern. Highest runtime complexity; only
-  after the synchronous ingest semantics (R2–R2.4) are fully settled.
+- [x] **R2.5 — async inbox + worker** · **DONE #788 (taskbook) + #789 (inbox mechanism) + #794
+  (wiring)**. Default-OFF (`MES_INGEST_ASYNC`): the route persists the event to the
+  `meta_mes_consumption_inbox` and returns 202; `drain_once` processes it through the same
+  `ingest_mes_consumption`; admin-gated inbox ops (list/get/replay). Two real defects caught by
+  adversarial verify and fixed: the poison-row terminal-failure and the async uom-mismatch parity.
 
-- [ ] **Follow-up: MES audit attribution** · size **S–M**. The R2.2 security review flagged that
-  the mes-actuals audit row records the request `x-tenant-id` header, not the bound
-  `MES_INGEST_TENANT_ID` (attribution-only — **not** a data-isolation gap, which was verified
-  correct). A precise fix is middleware-level (pin the MES tenant in the request context). Deferred
-  from R2.2's narrow scope; pick up when convenient.
+- [x] **Follow-up: MES audit attribution** · **DONE #787**. `TenantOrgContextMiddleware` skips
+  header-derived tenant/org for the machine MES path (`_is_mes_ingest_path`), so the audit row no
+  longer records a caller-supplied `x-tenant-id` for it. (Recording the *bound*
+  `MES_INGEST_TENANT_ID` precisely remains a noted larger follow-up.)
+
+- **Cross-cutting fix this run**: **tenant-baseline generator completeness + drift guard** →
+  **DONE #793** (supersedes the closed #790). A merge-train dry-run found the generator omitted
+  `approval_automation`, so a regeneration silently dropped a per-tenant table; now complete, with
+  an order-independent subprocess drift guard registered in CI.
 
 ## 3. Non-MES candidates (from the survey — RE-VERIFY current state before starting)
 
@@ -86,8 +104,10 @@ against live code first.
   the not-yet-opted SSO slice. Not a clean Yuantus-only build.
 
 - [ ] **CAD-PDM C3 — date-BOM auto-obsolete + where-used propagation** · size **M–L** ·
-  decision-gated. Confirmed open (no closing commit in `--all`). A genuine new feature (date
-  trigger + scheduler + upward where-used). Owner opt-in / taskbook-first when prioritized.
+  **taskbook ready (#792, MERGED); impl owner-prioritization-gated**. A genuine new feature (date
+  trigger via a polling worker — no cron infra — + B1 `is_superseded` obsolete + upward where-used
+  **flag, not cascade**). The "taskbook-first" gate is satisfied; the only remaining gate is the
+  owner's prioritization + ratification of the taskbook's open questions.
 
 - [ ] **MetaSheet bridge activation** · size **M** · SSO-gated. `api/routers/metasheet_bridge.py`
   still returns a static `{"active": false, "entitlement_required": true}`. Depends on the
@@ -105,12 +125,16 @@ against live code first.
 
 ## 5. Recommended next action
 
-1. **R2.3 `source_type` widening** — the cleanest next slice; just needs the type list from owner.
-2. Or **R2.4 unit-conversion thin taskbook**; or the **MES audit-attribution** follow-up; or
-   **re-verify + pick** a non-MES candidate (jti denylist is the highest-value security item).
+The **MES ingestion line is complete and merged** (§2). The remaining roadmap work is gated on the
+owner, not on more solo build:
+
+1. **CAD-PDM C3** — the taskbook is ready (#792). Needs the owner to **prioritize** + ratify its
+   open questions; then it's a bounded build (polling worker + obsolete + where-used flag).
+2. **jti denylist / MetaSheet bridge** — both need the **SSO / cross-repo decision** (they live
+   behind metasheet2 + the not-yet-opted identity-session slice); not clean Yuantus-only builds.
 
 ## 6. Maintenance
 
-Point-in-time snapshot (`2026-06-17`, `main@91da3591`). Update it as slices land; **re-verify any
-item against current code/git before starting** — the formal plan docs went stale precisely
-because that step was skipped.
+Point-in-time snapshot (`2026-06-17`, original `main@91da3591`, **updated through `main@279b44e4`**
+after the MES line merged). Update it as slices land; **re-verify any item against current code/git
+before starting** — the formal plan docs went stale precisely because that step was skipped.
