@@ -63,6 +63,11 @@ def register_tenant_model_metadata() -> None:
     from yuantus.meta_engine.maintenance import models as _maintenance  # noqa: F401
     from yuantus.meta_engine.quality import models as _quality  # noqa: F401
     from yuantus.meta_engine.report_locale import models as _report_locale  # noqa: F401
+    # `meta_approval_automation_templates` lives in a standalone module under
+    # meta_engine/models that only `create_app()`'s approval-automation router
+    # imports — so without this line the generator omitted it and a fully-booted
+    # app's metadata drifted from the baseline (caught by the drift-guard test).
+    from yuantus.meta_engine.models import approval_automation as _approval_automation  # noqa: F401
 
     # Global/control-plane tables are registered so the filter can exclude
     # them and tests can assert an exhaustive partition.

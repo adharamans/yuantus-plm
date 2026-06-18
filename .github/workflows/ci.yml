@@ -588,7 +588,8 @@ jobs:
             src/yuantus/meta_engine/tests/test_workflow_upload_artifact_if_no_files_found_contracts.py \
             src/yuantus/meta_engine/tests/test_workflow_upload_artifact_name_contracts.py \
             src/yuantus/meta_engine/tests/test_workflow_upload_artifact_retention_contracts.py \
-            src/yuantus/meta_engine/tests/test_workflow_yaml_parseability_contracts.py
+            src/yuantus/meta_engine/tests/test_workflow_yaml_parseability_contracts.py \
+            src/yuantus/tests/test_tenant_baseline_revision.py
       - name: Pact provider verifier (Metasheet2 -> Yuantus)
         run: |
           pytest -q src/yuantus/api/tests/test_pact_provider_yuantus_plm.py

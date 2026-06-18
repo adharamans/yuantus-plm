@@ -65,6 +65,18 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name', name='uq_app_name')
     )
+    op.create_table('meta_approval_automation_templates',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('tenant_id', sa.String(length=120), nullable=False),
+    sa.Column('template_key', sa.String(length=100), nullable=False),
+    sa.Column('state', sa.String(length=20), nullable=False),
+    sa.Column('definition_json', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('version', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('tenant_id', 'template_key', name='uq_approval_automation_template_scope')
+    )
     op.create_table('meta_approval_categories',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('name', sa.String(length=200), nullable=False),
@@ -120,6 +132,7 @@ def upgrade() -> None:
     sa.Column('actual_quantity', sa.Float(), nullable=False),
     sa.Column('recorded_at', sa.DateTime(), nullable=False),
     sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('idempotency_key', sa.String(length=64), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('meta_conversion_jobs',
@@ -154,6 +167,32 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('created_by_id', sa.Integer(), nullable=True),
     sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('meta_ecm_publication_outbox',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('item_id', sa.String(), nullable=False),
+    sa.Column('version_id', sa.String(), nullable=False),
+    sa.Column('file_id', sa.String(), nullable=False),
+    sa.Column('file_role', sa.String(length=60), nullable=False),
+    sa.Column('target_system', sa.String(length=120), nullable=False),
+    sa.Column('state', sa.String(length=30), nullable=False),
+    sa.Column('reason', sa.String(length=30), nullable=True),
+    sa.Column('snapshot', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('payload_fingerprint', sa.String(length=128), nullable=True),
+    sa.Column('attempt_count', sa.Integer(), nullable=False),
+    sa.Column('max_attempts', sa.Integer(), nullable=False),
+    sa.Column('replay_of', sa.String(), nullable=True),
+    sa.Column('error_message', sa.Text(), nullable=True),
+    sa.Column('dispatched_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('next_attempt_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('worker_id', sa.String(), nullable=True),
+    sa.Column('claimed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_by_id', sa.Integer(), nullable=True),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('item_id', 'version_id', 'file_id', 'file_role', 'target_system', name='uq_ecm_publication_outbox_identity')
     )
     op.create_table('meta_eco_activity_gate_events',
     sa.Column('id', sa.String(), nullable=False),
@@ -197,6 +236,31 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('meta_erp_publication_outbox',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('item_id', sa.String(), nullable=False),
+    sa.Column('version_id', sa.String(), nullable=False),
+    sa.Column('target_system', sa.String(length=120), nullable=False),
+    sa.Column('publication_kind', sa.String(length=60), nullable=False),
+    sa.Column('state', sa.String(length=30), nullable=False),
+    sa.Column('reason', sa.String(length=30), nullable=True),
+    sa.Column('snapshot', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('payload_fingerprint', sa.String(length=128), nullable=True),
+    sa.Column('attempt_count', sa.Integer(), nullable=False),
+    sa.Column('max_attempts', sa.Integer(), nullable=False),
+    sa.Column('replay_of', sa.String(), nullable=True),
+    sa.Column('error_message', sa.Text(), nullable=True),
+    sa.Column('dispatched_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('next_attempt_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('worker_id', sa.String(), nullable=True),
+    sa.Column('claimed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_by_id', sa.Integer(), nullable=True),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('item_id', 'version_id', 'target_system', 'publication_kind', name='uq_erp_publication_outbox_identity')
+    )
     op.create_table('meta_extension_points',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('name', sa.String(length=100), nullable=False),
@@ -230,6 +294,30 @@ def upgrade() -> None:
     sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['parent_id'], ['meta_maintenance_categories.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('meta_mes_consumption_inbox',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('idempotency_key', sa.String(length=64), nullable=False),
+    sa.Column('plan_id', sa.String(), nullable=False),
+    sa.Column('mes_event_id', sa.String(length=200), nullable=False),
+    sa.Column('source_type', sa.String(length=60), nullable=False),
+    sa.Column('source_id', sa.String(length=120), nullable=True),
+    sa.Column('actual_quantity', sa.Float(), nullable=False),
+    sa.Column('uom', sa.String(length=20), nullable=True),
+    sa.Column('recorded_at', sa.DateTime(), nullable=True),
+    sa.Column('attributes', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('state', sa.String(length=30), nullable=False),
+    sa.Column('attempt_count', sa.Integer(), nullable=False),
+    sa.Column('max_attempts', sa.Integer(), nullable=False),
+    sa.Column('next_attempt_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('worker_id', sa.String(), nullable=True),
+    sa.Column('claimed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('error', sa.Text(), nullable=True),
+    sa.Column('record_id', sa.String(), nullable=True),
+    sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('meta_methods',
@@ -506,22 +594,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('license_key')
     )
-    # PLM-COLLAB-P2-B: provisioned approval-automation template drafts (single source
-    # for future tenant schemas; mirrors migrations/versions/p2b_appr_tmpl_001).
-    op.create_table('meta_approval_automation_templates',
-    sa.Column('id', sa.String(), nullable=False),
-    sa.Column('tenant_id', sa.String(length=120), nullable=False),
-    sa.Column('template_key', sa.String(length=100), nullable=False),
-    sa.Column('state', sa.String(length=20), nullable=False),
-    sa.Column('definition_json', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
-    sa.Column('version', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), nullable=True),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('tenant_id', 'template_key', name='uq_approval_automation_template_scope')
-    )
-    op.create_index('ix_meta_approval_automation_templates_tenant_id', 'meta_approval_automation_templates', ['tenant_id'])
-    op.create_index('ix_meta_approval_automation_templates_template_key', 'meta_approval_automation_templates', ['template_key'])
     op.create_table('meta_approval_requests',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('title', sa.String(length=300), nullable=False),
@@ -1107,6 +1179,11 @@ def upgrade() -> None:
     sa.Column('file_role', sa.String(), nullable=True),
     sa.Column('sequence', sa.Integer(), nullable=True),
     sa.Column('description', sa.String(), nullable=True),
+    sa.Column('import_batch_id', sa.String(), nullable=True),
+    sa.Column('source_batch_id', sa.String(), nullable=True),
+    sa.Column('needs_update', sa.Boolean(), nullable=False),
+    sa.Column('staleness_reason', sa.String(), nullable=True),
+    sa.Column('staleness_checked_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.ForeignKeyConstraint(['file_id'], ['meta_files.id'], ),
     sa.ForeignKeyConstraint(['item_id'], ['meta_items.id'], ),
@@ -1119,14 +1196,18 @@ def upgrade() -> None:
     sa.Column('revision', sa.String(length=10), nullable=True),
     sa.Column('version_label', sa.String(length=50), nullable=True),
     sa.Column('state', sa.String(length=50), nullable=True),
-    sa.Column('is_current', sa.Boolean(), nullable=True),
-    sa.Column('is_released', sa.Boolean(), nullable=True),
+    sa.Column('is_current', sa.Boolean(), server_default=sa.text('true'), nullable=False),
+    sa.Column('is_released', sa.Boolean(), server_default=sa.text('false'), nullable=False),
+    sa.Column('is_superseded', sa.Boolean(), server_default=sa.text('false'), nullable=False),
     sa.Column('released_at', sa.DateTime(), nullable=True),
     sa.Column('released_by_id', sa.Integer(), nullable=True),
     sa.Column('checked_out_by_id', sa.Integer(), nullable=True),
     sa.Column('checked_out_at', sa.DateTime(), nullable=True),
+    sa.Column('checkout_client_host', sa.String(), nullable=True),
+    sa.Column('checkout_workspace_path', sa.String(), nullable=True),
+    sa.Column('checkout_client_info', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('predecessor_id', sa.String(), nullable=True),
-    sa.Column('branch_name', sa.String(length=100), nullable=True),
+    sa.Column('branch_name', sa.String(length=100), server_default='main', nullable=False),
     sa.Column('branched_from_id', sa.String(), nullable=True),
     sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('description', sa.Text(), nullable=True),
@@ -1508,8 +1589,16 @@ def upgrade() -> None:
     sa.Column('sequence', sa.Integer(), nullable=True),
     sa.Column('snapshot_path', sa.String(), nullable=True),
     sa.Column('is_primary', sa.Boolean(), nullable=True),
+    sa.Column('import_batch_id', sa.String(), nullable=True),
+    sa.Column('source_batch_id', sa.String(), nullable=True),
+    sa.Column('needs_update', sa.Boolean(), nullable=False),
+    sa.Column('staleness_reason', sa.String(), nullable=True),
+    sa.Column('staleness_checked_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('checked_out_by_id', sa.Integer(), nullable=True),
     sa.Column('checked_out_at', sa.DateTime(), nullable=True),
+    sa.Column('checkout_client_host', sa.String(), nullable=True),
+    sa.Column('checkout_workspace_path', sa.String(), nullable=True),
+    sa.Column('checkout_client_info', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['version_id'], ['meta_item_versions.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
@@ -1774,6 +1863,8 @@ def upgrade() -> None:
     op.create_index(op.f('ix_cad_change_logs_user_id'), 'cad_change_logs', ['user_id'], unique=False)
     op.create_index(op.f('ix_meta_3d_overlays_document_item_id'), 'meta_3d_overlays', ['document_item_id'], unique=True)
     op.create_index(op.f('ix_meta_3d_overlays_status'), 'meta_3d_overlays', ['status'], unique=False)
+    op.create_index(op.f('ix_meta_approval_automation_templates_template_key'), 'meta_approval_automation_templates', ['template_key'], unique=False)
+    op.create_index(op.f('ix_meta_approval_automation_templates_tenant_id'), 'meta_approval_automation_templates', ['tenant_id'], unique=False)
     op.create_index(op.f('ix_meta_approval_categories_parent_id'), 'meta_approval_categories', ['parent_id'], unique=False)
     op.create_index(op.f('ix_meta_breakage_incidents_batch_code'), 'meta_breakage_incidents', ['batch_code'], unique=False)
     op.create_index(op.f('ix_meta_breakage_incidents_bom_id'), 'meta_breakage_incidents', ['bom_id'], unique=False)
@@ -1791,16 +1882,24 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_consumption_plans_item_id'), 'meta_consumption_plans', ['item_id'], unique=False)
     op.create_index(op.f('ix_meta_consumption_plans_name'), 'meta_consumption_plans', ['name'], unique=False)
     op.create_index(op.f('ix_meta_consumption_plans_state'), 'meta_consumption_plans', ['state'], unique=False)
+    op.create_index(op.f('ix_meta_consumption_records_idempotency_key'), 'meta_consumption_records', ['idempotency_key'], unique=True)
     op.create_index(op.f('ix_meta_consumption_records_plan_id'), 'meta_consumption_records', ['plan_id'], unique=False)
     op.create_index(op.f('ix_meta_consumption_records_recorded_at'), 'meta_consumption_records', ['recorded_at'], unique=False)
     op.create_index(op.f('ix_meta_consumption_records_source_id'), 'meta_consumption_records', ['source_id'], unique=False)
     op.create_index(op.f('ix_meta_conversion_jobs_dedupe_key'), 'meta_conversion_jobs', ['dedupe_key'], unique=False)
     op.create_index(op.f('ix_meta_conversion_jobs_status'), 'meta_conversion_jobs', ['status'], unique=False)
+    op.create_index(op.f('ix_meta_ecm_publication_outbox_item_id'), 'meta_ecm_publication_outbox', ['item_id'], unique=False)
+    op.create_index(op.f('ix_meta_ecm_publication_outbox_version_id'), 'meta_ecm_publication_outbox', ['version_id'], unique=False)
     op.create_index(op.f('ix_meta_eco_activity_gate_events_activity_id'), 'meta_eco_activity_gate_events', ['activity_id'], unique=False)
     op.create_index(op.f('ix_meta_eco_activity_gate_events_eco_id'), 'meta_eco_activity_gate_events', ['eco_id'], unique=False)
     op.create_index(op.f('ix_meta_eco_activity_gates_eco_id'), 'meta_eco_activity_gates', ['eco_id'], unique=False)
     op.create_index(op.f('ix_meta_eco_activity_gates_status'), 'meta_eco_activity_gates', ['status'], unique=False)
+    op.create_index(op.f('ix_meta_erp_publication_outbox_item_id'), 'meta_erp_publication_outbox', ['item_id'], unique=False)
     op.create_index(op.f('ix_meta_maintenance_categories_parent_id'), 'meta_maintenance_categories', ['parent_id'], unique=False)
+    op.create_index(op.f('ix_meta_mes_consumption_inbox_idempotency_key'), 'meta_mes_consumption_inbox', ['idempotency_key'], unique=True)
+    op.create_index(op.f('ix_meta_mes_consumption_inbox_next_attempt_at'), 'meta_mes_consumption_inbox', ['next_attempt_at'], unique=False)
+    op.create_index(op.f('ix_meta_mes_consumption_inbox_plan_id'), 'meta_mes_consumption_inbox', ['plan_id'], unique=False)
+    op.create_index(op.f('ix_meta_mes_consumption_inbox_state'), 'meta_mes_consumption_inbox', ['state'], unique=False)
     op.create_index(op.f('ix_meta_numbering_sequences_item_type_id'), 'meta_numbering_sequences', ['item_type_id'], unique=False)
     op.create_index(op.f('ix_meta_numbering_sequences_org_id'), 'meta_numbering_sequences', ['org_id'], unique=False)
     op.create_index(op.f('ix_meta_numbering_sequences_tenant_id'), 'meta_numbering_sequences', ['tenant_id'], unique=False)
@@ -1824,6 +1923,8 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_workorder_document_links_document_version_id'), 'meta_workorder_document_links', ['document_version_id'], unique=False)
     op.create_index(op.f('ix_meta_workorder_document_links_operation_id'), 'meta_workorder_document_links', ['operation_id'], unique=False)
     op.create_index(op.f('ix_meta_workorder_document_links_routing_id'), 'meta_workorder_document_links', ['routing_id'], unique=False)
+    op.create_index(op.f('ix_meta_app_licenses_org_id'), 'meta_app_licenses', ['org_id'], unique=False)
+    op.create_index(op.f('ix_meta_app_licenses_tenant_id'), 'meta_app_licenses', ['tenant_id'], unique=False)
     op.create_index(op.f('ix_meta_approval_requests_category_id'), 'meta_approval_requests', ['category_id'], unique=False)
     op.create_index(op.f('ix_meta_approval_requests_entity_id'), 'meta_approval_requests', ['entity_id'], unique=False)
     op.create_index(op.f('ix_meta_approval_requests_entity_type'), 'meta_approval_requests', ['entity_type'], unique=False)
@@ -1851,10 +1952,15 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_electronic_signatures_item_id'), 'meta_electronic_signatures', ['item_id'], unique=False)
     op.create_index(op.f('ix_meta_geometric_indices_item_id'), 'meta_geometric_indices', ['item_id'], unique=False)
     op.create_index(op.f('ix_meta_item_files_file_id'), 'meta_item_files', ['file_id'], unique=False)
+    op.create_index(op.f('ix_meta_item_files_import_batch_id'), 'meta_item_files', ['import_batch_id'], unique=False)
     op.create_index(op.f('ix_meta_item_files_item_id'), 'meta_item_files', ['item_id'], unique=False)
+    op.create_index(op.f('ix_meta_item_files_needs_update'), 'meta_item_files', ['needs_update'], unique=False)
+    op.create_index('uq_item_file_role', 'meta_item_files', ['item_id', 'file_id', 'file_role'], unique=True)
     op.create_index(op.f('ix_meta_item_versions_is_current'), 'meta_item_versions', ['is_current'], unique=False)
     op.create_index(op.f('ix_meta_item_versions_is_released'), 'meta_item_versions', ['is_released'], unique=False)
+    op.create_index(op.f('ix_meta_item_versions_is_superseded'), 'meta_item_versions', ['is_superseded'], unique=False)
     op.create_index(op.f('ix_meta_item_versions_item_id'), 'meta_item_versions', ['item_id'], unique=False)
+    op.create_index('uq_itemversion_open_current_per_line', 'meta_item_versions', ['item_id', sa.literal_column("coalesce(branch_name, 'main')")], unique=True, sqlite_where=sa.text('is_current = 1 AND is_released = 0'), postgresql_where=sa.text('is_current IS TRUE AND is_released IS NOT TRUE'))
     op.create_index(op.f('ix_meta_manufacturing_boms_source_item_id'), 'meta_manufacturing_boms', ['source_item_id'], unique=False)
     op.create_index(op.f('ix_meta_product_configurations_product_item_id'), 'meta_product_configurations', ['product_item_id'], unique=False)
     op.create_index(op.f('ix_meta_quality_points_item_type_id'), 'meta_quality_points', ['item_type_id'], unique=False)
@@ -1895,6 +2001,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_similarity_records_target_file_id'), 'meta_similarity_records', ['target_file_id'], unique=False)
     op.create_index(op.f('ix_meta_version_files_file_id'), 'meta_version_files', ['file_id'], unique=False)
     op.create_index(op.f('ix_meta_version_files_file_role'), 'meta_version_files', ['file_role'], unique=False)
+    op.create_index(op.f('ix_meta_version_files_import_batch_id'), 'meta_version_files', ['import_batch_id'], unique=False)
     op.create_index(op.f('ix_meta_version_files_version_id'), 'meta_version_files', ['version_id'], unique=False)
     op.create_index('uq_version_file_role', 'meta_version_files', ['version_id', 'file_id', 'file_role'], unique=True)
     op.create_index(op.f('ix_meta_version_history_version_id'), 'meta_version_history', ['version_id'], unique=False)
@@ -1952,6 +2059,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_version_history_version_id'), table_name='meta_version_history')
     op.drop_index('uq_version_file_role', table_name='meta_version_files')
     op.drop_index(op.f('ix_meta_version_files_version_id'), table_name='meta_version_files')
+    op.drop_index(op.f('ix_meta_version_files_import_batch_id'), table_name='meta_version_files')
     op.drop_index(op.f('ix_meta_version_files_file_role'), table_name='meta_version_files')
     op.drop_index(op.f('ix_meta_version_files_file_id'), table_name='meta_version_files')
     op.drop_index(op.f('ix_meta_similarity_records_target_file_id'), table_name='meta_similarity_records')
@@ -1992,10 +2100,15 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_quality_points_item_type_id'), table_name='meta_quality_points')
     op.drop_index(op.f('ix_meta_product_configurations_product_item_id'), table_name='meta_product_configurations')
     op.drop_index(op.f('ix_meta_manufacturing_boms_source_item_id'), table_name='meta_manufacturing_boms')
+    op.drop_index('uq_itemversion_open_current_per_line', table_name='meta_item_versions', sqlite_where=sa.text('is_current = 1 AND is_released = 0'), postgresql_where=sa.text('is_current IS TRUE AND is_released IS NOT TRUE'))
     op.drop_index(op.f('ix_meta_item_versions_item_id'), table_name='meta_item_versions')
+    op.drop_index(op.f('ix_meta_item_versions_is_superseded'), table_name='meta_item_versions')
     op.drop_index(op.f('ix_meta_item_versions_is_released'), table_name='meta_item_versions')
     op.drop_index(op.f('ix_meta_item_versions_is_current'), table_name='meta_item_versions')
+    op.drop_index('uq_item_file_role', table_name='meta_item_files')
+    op.drop_index(op.f('ix_meta_item_files_needs_update'), table_name='meta_item_files')
     op.drop_index(op.f('ix_meta_item_files_item_id'), table_name='meta_item_files')
+    op.drop_index(op.f('ix_meta_item_files_import_batch_id'), table_name='meta_item_files')
     op.drop_index(op.f('ix_meta_item_files_file_id'), table_name='meta_item_files')
     op.drop_index(op.f('ix_meta_geometric_indices_item_id'), table_name='meta_geometric_indices')
     op.drop_index(op.f('ix_meta_electronic_signatures_item_id'), table_name='meta_electronic_signatures')
@@ -2023,6 +2136,8 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_approval_requests_entity_type'), table_name='meta_approval_requests')
     op.drop_index(op.f('ix_meta_approval_requests_entity_id'), table_name='meta_approval_requests')
     op.drop_index(op.f('ix_meta_approval_requests_category_id'), table_name='meta_approval_requests')
+    op.drop_index(op.f('ix_meta_app_licenses_tenant_id'), table_name='meta_app_licenses')
+    op.drop_index(op.f('ix_meta_app_licenses_org_id'), table_name='meta_app_licenses')
     op.drop_index(op.f('ix_meta_workorder_document_links_routing_id'), table_name='meta_workorder_document_links')
     op.drop_index(op.f('ix_meta_workorder_document_links_operation_id'), table_name='meta_workorder_document_links')
     op.drop_index(op.f('ix_meta_workorder_document_links_document_version_id'), table_name='meta_workorder_document_links')
@@ -2046,16 +2161,24 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_numbering_sequences_tenant_id'), table_name='meta_numbering_sequences')
     op.drop_index(op.f('ix_meta_numbering_sequences_org_id'), table_name='meta_numbering_sequences')
     op.drop_index(op.f('ix_meta_numbering_sequences_item_type_id'), table_name='meta_numbering_sequences')
+    op.drop_index(op.f('ix_meta_mes_consumption_inbox_state'), table_name='meta_mes_consumption_inbox')
+    op.drop_index(op.f('ix_meta_mes_consumption_inbox_plan_id'), table_name='meta_mes_consumption_inbox')
+    op.drop_index(op.f('ix_meta_mes_consumption_inbox_next_attempt_at'), table_name='meta_mes_consumption_inbox')
+    op.drop_index(op.f('ix_meta_mes_consumption_inbox_idempotency_key'), table_name='meta_mes_consumption_inbox')
     op.drop_index(op.f('ix_meta_maintenance_categories_parent_id'), table_name='meta_maintenance_categories')
+    op.drop_index(op.f('ix_meta_erp_publication_outbox_item_id'), table_name='meta_erp_publication_outbox')
     op.drop_index(op.f('ix_meta_eco_activity_gates_status'), table_name='meta_eco_activity_gates')
     op.drop_index(op.f('ix_meta_eco_activity_gates_eco_id'), table_name='meta_eco_activity_gates')
     op.drop_index(op.f('ix_meta_eco_activity_gate_events_eco_id'), table_name='meta_eco_activity_gate_events')
     op.drop_index(op.f('ix_meta_eco_activity_gate_events_activity_id'), table_name='meta_eco_activity_gate_events')
+    op.drop_index(op.f('ix_meta_ecm_publication_outbox_version_id'), table_name='meta_ecm_publication_outbox')
+    op.drop_index(op.f('ix_meta_ecm_publication_outbox_item_id'), table_name='meta_ecm_publication_outbox')
     op.drop_index(op.f('ix_meta_conversion_jobs_status'), table_name='meta_conversion_jobs')
     op.drop_index(op.f('ix_meta_conversion_jobs_dedupe_key'), table_name='meta_conversion_jobs')
     op.drop_index(op.f('ix_meta_consumption_records_source_id'), table_name='meta_consumption_records')
     op.drop_index(op.f('ix_meta_consumption_records_recorded_at'), table_name='meta_consumption_records')
     op.drop_index(op.f('ix_meta_consumption_records_plan_id'), table_name='meta_consumption_records')
+    op.drop_index(op.f('ix_meta_consumption_records_idempotency_key'), table_name='meta_consumption_records')
     op.drop_index(op.f('ix_meta_consumption_plans_state'), table_name='meta_consumption_plans')
     op.drop_index(op.f('ix_meta_consumption_plans_name'), table_name='meta_consumption_plans')
     op.drop_index(op.f('ix_meta_consumption_plans_item_id'), table_name='meta_consumption_plans')
@@ -2073,6 +2196,8 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_breakage_incidents_bom_id'), table_name='meta_breakage_incidents')
     op.drop_index(op.f('ix_meta_breakage_incidents_batch_code'), table_name='meta_breakage_incidents')
     op.drop_index(op.f('ix_meta_approval_categories_parent_id'), table_name='meta_approval_categories')
+    op.drop_index(op.f('ix_meta_approval_automation_templates_tenant_id'), table_name='meta_approval_automation_templates')
+    op.drop_index(op.f('ix_meta_approval_automation_templates_template_key'), table_name='meta_approval_automation_templates')
     op.drop_index(op.f('ix_meta_3d_overlays_status'), table_name='meta_3d_overlays')
     op.drop_index(op.f('ix_meta_3d_overlays_document_item_id'), table_name='meta_3d_overlays')
     op.drop_index(op.f('ix_cad_change_logs_user_id'), table_name='cad_change_logs')
@@ -2164,20 +2289,24 @@ def downgrade() -> None:
     op.drop_table('meta_permissions')
     op.drop_table('meta_numbering_sequences')
     op.drop_table('meta_methods')
+    op.drop_table('meta_mes_consumption_inbox')
     op.drop_table('meta_maintenance_categories')
     op.drop_table('meta_lifecycle_maps')
     op.drop_table('meta_grid_views')
     op.drop_table('meta_forms')
     op.drop_table('meta_extension_points')
+    op.drop_table('meta_erp_publication_outbox')
     op.drop_table('meta_eco_stages')
     op.drop_table('meta_eco_activity_gates')
     op.drop_table('meta_eco_activity_gate_events')
+    op.drop_table('meta_ecm_publication_outbox')
     op.drop_table('meta_dashboards')
     op.drop_table('meta_conversion_jobs')
     op.drop_table('meta_consumption_records')
     op.drop_table('meta_consumption_plans')
     op.drop_table('meta_breakage_incidents')
     op.drop_table('meta_approval_categories')
+    op.drop_table('meta_approval_automation_templates')
     op.drop_table('meta_app_registry')
     op.drop_table('meta_3d_overlays')
     op.drop_table('cad_change_logs')
