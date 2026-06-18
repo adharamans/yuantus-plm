@@ -132,10 +132,12 @@ commands in §5-§6 use `-p yuantusplm`.
 
 ### D2 — shared external network with alias (option C, corrected)
 
-A single external network named `ecm-publish-net`, created once per deploy host:
+A single external network named `ecm-publish-net`, created once per deploy host
+via the idempotent guard (full form + rationale in §5.1):
 
 ```bash
-docker network create ecm-publish-net
+docker network inspect ecm-publish-net >/dev/null 2>&1 \
+  || docker network create ecm-publish-net
 ```
 
 Both compose stacks declare it `external: true`. **Athena gives `ecm-core` an
