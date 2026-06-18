@@ -111,6 +111,33 @@ class EffectivityService:
             .all()
         )
 
+    def get_expired_date_effectivities(
+        self, *, now: Optional[datetime] = None, version_scoped_only: bool = True
+    ) -> List[Effectivity]:
+        """Date effectivities whose window has closed (``end_date < now``).
+
+        This is the negation of the *end-date* half of effectivity (``end_date IS NULL
+        OR end_date >= now``): an open-ended effectivity (``end_date IS NULL``) is never
+        expired. It deliberately does NOT mirror ``VersionService.find_effective_version``
+        on the *start* side (that helper excludes ``NULL start_date`` rows; the canonical
+        ``_check_date`` treats a null start as -infinity) — start has no bearing on
+        whether a window has *closed*. ``now`` defaults to
+        naive-UTC ``utcnow()`` to match the column's storage. ``version_scoped_only``
+        (default) restricts to effectivities bound to an ``ItemVersion`` — the C3
+        date-BOM auto-obsolete scope; BOM-line (``item_id``-scoped) effectivities are
+        a separate follow-up.
+        """
+        reference = self._normalize_utc_naive(now) if now is not None else datetime.utcnow()
+        query = (
+            self.session.query(Effectivity)
+            .filter(Effectivity.effectivity_type == "Date")
+            .filter(Effectivity.end_date.isnot(None))
+            .filter(Effectivity.end_date < reference)
+        )
+        if version_scoped_only:
+            query = query.filter(Effectivity.version_id.isnot(None))
+        return query.all()
+
     def delete_effectivity(self, effectivity_id: str) -> bool:
         """Delete an effectivity record."""
         effectivity = self.get_effectivity(effectivity_id)

@@ -168,6 +168,22 @@ def upgrade() -> None:
     sa.Column('created_by_id', sa.Integer(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('meta_date_obsolete_impacts',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('effectivity_id', sa.String(), nullable=False),
+    sa.Column('child_item_id', sa.String(), nullable=False),
+    sa.Column('parent_item_id', sa.String(), nullable=False),
+    sa.Column('child_obsoleted', sa.Boolean(), nullable=False),
+    sa.Column('reason', sa.String(length=200), nullable=True),
+    sa.Column('state', sa.String(length=30), nullable=False),
+    sa.Column('detected_at', sa.DateTime(), nullable=False),
+    sa.Column('acknowledged_at', sa.DateTime(), nullable=True),
+    sa.Column('acknowledged_by_id', sa.Integer(), nullable=True),
+    sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('effectivity_id', 'parent_item_id', name='uq_date_obsolete_impact_eff_parent')
+    )
     op.create_table('meta_ecm_publication_outbox',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('item_id', sa.String(), nullable=False),
@@ -1888,6 +1904,10 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_consumption_records_source_id'), 'meta_consumption_records', ['source_id'], unique=False)
     op.create_index(op.f('ix_meta_conversion_jobs_dedupe_key'), 'meta_conversion_jobs', ['dedupe_key'], unique=False)
     op.create_index(op.f('ix_meta_conversion_jobs_status'), 'meta_conversion_jobs', ['status'], unique=False)
+    op.create_index(op.f('ix_meta_date_obsolete_impacts_child_item_id'), 'meta_date_obsolete_impacts', ['child_item_id'], unique=False)
+    op.create_index(op.f('ix_meta_date_obsolete_impacts_effectivity_id'), 'meta_date_obsolete_impacts', ['effectivity_id'], unique=False)
+    op.create_index(op.f('ix_meta_date_obsolete_impacts_parent_item_id'), 'meta_date_obsolete_impacts', ['parent_item_id'], unique=False)
+    op.create_index(op.f('ix_meta_date_obsolete_impacts_state'), 'meta_date_obsolete_impacts', ['state'], unique=False)
     op.create_index(op.f('ix_meta_ecm_publication_outbox_item_id'), 'meta_ecm_publication_outbox', ['item_id'], unique=False)
     op.create_index(op.f('ix_meta_ecm_publication_outbox_version_id'), 'meta_ecm_publication_outbox', ['version_id'], unique=False)
     op.create_index(op.f('ix_meta_eco_activity_gate_events_activity_id'), 'meta_eco_activity_gate_events', ['activity_id'], unique=False)
@@ -2173,6 +2193,10 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_eco_activity_gate_events_activity_id'), table_name='meta_eco_activity_gate_events')
     op.drop_index(op.f('ix_meta_ecm_publication_outbox_version_id'), table_name='meta_ecm_publication_outbox')
     op.drop_index(op.f('ix_meta_ecm_publication_outbox_item_id'), table_name='meta_ecm_publication_outbox')
+    op.drop_index(op.f('ix_meta_date_obsolete_impacts_state'), table_name='meta_date_obsolete_impacts')
+    op.drop_index(op.f('ix_meta_date_obsolete_impacts_parent_item_id'), table_name='meta_date_obsolete_impacts')
+    op.drop_index(op.f('ix_meta_date_obsolete_impacts_effectivity_id'), table_name='meta_date_obsolete_impacts')
+    op.drop_index(op.f('ix_meta_date_obsolete_impacts_child_item_id'), table_name='meta_date_obsolete_impacts')
     op.drop_index(op.f('ix_meta_conversion_jobs_status'), table_name='meta_conversion_jobs')
     op.drop_index(op.f('ix_meta_conversion_jobs_dedupe_key'), table_name='meta_conversion_jobs')
     op.drop_index(op.f('ix_meta_consumption_records_source_id'), table_name='meta_consumption_records')
@@ -2300,6 +2324,7 @@ def downgrade() -> None:
     op.drop_table('meta_eco_activity_gates')
     op.drop_table('meta_eco_activity_gate_events')
     op.drop_table('meta_ecm_publication_outbox')
+    op.drop_table('meta_date_obsolete_impacts')
     op.drop_table('meta_dashboards')
     op.drop_table('meta_conversion_jobs')
     op.drop_table('meta_consumption_records')
