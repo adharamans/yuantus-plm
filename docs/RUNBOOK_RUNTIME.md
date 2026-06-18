@@ -417,6 +417,81 @@ AuditLogMiddleware  (innermost — sees populated identity context for AuditLog 
 A reorder via `add_middleware` will surface in PR review via the
 contract test — it is correctness-load-bearing.
 
+## ECM publish — controlled rollout
+
+This section enables the ECM publish path from Yuantus to Athena via a shared
+external Docker network. Full design rationale, gate decisions, and the
+verification recipe live in
+`docs/DEVELOPMENT_ECM_PUBLISH_DURABLE_REACHABILITY_TASKBOOK_20260617.md`; the
+steps below are the operator-facing summary.
+
+1) Create the shared external network (one-time per deploy host; idempotent
+   guard — safe to embed in deploy scripts and to re-run after host reboots):
+
+```bash
+docker network inspect ecm-publish-net >/dev/null 2>&1 \
+  || docker network create ecm-publish-net
+```
+
+2) Bring up Athena (the receiver) WITH the ECM publish override file. The
+base `Athena/docker-compose.yml` is deliberately ECM-publish-unaware; the
+new `docker-compose.ecm-publish.yml` override scopes the `ecm-publish-net`
+join to `ecm-core` and the `athena-ecm-core` alias. Append the override
+after any pre-existing overrides (`docker-compose.prod.yml`, ghcr-image
+overrides, etc.):
+
+```bash
+cd /path/to/Athena && docker compose \
+  -f docker-compose.yml -f docker-compose.ecm-publish.yml up -d
+```
+
+3) Bring up Yuantus. **REQUIRED for live ECM publish.** Notes:
+
+- `YUANTUS_ECM_PUBLISH_ENABLED` flows into BOTH the api process (the release()
+  enqueue gate at `src/yuantus/meta_engine/version/service.py:617`) and the
+  `ecm-publication-worker` process. Both must see it as true; `docker compose
+  up -d` picks the env var up via the passthrough in each service's
+  `environment:` block — the api side requires the gate flag to be in scope
+  at startup, so export the block BEFORE `up`.
+- `YUANTUS_PUBLICATION_ECM_BASE_URL` is the live receiver URL. Do NOT lean
+  on `YUANTUS_ATHENA_BASE_URL`; `src/yuantus/meta_engine/ecm_publication/adapter_registry.py:29-33`
+  falls back to it, but that legacy path is for older Athena callers and
+  can route ECM publish to an unintended host.
+
+```bash
+export YUANTUS_ECM_PUBLISH_ENABLED=true
+export YUANTUS_PUBLICATION_ECM_TARGET_SYSTEM=athena
+export YUANTUS_PUBLICATION_ECM_BASE_URL=http://athena-ecm-core:8080
+export YUANTUS_PUBLICATION_ECM_TRANSFER_USER=<...>
+export YUANTUS_PUBLICATION_ECM_TRANSFER_SECRET=<...>
+export YUANTUS_PUBLICATION_ECM_ROOT_FOLDER_ID=<...>
+export YUANTUS_PUBLICATION_ECM_SOURCE_REPOSITORY_ID=yuantus-plm
+
+docker compose -p yuantusplm \
+  -f docker-compose.yml -f docker-compose.ecm-publish.yml \
+  --profile ecm-publish up -d
+```
+
+The base `Yuantus/docker-compose.yml` is deliberately ECM-publish-unaware
+(symmetric with Athena per G3.5); the
+`Yuantus/docker-compose.ecm-publish.yml` override carries the
+`ecm-publication-worker` service and the top-level `ecm-publish-net`
+external network declaration. The drainer remains `profiles: ["ecm-publish"]`
+inside the override as a second explicit gate so a routine
+`-f docker-compose.yml -f docker-compose.ecm-publish.yml up -d` (without
+`--profile ecm-publish`) still keeps the drainer off.
+
+4) Kill-switch (restart-only; the worker reads the gate flag at startup):
+
+```bash
+docker compose -p yuantusplm \
+  -f docker-compose.yml -f docker-compose.ecm-publish.yml \
+  --profile ecm-publish stop ecm-publication-worker
+```
+
+The Transfer Receiver secret is never written into compose, into `.env` files
+committed to git, into operator screenshots, or into any receipt.
+
 ## Stop services
 
 ```bash
