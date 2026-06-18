@@ -1212,6 +1212,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/aml-metadata-federation-design-verification-20260411.md: `docs/development/aml-metadata-federation-design-verification-20260411.md`
 - docs/development/aml-metadata-pact-design-and-verification-20260411.md: `docs/development/aml-metadata-pact-design-and-verification-20260411.md`
 - docs/development/aml-metadata-session-handoff-20260411.md: `docs/development/aml-metadata-session-handoff-20260411.md`
+- docs/development/plm-collaboration-current-state-commercialization-and-roadmap-20260618.md: `docs/development/plm-collaboration-current-state-commercialization-and-roadmap-20260618.md`
 ## Optional
 
 - Release Announcement: `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260203.md` (latest), `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260202.md`, `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260201.md`, `docs/RELEASE_ANNOUNCEMENT_v0.1.3.md`
