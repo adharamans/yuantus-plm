@@ -126,6 +126,57 @@ def test_committed_baseline_matches_generator_output():
         )
 
 
+def test_generator_metadata_covers_booted_app_tenant_tables():
+    """Drift guard: every per-tenant table a fully booted ``create_app()``
+    registers must also be in the generator's metadata. Run in two CLEAN
+    subprocesses so neither depends on the other's import side effects — this
+    deterministically catches a per-tenant model that only a router imports
+    (the gap that silently dropped ``meta_approval_automation_templates`` from
+    the baseline and made the committed-vs-generator guard order-fragile).
+
+    The reverse direction is intentionally allowed: the generator legitimately
+    pins a few tables (e.g. lazily-router-loaded ones) that a *bare* app boot
+    has not imported yet, so it is a superset, never a subset.
+    """
+    import json
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{REPO_ROOT}/src"
+
+    def _tables(code: str) -> set:
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        return set(json.loads(result.stdout.strip().splitlines()[-1]))
+
+    generator = _tables(
+        "import json;"
+        "from yuantus.scripts.tenant_schema import build_tenant_metadata as b;"
+        "print(json.dumps(sorted(b().tables)))"
+    )
+    booted_app = _tables(
+        "import json;"
+        "from yuantus.api.app import create_app;create_app();"
+        "from yuantus.models.base import Base, WorkflowBase;"
+        "from yuantus.scripts.tenant_schema import GLOBAL_TABLE_NAMES;"
+        "t=(set(Base.metadata.tables)|set(WorkflowBase.metadata.tables))-set(GLOBAL_TABLE_NAMES);"
+        "print(json.dumps(sorted(t)))"
+    )
+
+    omitted = booted_app - generator
+    assert not omitted, (
+        "the tenant baseline generator OMITS per-tenant tables that a booted "
+        f"app registers: {sorted(omitted)}. Add their model module to "
+        "register_tenant_model_metadata() in src/yuantus/scripts/tenant_schema.py, "
+        "then regenerate the baseline."
+    )
+
+
 def test_baseline_creates_representative_tenant_tables():
     """Spot-check that core tenant tables are in the upgrade body. The
     list is intentionally small — just enough to catch a regenerate
