@@ -21,6 +21,9 @@ _CONSUMPTION_ROUTE_KEYS = {
     ("POST", "/consumption/plans/{plan_id}/actuals"),
     ("POST", "/consumption/plans/{plan_id}/mes-actuals"),
     ("GET", "/consumption/plans/{plan_id}/variance"),
+    ("GET", "/consumption/mes-inbox"),
+    ("GET", "/consumption/mes-inbox/{inbox_id}"),
+    ("POST", "/consumption/mes-inbox/{inbox_id}/replay"),
     ("GET", "/consumption/dashboard"),
 }
 

@@ -7,11 +7,22 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from yuantus.api.dependencies.auth import CurrentUser, get_current_user
+from yuantus.api.dependencies.auth import (
+    CurrentUser,
+    get_current_user,
+    require_admin_permission,
+)
+from fastapi.responses import JSONResponse
+
 from yuantus.api.dependencies.mes_ingest_auth import require_mes_ingest_credential
+from yuantus.config import get_settings
 from yuantus.database import get_db
 from dataclasses import replace
 
+from yuantus.meta_engine.models.parallel_tasks import MesConsumptionInbox
+from yuantus.meta_engine.services.consumption_mes_inbox_service import (
+    MesConsumptionInboxService,
+)
 from yuantus.meta_engine.models.parallel_tasks import ConsumptionPlan
 from yuantus.meta_engine.services.consumption_mes_contract import (
     RESERVED_PROPERTIES_KEY,
@@ -386,6 +397,38 @@ async def ingest_mes_consumption_actual(
             message="event.plan_id must match the path plan_id",
             context={"path_plan_id": plan_id, "body_plan_id": event.plan_id},
         )
+    # R2.5 async mode (default OFF): persist the raw event to the inbox + return
+    # 202; the inbox worker drains it later through the SAME ingest path. Accept
+    # is idempotent (the inbox unique key). Conflicts/validation surface on the
+    # inbox row (ops surface), not synchronously -- the documented producer-contract
+    # shift. The synchronous path below is unchanged when async is off.
+    if bool(getattr(get_settings(), "MES_INGEST_ASYNC", False)):
+        try:
+            row, disposition = MesConsumptionInboxService(db).accept_event(event)
+            db.commit()
+        except ValueError as exc:
+            # Boundary validation the sync path also enforces (e.g. the reserved
+            # `_ingestion` key) -> 400, symmetric with the sync route, so an
+            # invalid payload is not durably accepted.
+            db.rollback()
+            _raise_api_error(
+                status_code=400,
+                code="consumption_mes_invalid_event",
+                message=str(exc),
+                context={"plan_id": plan_id},
+            )
+        except Exception as exc:
+            db.rollback()
+            _raise_api_error(
+                status_code=500,
+                code="consumption_mes_accept_failed",
+                message=str(exc),
+                context={"plan_id": plan_id},
+            )
+        return JSONResponse(
+            status_code=202,
+            content={"disposition": disposition, "inbox_id": row.id, "state": row.state},
+        )
     service = ConsumptionPlanService(db)
     try:
         inputs = map_mes_event_to_consumption_record_inputs(event)
@@ -535,3 +578,84 @@ async def get_consumption_dashboard(
     result = service.dashboard(item_id=item_id)
     result["operator_id"] = int(user.id)
     return result
+
+
+# --- MES inbox ops (R2.5) — admin-gated visibility + replay -----------------
+_INBOX_STATES = {"pending", "processed", "conflict", "failed"}
+
+
+def _inbox_row(row: MesConsumptionInbox) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "idempotency_key": row.idempotency_key,
+        "plan_id": row.plan_id,
+        "mes_event_id": row.mes_event_id,
+        "source_type": row.source_type,
+        "actual_quantity": row.actual_quantity,
+        "uom": row.uom,
+        "state": row.state,
+        "attempt_count": row.attempt_count,
+        "error": row.error,
+        "record_id": row.record_id,
+    }
+
+
+@parallel_tasks_consumption_router.get("/consumption/mes-inbox")
+async def list_mes_inbox(
+    state: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    require_admin_permission(user)
+    if state is not None and state not in _INBOX_STATES:
+        _raise_api_error(
+            status_code=422, code="consumption_mes_inbox_invalid_state",
+            message=f"state must be one of {sorted(_INBOX_STATES)}",
+        )
+    q = db.query(MesConsumptionInbox)
+    if state is not None:
+        q = q.filter(MesConsumptionInbox.state == state)
+    rows = q.order_by(MesConsumptionInbox.created_at.desc()).limit(limit).all()
+    return {"count": len(rows), "rows": [_inbox_row(r) for r in rows]}
+
+
+@parallel_tasks_consumption_router.get("/consumption/mes-inbox/{inbox_id}")
+async def get_mes_inbox(
+    inbox_id: str,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    require_admin_permission(user)
+    row = db.get(MesConsumptionInbox, inbox_id)
+    if row is None:
+        _raise_api_error(
+            status_code=404, code="consumption_mes_inbox_not_found",
+            message="inbox row not found", context={"inbox_id": inbox_id},
+        )
+    return _inbox_row(row)
+
+
+@parallel_tasks_consumption_router.post("/consumption/mes-inbox/{inbox_id}/replay")
+async def replay_mes_inbox(
+    inbox_id: str,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    require_admin_permission(user)
+    row = db.get(MesConsumptionInbox, inbox_id)
+    if row is None:
+        _raise_api_error(
+            status_code=404, code="consumption_mes_inbox_not_found",
+            message="inbox row not found", context={"inbox_id": inbox_id},
+        )
+    if row.state != "failed":
+        _raise_api_error(
+            status_code=409, code="consumption_mes_inbox_not_replayable",
+            message="only failed rows can be replayed", context={"state": row.state},
+        )
+    row.state = "pending"
+    row.attempt_count = 0
+    row.error = None
+    db.commit()
+    return _inbox_row(row)

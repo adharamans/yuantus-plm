@@ -144,7 +144,7 @@ class MesConsumptionInboxService:
             row.error = None
         return row.state
 
-    # -- claim (for a future worker daemon; testable now) --------------------
+    # -- claim / drain (the worker core; the CLI daemon is a thin wrapper) ----
     def claim_due(self, *, limit: int = 50) -> List[MesConsumptionInbox]:
         now = datetime.now(timezone.utc)
         return (
@@ -157,3 +157,14 @@ class MesConsumptionInboxService:
             .limit(limit)
             .all()
         )
+
+    def drain_once(self, *, limit: int = 50) -> int:
+        """Claim a due batch and process each row (committing after each so a
+        later failure doesn't roll back earlier successes). Returns the count
+        processed. This is the worker's per-tick core; a long-running daemon just
+        calls it on an interval (mirrors the ECM publication worker)."""
+        rows = self.claim_due(limit=limit)
+        for row in rows:
+            self.process_row(row)
+            self.session.commit()
+        return len(rows)

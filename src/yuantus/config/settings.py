@@ -651,6 +651,14 @@ class Settings(BaseSettings):
         default="",
         description="Optional fixed org context for MES ingest (tenant is the isolation boundary)",
     )
+    MES_INGEST_ASYNC: bool = Field(
+        default=False,
+        description=(
+            "Consumption R2.5: when true the MES ingest route persists the event to "
+            "the inbox and returns 202 (the inbox worker drains it); default false "
+            "keeps the synchronous ingest. Restart-only (get_settings is cached)."
+        ),
+    )
     PUBLICATION_ECM_PATH: str = Field(
         default="/cmis/browser",
         description="CMIS compliance-reference endpoint path; not used by Transfer Receiver",
