@@ -1,6 +1,6 @@
 # YuantusPLM — Development Roadmap & TODO (current snapshot)
 
-Date: 2026-06-17 · Original snapshot baseline `main` @ `91da3591`; **updated through `main` @ `279b44e4`** (MES line merged).
+Date: 2026-06-17 · Original snapshot baseline `main` @ `91da3591`; **updated through `main` @ `1eebc293`** (MES line + CAD-PDM C3 merged).
 Status: **living snapshot** — the current **working roadmap** (execution entry point) as of this date.
 
 ## 0. Why this exists (read first)
@@ -31,9 +31,12 @@ The **MES ingestion line is end-to-end COMPLETE on main** (sync + async). Landed
   provisioning bug surfaced by a merge-train dry-run: the generator omitted `approval_automation`,
   so a regen dropped a per-tenant table; now complete + an order-independent subprocess drift guard
   in CI). Supersedes the closed #790. **MERGED**.
-- Verified on merged main: route count **716**, single migration head `mes_inbox_001`, full
-  contract suite **113 passed**.
-- **C3 taskbook** → **#792** **MERGED** (impl still owner-deferred; see §3).
+- Verified **at the MES-line merge** (`main@279b44e4`): route count 716, head `mes_inbox_001`,
+  full contract suite 113 passed. **Current `main@1eebc293` after C3: route count 719, head
+  `c3_date_obsolete_001`.**
+- **CAD-PDM C3 date-BOM auto-obsolete** → taskbook **#792** + mechanism **#797** + wiring **#798**,
+  all **MERGED** — feature-complete behind a default-off flag (two adversarial-verify rounds caught
+  real bugs; see §3).
 - **Re-verification correction**: the **jti revocation denylist is cross-repo-blocked**, not cleanly
   Yuantus-actionable — the embed token is verified **OFFLINE by the consumer (metasheet2)**, so a
   Yuantus-side denylist enforces nothing without a metasheet2 change, and it contradicts the
@@ -55,8 +58,9 @@ The **MES ingestion line is end-to-end COMPLETE on main** (sync + async). Landed
 The active line is **done and merged** (R1 → R2.2 previously; R2.3 → R2.5 this run). Order was
 owner-ratified: secure the entrypoint (R2.2) → widen sources (R2.3) → convert units (R2.4) →
 async (R2.5), plus the R2.2 audit-attribution follow-up. Items below kept for the record with
-their landing PRs. Verified on merged main: route count 716, single migration head
-`mes_inbox_001`, full contract suite 113 passed.
+their landing PRs. Verified **at the MES-line merge** (`main@279b44e4`): route count 716, head
+`mes_inbox_001`, full contract suite 113 passed. (Current `main@1eebc293` after C3 is 719 routes,
+head `c3_date_obsolete_001` — see §3.)
 
 - [x] **R2.3 — `source_type` widening** · **DONE #785**. `ALLOWED_SOURCE_TYPES` is now
   `frozenset({"mes", "workorder", "scrap", "rework"})` (`services/consumption_mes_contract.py`) —
@@ -103,11 +107,16 @@ against live code first.
   revocation needs a cross-repo decision (online verify, or a polled/synced revocation list) =
   the not-yet-opted SSO slice. Not a clean Yuantus-only build.
 
-- [ ] **CAD-PDM C3 — date-BOM auto-obsolete + where-used propagation** · size **M–L** ·
-  **taskbook ready (#792, MERGED); impl owner-prioritization-gated**. A genuine new feature (date
-  trigger via a polling worker — no cron infra — + B1 `is_superseded` obsolete + upward where-used
-  **flag, not cascade**). The "taskbook-first" gate is satisfied; the only remaining gate is the
-  owner's prioritization + ratification of the taskbook's open questions.
+- [x] **CAD-PDM C3 — date-BOM auto-obsolete + where-used propagation** · **DONE — feature-complete
+  behind a default-off flag**. Taskbook #792; **Slice 1 mechanism #797** (date-expiry scan →
+  obsolete-the-Item-iff-no-effective-version + depth-1 where-used **flag, not cascade**) + **Slice 2
+  wiring #798** (scan-based polling worker, no cron; two gates — global setting + a registered
+  per-tenant SKU `plm.cadpdm_date_obsolete`; admin-gated impact ops routes). Two adversarial-verify
+  rounds caught + fixed real bugs (false-obsolete on open-start versions; a permanently-dead
+  entitlement gate; a non-converging batch). Owner-ratified decisions: obsolete = Item lifecycle
+  "Obsolete" via `promote` (**not** B1 `is_superseded`, which is orthogonal), flag-not-cascade,
+  depth-1, polling worker. **Out of scope (follow-ups)**: BOM-line (`item_id`-scoped) effectivities;
+  a standalone worker-daemon CLI; the pre-existing `find_effective_version` NULL-start narrowness.
 
 - [ ] **MetaSheet bridge activation** · size **M** · SSO-gated. `api/routers/metasheet_bridge.py`
   still returns a static `{"active": false, "entitlement_required": true}`. Depends on the
@@ -125,16 +134,19 @@ against live code first.
 
 ## 5. Recommended next action
 
-The **MES ingestion line is complete and merged** (§2). The remaining roadmap work is gated on the
-owner, not on more solo build:
+The **MES ingestion line** (§2) **and CAD-PDM C3** (§3) are complete and merged. With C3 done, the
+**Yuantus-local buildable roadmap is essentially clear**; what remains is gated on the owner /
+cross-repo, not on more solo build:
 
-1. **CAD-PDM C3** — the taskbook is ready (#792). Needs the owner to **prioritize** + ratify its
-   open questions; then it's a bounded build (polling worker + obsolete + where-used flag).
-2. **jti denylist / MetaSheet bridge** — both need the **SSO / cross-repo decision** (they live
+1. **jti denylist / MetaSheet bridge** — both need the **SSO / cross-repo decision** (they live
    behind metasheet2 + the not-yet-opted identity-session slice); not clean Yuantus-only builds.
+2. **Optional Yuantus-local follow-ups** surfaced this cycle: the pre-existing
+   `find_effective_version` NULL-start narrowness (a separate, regression-scanned fix), C3's
+   BOM-line-scoped effectivities, and a standalone C3 worker-daemon CLI. None urgent; pick on a
+   concrete driver.
 
 ## 6. Maintenance
 
-Point-in-time snapshot (`2026-06-17`, original `main@91da3591`, **updated through `main@279b44e4`**
+Point-in-time snapshot (`2026-06-17`, original `main@91da3591`, **updated through `main@1eebc293`**
 after the MES line merged). Update it as slices land; **re-verify any item against current code/git
 before starting** — the formal plan docs went stale precisely because that step was skipped.
