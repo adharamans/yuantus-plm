@@ -9,6 +9,8 @@ requires an explicit owner opt-in and its own PR.
 This taskbook is intentionally narrow about the first paid version: **BOM Review Add-on first**.
 Approval execution, SSO/session spine, and controlled write-back are separate later product lines.
 
+> **Phase ↔ draft-Stage map** (for anyone arriving from the workspace drafting docs / earlier discussion, which used "Stage"/"S0-x" names — **this taskbook's Phase numbering is canonical**): Phase 1 = V1 pilot · Phase 2 = Stage 0 hardening (S0-2 multi-kid, S0-3 pact) · Phase 3 = S2-1 parent host · Phase 4 = Stage 1 commercial-ops (S1-1…S1-4) · Phase 5 = S2-2 automation · Phase 6 = S3-1 SSO · Phase 7 = write-back.
+
 ---
 
 ## 0. Current Code Grounding
@@ -102,6 +104,19 @@ Excluded:
 - SSO/session exchange.
 - Online self-serve billing.
 
+### V1 Operating Constraints (interim, until Phase 4)
+
+V1 runs on top of two verified gaps, so it must be sold and operated under explicit constraints
+until Phase 4 closes them:
+
+- **Perpetual licenses only** (`expires_at = null`). `is_entitled` is a hard, no-grace cutoff
+  (grace is Phase 4) — a dated license would hard-cut the feature mid-review. Do not issue a dated
+  V1 license.
+- **Hand-signed, out-of-band.** The vendor issuance tool is Phase 4; for V1 a license is signed
+  manually (private key in custody, never in repo) and delivered for `yuantus license import`.
+- **Single tenant, no key rotation.** One controlled pilot tenant; multi-`kid` rotation is Phase 4,
+  so do not rotate the embed signing key during the pilot.
+
 ### Implementation Slices
 
 | Slice | Repo | Deliverable | Acceptance |
@@ -163,16 +178,16 @@ Purpose: make MetaSheet maintenance safe by catching shape drift before release.
 
 | Slice | Repo | Deliverable | Acceptance |
 |---|---|---|---|
-| 2A Yuantus provider schema | Yuantus | Golden schemas or pact fixtures for capability, context, and embed-token responses. | Removing/renaming declared fields fails CI. |
-| 2B MetaSheet consumer pact | MetaSheet2 | Consumer contract reads the Yuantus fixtures and validates adapter/relay expectations. | `quantity -> qty` and similar drift fails visibly. |
-| 2C Sync helper | Both | Repeatable sync/check helper, modeled after existing pact sync discipline. | Reviewer can run one command to check drift. |
-| 2D CI wiring | Both | Change-scope triggers run the right contracts when these surfaces change. | No silent no-op when either repo changes the contract. |
+| 2A Yuantus provider schema | Yuantus | **Reuse the existing pact** (provider verifier `test_pact_provider_yuantus_plm.py` + sync helper already exist) — add interactions for capability, context, and embed-token responses + their provider seed. | Removing/renaming a declared field fails `test_pact_provider_yuantus_plm.py`. |
+| 2B MetaSheet consumer pact | MetaSheet2 | Consumer contract authors the 3 interactions and validates adapter/relay expectations. (Note: #2875 already gives the *runtime* drift guard — `quantity -> qty` degrades to a visible error; this adds the *CI-time* guard.) | `quantity -> qty` and similar drift fails the contract. |
+| 2C Sync helper | Both | **ALREADY EXISTS** (`sync_metasheet2_pact.sh --check` + `test_ci_contracts_pact_sync_helper.py`) — route the 3 new interactions through it; do **not** build a new helper. | `--check` flags drift on the 3 surfaces. |
+| 2D CI wiring | Both | **Provider gate ALREADY EXISTS** (`test_ci_contracts_pact_provider_gate.py`) — confirm its change-scope triggers cover the 3 surfaces. | No silent no-op when either repo changes the contract. |
 
 ### TODO
 
-- [ ] Decide pact vs JSON schema vs golden fixture for the modern surfaces.
+- [ ] Decide pact vs JSON schema vs golden fixture for the modern surfaces. **(Recommended: reuse the existing pact — the provider verifier + `sync_metasheet2_pact.sh` + CI gate already exist; a parallel golden-schema would duplicate them.)**
 - [ ] Add Yuantus fixture for unentitled `context:null` and entitled context.
-- [ ] Add Yuantus fixture for embed-token response envelope without committing a real token.
+- [ ] Add Yuantus fixture for embed-token response envelope without committing a real token. **(Signed output is non-deterministic → match `token`/`jti` with `matchingRules` regex, never value-match; seed `YUANTUS_EMBED_TOKEN_SIGNING_KEY` + `YUANTUS_EMBED_TOKEN_KEY_ID` in the provider verifier, per `test_bom_multitable_embed_token.py`.)**
 - [ ] Add MetaSheet fixture for relay error state on field drift.
 - [ ] Add compatibility matrix: Yuantus commit/tag ↔ MetaSheet commit/tag.
 - [ ] Add CI failure examples to the docs.
@@ -238,10 +253,10 @@ Purpose: make the add-on sellable and supportable beyond engineering demos.
 
 - [ ] Build a vendor-side license issuance CLI outside the production repo or in a clearly separated private tool.
 - [ ] Define key custody: private signing key location, rotation procedure, operator permissions.
-- [ ] Add public-key rotation support and runbook for multiple `kid` values.
+- [ ] Add public-key rotation support and runbook for multiple `kid` values. **(Already half-built — the consumer verify path resolves by `kid` (`embed-token-verify.ts:66-70`) and the provider already stamps `kid`; this is a consumer-only `embedPublicKeysByKid()` multi-key env parse, size S, NOT net-new infra. Pull into Phase 2 if any rotation is anticipated before commercial ops.)**
 - [ ] Add tenant-facing license status API or admin page.
 - [ ] Add renewal and expiry runbook.
-- [ ] Decide seat/quantity policy for `plm.bom_multitable`.
+- [ ] Decide seat/quantity policy for `plm.bom_multitable`. **(No `seat_limit` field exists yet — design the model first. Impl caveat: active users live in the identity DB (`auth_users`), `AppLicense` in the meta DB → the count is cross-engine; reuse `QuotaService.get_usage`.)**
 - [ ] Decide grace-period policy for local deployments.
 - [ ] Add support bundle command that prints feature entitlement status without leaking private key material.
 - [ ] Document how to issue a bundle license that contains multiple `app_names` without broadening `FEATURE_APP_NAMES`.
@@ -345,7 +360,7 @@ Purpose: add mutation only after read-only BOM Review and identity/commercial op
 
 ## 12. Recommended First PR Sequence
 
-1. **PR A — finalize planning baseline:** fix #2875 merged status in #800, add this taskbook, update delivery index.
+1. **PR A — land planning baseline:** add this taskbook + update delivery index. (The #800 ledger's #2875-landed status is already fixed — see Phase 0.)
 2. **PR B — V1 pilot runbook:** operator/deployment/license/acceptance runbook only.
 3. **PR C — modern-surface contract fixtures:** Yuantus provider fixtures + MetaSheet consumer checks.
 4. **PR D — local combined-profile smoke:** cheap, deterministic smoke for capability + BOM Review happy path.
