@@ -19,6 +19,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_baseline_release_diagnostics.py",
     "src/yuantus/meta_engine/tests/test_item_release_gate.py",
     "src/yuantus/meta_engine/tests/test_lifecycle_role_hierarchy.py",
+    "src/yuantus/meta_engine/tests/test_lifecycle_permission_rollback.py",
     "src/yuantus/meta_engine/tests/test_item_number_immutable.py",
     "src/yuantus/meta_engine/tests/test_latest_released_guard.py",
     "src/yuantus/meta_engine/tests/test_latest_released_guard_router.py",

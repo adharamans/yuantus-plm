@@ -466,6 +466,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_latest_released_guard_router.py \
             src/yuantus/meta_engine/tests/test_latest_released_write_paths.py \
             src/yuantus/meta_engine/tests/test_license_import.py \
+            src/yuantus/meta_engine/tests/test_lifecycle_permission_rollback.py \
             src/yuantus/meta_engine/tests/test_lifecycle_role_hierarchy.py \
             src/yuantus/meta_engine/tests/test_locale_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_maintenance_category_router_contracts.py \

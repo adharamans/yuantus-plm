@@ -251,6 +251,10 @@ class LifecycleService:
         # --- 执行状态变更 ---
         old_state_id = item.current_state
         old_state_name = item.state
+        # capture the pre-transition permission so a rolled-back transition also restores
+        # permission (state-driven permission is set below; on failure it must be undone
+        # together with state, else a stale permission can be committed by a caller).
+        old_permission_id = item.permission_id
 
         item.state = target_state_obj.name
         item.current_state = target_state_obj.id
@@ -275,7 +279,7 @@ class LifecycleService:
             # 回滚状态变更 (in-memory, requires session rollback or explicit setting if commit not yet done)
             item.state = old_state_name
             item.current_state = old_state_id
-            # item.permission_id = ... (restore old permission if necessary)
+            item.permission_id = old_permission_id
             return PromoteResult(success=False, error=context.abort_reason)
 
         # 7.5 Workflow Integration (Phase 2.5)
@@ -304,6 +308,7 @@ class LifecycleService:
                 logger.error(f"Failed to start workflow: {e}")
                 item.state = old_state_name
                 item.current_state = old_state_id
+                item.permission_id = old_permission_id
                 return PromoteResult(
                     success=False, error=f"Failed to start workflow: {str(e)}"
                 )
@@ -324,6 +329,7 @@ class LifecycleService:
                 logger.error(f"Failed to release version: {e}")
                 item.state = old_state_name
                 item.current_state = old_state_id
+                item.permission_id = old_permission_id
                 return PromoteResult(
                     success=False, error=f"Version release failed: {str(e)}"
                 )
