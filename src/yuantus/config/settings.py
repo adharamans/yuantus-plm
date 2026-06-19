@@ -423,6 +423,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    # PLM-COLLAB-V2 (grace): days past a license's expires_at during which the feature
+    # is still SERVED (soft-degrade) instead of hard-cut mid-use. 0 = no grace (hard
+    # cutoff at expiry; backward-compatible). env: YUANTUS_LICENSE_EXPIRY_GRACE_DAYS.
+    LICENSE_EXPIRY_GRACE_DAYS: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Days past a license's expires_at during which the feature is still served "
+            "(soft-degrade) instead of hard-cut. 0 = no grace (hard cutoff at expiry). "
+            "env: YUANTUS_LICENSE_EXPIRY_GRACE_DAYS."
+        ),
+    )
+
     # PLM-COLLAB-P1-D: enable the DEFAULT-OFF, superuser-only MOCK feature
     # activation route (demo/test of the upgrade affordance). Production stays off;
     # real authorization always goes via the P1-C signed license import.

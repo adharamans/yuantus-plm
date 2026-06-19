@@ -110,6 +110,31 @@ def test_expired_does_not_unlock(session):
     assert _entitled(session) is False
 
 
+# PLM-COLLAB-V2 (grace): a dated license soft-degrades for LICENSE_EXPIRY_GRACE_DAYS
+# past expiry instead of hard-cutting mid-use -- removing the "perpetual-only" constraint.
+def test_grace_disabled_by_default_hard_cuts_at_expiry(session):
+    # default grace 0 -> the exact prior hard-cutoff semantics hold (backward compatible).
+    _lic(session, tenant_id="acme", expires_at=datetime.utcnow() - timedelta(days=1))
+    tenant_id_var.set("acme")
+    assert _entitled(session) is False
+
+
+def test_grace_window_still_serves_a_license_expired_within_grace(session, monkeypatch):
+    monkeypatch.setenv("YUANTUS_LICENSE_EXPIRY_GRACE_DAYS", "10")
+    get_settings.cache_clear()
+    _lic(session, tenant_id="acme", expires_at=datetime.utcnow() - timedelta(days=5))
+    tenant_id_var.set("acme")
+    assert _entitled(session) is True  # 5d past expiry, inside the 10d grace -> still served
+
+
+def test_grace_window_cuts_a_license_past_the_grace(session, monkeypatch):
+    monkeypatch.setenv("YUANTUS_LICENSE_EXPIRY_GRACE_DAYS", "3")
+    get_settings.cache_clear()
+    _lic(session, tenant_id="acme", expires_at=datetime.utcnow() - timedelta(days=5))
+    tenant_id_var.set("acme")
+    assert _entitled(session) is False  # 5d past expiry, beyond the 3d grace -> cut
+
+
 def test_future_expiry_unlocks(session):
     _lic(session, tenant_id="acme", expires_at=datetime.utcnow() + timedelta(days=30))
     tenant_id_var.set("acme")
