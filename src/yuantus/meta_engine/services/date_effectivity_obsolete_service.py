@@ -31,6 +31,11 @@ from yuantus.meta_engine.services.effectivity_service import EffectivityService
 from yuantus.meta_engine.version.models import ItemVersion
 
 _OBSOLETE_STATE = "Obsolete"
+# A BOM line is a relationship Item of this ItemType: bom_service.add_bom_line writes
+# Item(item_type_id="Part BOM", source_id=parent, related_id=child) and stores its date
+# effectivity item_id-scoped (Effectivity.item_id = the relationship Item id).
+_BOM_LINE_ITEM_TYPE = "Part BOM"
+_BOM_LINE_REASON = "bom_line_effectivity_expired"
 
 
 class DateEffectivityObsoleteService:
@@ -42,7 +47,11 @@ class DateEffectivityObsoleteService:
 
     # -- detection -----------------------------------------------------------
     def scan_expired(self, *, now: Optional[datetime] = None) -> List[Effectivity]:
-        return self.effectivity.get_expired_date_effectivities(now=now)
+        # version_scoped_only=False so the sweep also sees BOM-line (item_id-scoped) date
+        # effectivities; process_expired dispatches by scope (version vs BOM line).
+        return self.effectivity.get_expired_date_effectivities(
+            now=now, version_scoped_only=False
+        )
 
     def _affected_item_id(self, eff: Effectivity) -> Optional[str]:
         # v1 scope: version-scoped date effectivities -> the version's item.
@@ -92,15 +101,34 @@ class DateEffectivityObsoleteService:
         now: Optional[datetime] = None,
         apply_obsolete: bool = True,
     ) -> Dict[str, Any]:
-        """Resolve the affected Item, obsolete-or-mark it, then flag depth-1 parents.
+        """Dispatch an expired effectivity to its scope handler (idempotent).
 
-        Idempotent: re-running on the same expired effectivity is a no-op (the Item is
-        already Obsolete or still effective; parent flags are upserted on a unique key).
+        Version-scoped (``version_id``) -> obsolete-or-mark the version's Item + flag its
+        depth-1 where-used parents. BOM-line (``item_id`` -> a "Part BOM" relationship
+        Item) -> flag-only: record the expired parent->child line; never promote or
+        cascade (owner-ratified). Anything else is skipped.
         """
         now = self.effectivity._normalize_utc_naive(now) if now else datetime.utcnow()
+        if eff.version_id:
+            return self._process_version_expired(
+                eff, user_id=user_id, now=now, apply_obsolete=apply_obsolete
+            )
+        if eff.item_id:
+            return self._process_bom_line_expired(eff, now=now)
+        return {"status": "skipped", "reason": "not_scoped", "effectivity_id": eff.id}
+
+    def _process_version_expired(
+        self,
+        eff: Effectivity,
+        *,
+        user_id: int,
+        now: datetime,
+        apply_obsolete: bool = True,
+    ) -> Dict[str, Any]:
+        """Version-scoped path: obsolete-or-mark the version's Item, flag depth-1 parents."""
         item_id = self._affected_item_id(eff)
         if not item_id:
-            return {"status": "skipped", "reason": "not_version_scoped", "effectivity_id": eff.id}
+            return {"status": "skipped", "reason": "version_not_found", "effectivity_id": eff.id}
         item = self.session.get(Item, item_id)
         if item is None:
             return {"status": "skipped", "reason": "item_not_found", "item_id": item_id}
@@ -170,35 +198,116 @@ class DateEffectivityObsoleteService:
             parent_id = parent.get("id")
             if not parent_id:
                 continue
-            existing = (
-                self.session.query(DateObsoleteImpact)
-                .filter(
-                    DateObsoleteImpact.effectivity_id == eff.id,
-                    DateObsoleteImpact.parent_item_id == parent_id,
-                )
-                .one_or_none()
-            )
-            if existing is not None:
-                # idempotent: refresh the outcome together (child_obsoleted AND reason
-                # AND the error payload) so a re-scan after a fix never leaves a
-                # contradictory row (e.g. child_obsoleted=True with a stale "expired"
-                # reason).
-                existing.child_obsoleted = child_obsoleted
-                existing.reason = reason
-                existing.properties = props
-                continue
-            self.session.add(
-                DateObsoleteImpact(
-                    effectivity_id=eff.id,
-                    child_item_id=child_item_id,
-                    parent_item_id=parent_id,
-                    child_obsoleted=child_obsoleted,
-                    reason=reason,
-                    state="open",
-                    detected_at=now,
-                    properties=props,
-                )
-            )
-            flagged += 1
+            if self._upsert_impact(
+                effectivity_id=eff.id, parent_id=parent_id, child_id=child_item_id,
+                reason=reason, child_obsoleted=child_obsoleted, now=now, props=props,
+            ):
+                flagged += 1
         self.session.flush()
         return flagged
+
+    def _upsert_impact(
+        self,
+        *,
+        effectivity_id: str,
+        parent_id: str,
+        child_id: str,
+        reason: str,
+        child_obsoleted: bool,
+        now: datetime,
+        props: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Insert or refresh a DateObsoleteImpact on the unique (effectivity_id,
+        parent_item_id) key. Returns True if a NEW row was inserted, False if an existing
+        row was refreshed. Refreshing updates child_obsoleted + reason + properties together
+        so a re-scan never leaves a contradictory row (e.g. child_obsoleted=True with a
+        stale reason)."""
+        existing = (
+            self.session.query(DateObsoleteImpact)
+            .filter(
+                DateObsoleteImpact.effectivity_id == effectivity_id,
+                DateObsoleteImpact.parent_item_id == parent_id,
+            )
+            .one_or_none()
+        )
+        if existing is not None:
+            existing.child_obsoleted = child_obsoleted
+            existing.reason = reason
+            existing.properties = props
+            return False
+        self.session.add(
+            DateObsoleteImpact(
+                effectivity_id=effectivity_id,
+                child_item_id=child_id,
+                parent_item_id=parent_id,
+                child_obsoleted=child_obsoleted,
+                reason=reason,
+                state="open",
+                detected_at=now,
+                properties=props,
+            )
+        )
+        return True
+
+    # -- BOM-line (item_id-scoped) flag-only path ----------------------------
+    def _process_bom_line_expired(
+        self, eff: Effectivity, *, now: datetime
+    ) -> Dict[str, Any]:
+        """Flag-only handling of an expired BOM-line (item_id-scoped) Date effectivity.
+
+        The effectivity's ``item_id`` points at a "Part BOM" relationship Item
+        (``source_id`` = parent assembly, ``related_id`` = child part). Expiry means that
+        parent->child usage's date window closed — NOT that the child part or the parent
+        assembly is obsolete — so this records a single DateObsoleteImpact for the line and
+        promotes/cascades nothing (owner-ratified).
+
+        Guards: ``item_id`` MUST resolve to a "Part BOM" Item with both endpoints, else
+        skip (a generic item-scoped effectivity is not a BOM line). The line's own
+        ``source_id``/``related_id`` are used directly — NOT ``get_where_used(child)`` — so
+        the flag stays scoped to this one line and never fans out to every parent of the
+        child.
+        """
+        rel = self.session.get(Item, eff.item_id)
+        if rel is None:
+            return {
+                "status": "skipped", "reason": "bom_line_not_found",
+                "effectivity_id": eff.id, "item_id": eff.item_id,
+            }
+        if rel.item_type_id != _BOM_LINE_ITEM_TYPE or not rel.source_id or not rel.related_id:
+            return {
+                "status": "skipped", "reason": "not_a_bom_line",
+                "effectivity_id": eff.id, "item_id": eff.item_id,
+            }
+        if not rel.is_current:
+            # A superseded BOM line is no longer a live usage. bom_obsolete supersedes in
+            # place (sets the old line is_current=False) and COPIES its date effectivity to
+            # the new current line, so flagging the old one would emit review noise for a
+            # usage that no longer exists; the copy on the current line carries the live
+            # effectivity and is flagged via its own (current) relationship Item.
+            return {
+                "status": "skipped", "reason": "bom_line_not_current",
+                "effectivity_id": eff.id, "item_id": eff.item_id,
+            }
+        parent_id = rel.source_id
+        child_id = rel.related_id
+        summary: Dict[str, Any] = {"bom_line_id": rel.id, "scope": "bom_line"}
+        line_props = rel.properties or {}
+        for key in ("uom", "quantity", "find_num", "refdes"):
+            if line_props.get(key) is not None:
+                summary[key] = line_props[key]
+        added = self._upsert_impact(
+            effectivity_id=eff.id, parent_id=parent_id, child_id=child_id,
+            reason=_BOM_LINE_REASON, child_obsoleted=False, now=now, props=summary,
+        )
+        self.session.flush()
+        return {
+            "status": "processed",
+            "scope": "bom_line",
+            "effectivity_id": eff.id,
+            "bom_line_id": rel.id,
+            "parent_item_id": parent_id,
+            "child_item_id": child_id,
+            "child_obsoleted": False,
+            "reason": _BOM_LINE_REASON,
+            "flagged_parents": 1 if added else 0,
+        }
