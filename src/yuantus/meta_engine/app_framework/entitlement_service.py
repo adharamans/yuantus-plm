@@ -16,14 +16,23 @@ is NOT an authorization source.
 """
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from typing import FrozenSet, Mapping
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from yuantus.config import get_settings
 from yuantus.meta_engine.app_framework.license_scope import resolve_license_scope
 from yuantus.meta_engine.app_framework.store_models import AppLicense
+
+logger = logging.getLogger(__name__)
+
+# PLM-COLLAB-V2 (grace): a license served past its hard expiry but inside the
+# configured grace window logs a one-time renewal warning per (tenant, license_key),
+# so the hot is_entitled path never spams the log.
+_grace_warned: set = set()
 
 # feature_key -> the app_name(s) whose active, unexpired, tenant-scoped license
 # grants it. Locked in code; license_data is NOT consulted.
@@ -68,14 +77,31 @@ class EntitlementService:
         if not app_names:
             return False  # reserved but not yet lit in P1-B
         now = datetime.utcnow()
+        # PLM-COLLAB-V2 grace: a license is still served for LICENSE_EXPIRY_GRACE_DAYS
+        # after its hard expiry (soft-degrade) instead of an abrupt cutoff mid-use.
+        # grace_days=0 (default) keeps the exact prior hard-cutoff semantics.
+        grace_days = max(int(get_settings().LICENSE_EXPIRY_GRACE_DAYS or 0), 0)
+        expiry_floor = now - timedelta(days=grace_days)
         lic = (
             self.session.query(AppLicense)
             .filter(
                 AppLicense.tenant_id == tenant_id,
                 AppLicense.status == "Active",
                 AppLicense.app_name.in_(tuple(app_names)),
-                or_(AppLicense.expires_at.is_(None), AppLicense.expires_at > now),
+                or_(AppLicense.expires_at.is_(None), AppLicense.expires_at > expiry_floor),
             )
             .first()
         )
-        return lic is not None
+        if lic is None:
+            return False
+        if lic.expires_at is not None and lic.expires_at <= now:
+            # served inside the grace window -> warn once per license so admins renew.
+            _key = (tenant_id, lic.license_key)
+            if _key not in _grace_warned:
+                _grace_warned.add(_key)
+                logger.warning(
+                    "entitlement: license %s (tenant %s) is in its expiry grace window "
+                    "(expired %s; grace %dd) -- still served; renew before the grace cutoff.",
+                    lic.license_key, tenant_id, lic.expires_at.isoformat(), grace_days,
+                )
+        return True
