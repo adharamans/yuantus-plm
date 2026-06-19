@@ -42,6 +42,40 @@ class LifecycleService:
             .first()
         )
 
+    @staticmethod
+    def _role_satisfies(role, allowed_role_id) -> bool:
+        """True if ``role`` is the transition's allowed role or inherits from it — i.e.
+        ``allowed_role_id`` is ``role`` itself or one of its ancestors up the ``parent``
+        chain. Mirrors ``RBACRole.has_permission`` (which walks UP to the parent: a role
+        inherits its parent's rights), so a descendant of the allowed role inherits the
+        transition right. Iterative + cycle-safe against a malformed parent loop.
+        """
+        seen: set = set()
+        current = role
+        while current is not None and getattr(current, "id", None) not in seen:
+            if current.id == allowed_role_id:
+                return True
+            seen.add(current.id)
+            current = getattr(current, "parent", None)
+        return False
+
+    @staticmethod
+    def _user_allowed_for_transition(user, transition_obj) -> bool:
+        """True if ``user`` may perform the transition's role-gated step. A transition with
+        no ``role_allowed_id`` is unrestricted; a superuser always passes; otherwise any of
+        the user's roles must satisfy (be, or inherit from) the allowed role. This is the
+        gate's whole role decision, factored out so it is behaviorally testable without the
+        full promote()/session machinery.
+        """
+        if not getattr(transition_obj, "role_allowed_id", None):
+            return True
+        if getattr(user, "is_superuser", False):
+            return True
+        return any(
+            LifecycleService._role_satisfies(role, transition_obj.role_allowed_id)
+            for role in (getattr(user, "roles", None) or [])
+        )
+
     def promote(
         self,
         item: Item,
@@ -143,18 +177,9 @@ class LifecycleService:
             if not user:
                 return PromoteResult(success=False, error="User not found.")
 
-            # Check if user has the allowed role (or is superuser/admin)
-            has_role = False
-            if user.is_superuser:
-                has_role = True
-            else:
-                for role in user.roles:
-                    if role.id == transition_obj.role_allowed_id:
-                        has_role = True
-                        break
-                    # Handle role hierarchy if needed (not implemented here yet)
-
-            if not has_role:
+            # Superuser bypass, else any of the user's roles must satisfy (be, or inherit
+            # from) the allowed role — the whole decision is in _user_allowed_for_transition.
+            if not self._user_allowed_for_transition(user, transition_obj):
                 return PromoteResult(
                     success=False,
                     error=f"Permission denied. Role requirement not met for transition '{transition_obj.id}'.",
