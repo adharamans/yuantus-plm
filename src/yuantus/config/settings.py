@@ -696,6 +696,15 @@ class Settings(BaseSettings):
             "flag is written."
         ),
     )
+    LIFECYCLE_TRANSITION_HISTORY_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When true (default), a successful LifecycleService.promote() records a row in "
+            "meta_lifecycle_transition_history (actor / from+to state / from+to permission / "
+            "comment / time). Best-effort: a write failure is logged and never fails the "
+            "transition. Set false to disable the audit write."
+        ),
+    )
     PUBLICATION_ECM_PATH: str = Field(
         default="/cmis/browser",
         description="CMIS compliance-reference endpoint path; not used by Transfer Receiver",

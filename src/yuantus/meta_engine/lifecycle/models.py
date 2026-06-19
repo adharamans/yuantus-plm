@@ -1,4 +1,10 @@
-from sqlalchemy import Column, String, Boolean, ForeignKey, Integer, false
+import uuid
+from datetime import datetime
+
+from sqlalchemy import (
+    Column, String, Boolean, ForeignKey, Integer, false, DateTime, Text, JSON, Index,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from typing import Optional, List
 
@@ -133,4 +139,44 @@ class StateIdentityPermission(Base):
 
     state: Mapped["LifecycleState"] = relationship(
         "LifecycleState", back_populates="identity_permissions"
+    )
+
+
+class LifecycleTransitionHistory(Base):
+    """Durable audit record of a SUCCESSFUL lifecycle state transition.
+
+    Written once per committed promote() (best-effort: a write failure never fails the
+    transition). Records the state move, the state-driven permission move (#808), the actor,
+    and the promote() comment. ``outcome`` is always "success" in v1 — reserved so a future
+    all-attempts slice can record denied/failed attempts without a schema change.
+
+    ``actor_user_id`` is intentionally FK-free (a system/automated promote may run with an
+    unvalidated user id, e.g. 0); ``item_id`` is a recorded value (no FK) so the audit row
+    survives item deletion (immutable history), mirroring DateObsoleteImpact.
+    """
+
+    __tablename__ = "meta_lifecycle_transition_history"
+
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    item_id = Column(String, nullable=False, index=True)
+    from_state_id = Column(String, nullable=True)
+    from_state_name = Column(String, nullable=True)
+    to_state_id = Column(String, nullable=True)
+    to_state_name = Column(String, nullable=True)
+    from_permission_id = Column(String, nullable=True)
+    to_permission_id = Column(String, nullable=True)
+    transition_id = Column(String, nullable=True)
+    lifecycle_map_id = Column(String, nullable=True)
+    actor_user_id = Column(Integer, nullable=True)  # no FK: system/automated promotes
+    comment = Column(Text, nullable=True)
+    outcome = Column(String(20), nullable=False, default="success", server_default="success")
+    properties = Column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index(
+            "ix_meta_lifecycle_transition_history_item_created",
+            "item_id",
+            "created_at",
+        ),
     )

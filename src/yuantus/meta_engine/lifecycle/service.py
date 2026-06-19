@@ -1,5 +1,10 @@
 from typing import Optional
-from .models import LifecycleMap, LifecycleState, LifecycleTransition
+from .models import (
+    LifecycleMap,
+    LifecycleState,
+    LifecycleTransition,
+    LifecycleTransitionHistory,
+)
 from ..models.item import Item
 from ..models.meta_schema import ItemType
 from dataclasses import dataclass
@@ -334,8 +339,13 @@ class LifecycleService:
                     success=False, error=f"Version release failed: {str(e)}"
                 )
 
-        # 9. 记录历史 (Placeholder - actual history logging to a table or event stream)
-        # self._record_history(item, current_state_obj, target_state_obj, user_id, comment)
+        # 9. 记录历史 — durable audit row for this successful transition. Written here, after
+        # all three rollback returns, so only committed transitions are recorded; best-effort
+        # (a write failure is logged, never fails the transition).
+        self._record_transition_history(
+            item, current_state_obj, target_state_obj, transition_obj,
+            user_id, comment, old_permission_id,
+        )
 
         # 9. 执行 after_transition hooks
         context = self.hook_registry.execute(
@@ -351,6 +361,55 @@ class LifecycleService:
             from_state=current_state_obj.name,
             to_state=target_state_obj.name,
         )
+
+    def _record_transition_history(
+        self, item, from_state, to_state, transition, actor_user_id, comment, old_permission_id
+    ) -> None:
+        """Best-effort audit of a successful transition (Slice 1).
+
+        The history INSERT runs inside a SAVEPOINT (``begin_nested``) so its failure rolls back
+        only the audit row, never poisons the session, and never breaks the caller's commit.
+
+        IMPORTANT: the already-applied business state is flushed FIRST, *outside* the audit
+        guard. ``flush()`` (and ``begin_nested()``'s own pre-flush) flush the WHOLE pending set
+        — outer business state included — so doing the business flush inside the try/except
+        would let a genuine business flush error be mislabeled "history write failed" and
+        swallowed, leaving the session rollback-pending under a success return. Flushing it
+        outside lets its error propagate normally and scopes best-effort to the history row
+        only. Default-on, gated by ``LIFECYCLE_TRANSITION_HISTORY_ENABLED``.
+        """
+        from yuantus.config import get_settings  # lazy: avoid an import cycle at module load
+
+        if not getattr(get_settings(), "LIFECYCLE_TRANSITION_HISTORY_ENABLED", True):
+            return
+        # Flush the (already-applied) business state OUTSIDE the audit guard: a real business
+        # flush error must propagate, not be swallowed as a history-write failure.
+        self.session.flush()
+        try:
+            with self.session.begin_nested():
+                self.session.add(
+                    LifecycleTransitionHistory(
+                        item_id=item.id,
+                        from_state_id=getattr(from_state, "id", None),
+                        from_state_name=getattr(from_state, "name", None),
+                        to_state_id=getattr(to_state, "id", None),
+                        to_state_name=getattr(to_state, "name", None),
+                        from_permission_id=old_permission_id,
+                        to_permission_id=getattr(item, "permission_id", None),
+                        transition_id=getattr(transition, "id", None),
+                        lifecycle_map_id=getattr(transition, "lifecycle_map_id", None),
+                        actor_user_id=actor_user_id,
+                        comment=comment or None,
+                        outcome="success",
+                    )
+                )
+                self.session.flush()  # surface any DB error inside the savepoint
+        except Exception as exc:  # best-effort: an audit write must never break the promote
+            logger.warning(
+                "transition-history write failed for item %s: %s",
+                getattr(item, "id", "?"),
+                exc,
+            )
 
     def attach_lifecycle(self, item_type: ItemType, item: Item):
         """

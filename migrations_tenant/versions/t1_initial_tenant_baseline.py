@@ -302,6 +302,24 @@ def upgrade() -> None:
     sa.Column('description', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('meta_lifecycle_transition_history',
+    sa.Column('id', sa.String(length=64), nullable=False),
+    sa.Column('item_id', sa.String(), nullable=False),
+    sa.Column('from_state_id', sa.String(), nullable=True),
+    sa.Column('from_state_name', sa.String(), nullable=True),
+    sa.Column('to_state_id', sa.String(), nullable=True),
+    sa.Column('to_state_name', sa.String(), nullable=True),
+    sa.Column('from_permission_id', sa.String(), nullable=True),
+    sa.Column('to_permission_id', sa.String(), nullable=True),
+    sa.Column('transition_id', sa.String(), nullable=True),
+    sa.Column('lifecycle_map_id', sa.String(), nullable=True),
+    sa.Column('actor_user_id', sa.Integer(), nullable=True),
+    sa.Column('comment', sa.Text(), nullable=True),
+    sa.Column('outcome', sa.String(length=20), server_default='success', nullable=False),
+    sa.Column('properties', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('meta_maintenance_categories',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('name', sa.String(length=200), nullable=False),
@@ -1915,6 +1933,9 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_eco_activity_gates_eco_id'), 'meta_eco_activity_gates', ['eco_id'], unique=False)
     op.create_index(op.f('ix_meta_eco_activity_gates_status'), 'meta_eco_activity_gates', ['status'], unique=False)
     op.create_index(op.f('ix_meta_erp_publication_outbox_item_id'), 'meta_erp_publication_outbox', ['item_id'], unique=False)
+    op.create_index(op.f('ix_meta_lifecycle_transition_history_created_at'), 'meta_lifecycle_transition_history', ['created_at'], unique=False)
+    op.create_index('ix_meta_lifecycle_transition_history_item_created', 'meta_lifecycle_transition_history', ['item_id', 'created_at'], unique=False)
+    op.create_index(op.f('ix_meta_lifecycle_transition_history_item_id'), 'meta_lifecycle_transition_history', ['item_id'], unique=False)
     op.create_index(op.f('ix_meta_maintenance_categories_parent_id'), 'meta_maintenance_categories', ['parent_id'], unique=False)
     op.create_index(op.f('ix_meta_mes_consumption_inbox_idempotency_key'), 'meta_mes_consumption_inbox', ['idempotency_key'], unique=True)
     op.create_index(op.f('ix_meta_mes_consumption_inbox_next_attempt_at'), 'meta_mes_consumption_inbox', ['next_attempt_at'], unique=False)
@@ -2186,6 +2207,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_mes_consumption_inbox_next_attempt_at'), table_name='meta_mes_consumption_inbox')
     op.drop_index(op.f('ix_meta_mes_consumption_inbox_idempotency_key'), table_name='meta_mes_consumption_inbox')
     op.drop_index(op.f('ix_meta_maintenance_categories_parent_id'), table_name='meta_maintenance_categories')
+    op.drop_index(op.f('ix_meta_lifecycle_transition_history_item_id'), table_name='meta_lifecycle_transition_history')
+    op.drop_index('ix_meta_lifecycle_transition_history_item_created', table_name='meta_lifecycle_transition_history')
+    op.drop_index(op.f('ix_meta_lifecycle_transition_history_created_at'), table_name='meta_lifecycle_transition_history')
     op.drop_index(op.f('ix_meta_erp_publication_outbox_item_id'), table_name='meta_erp_publication_outbox')
     op.drop_index(op.f('ix_meta_eco_activity_gates_status'), table_name='meta_eco_activity_gates')
     op.drop_index(op.f('ix_meta_eco_activity_gates_eco_id'), table_name='meta_eco_activity_gates')
@@ -2315,6 +2339,7 @@ def downgrade() -> None:
     op.drop_table('meta_methods')
     op.drop_table('meta_mes_consumption_inbox')
     op.drop_table('meta_maintenance_categories')
+    op.drop_table('meta_lifecycle_transition_history')
     op.drop_table('meta_lifecycle_maps')
     op.drop_table('meta_grid_views')
     op.drop_table('meta_forms')
