@@ -933,15 +933,27 @@ class VersionService:
     def find_effective_version(
         self, item_id: str, target_date: datetime
     ) -> Optional[ItemVersion]:
-        """
-        Finds the version of an item that is effective on the given date.
+        """Find the version whose Date effectivity window covers ``target_date``.
+
+        Null start/end bounds are open (``-inf`` / ``+inf``), matching the canonical
+        ``EffectivityService._check_date`` semantics — a NULL ``start_date`` means
+        "effective from the beginning", so an open-start version IS returned (previously
+        such rows were wrongly excluded by the bare ``start_date <= target_date``).
+
+        Note: this answers "which version's *Date* window covers this date" and so
+        requires a ``Date`` effectivity row; a version with no date effectivity is not
+        returned (distinct from ``EffectivityService.check_effectivity``, which treats an
+        item with no effectivity as always effective). On a tie the newest version
+        (``created_at`` desc) wins.
         """
         query = (
             self.session.query(ItemVersion)
             .join(Effectivity, ItemVersion.id == Effectivity.version_id)
             .filter(ItemVersion.item_id == item_id)
             .filter(Effectivity.effectivity_type == "Date")
-            .filter(Effectivity.start_date <= target_date)
+            .filter(
+                or_(Effectivity.start_date == None, Effectivity.start_date <= target_date)
+            )
             .filter(
                 or_(Effectivity.end_date == None, Effectivity.end_date >= target_date)
             )
