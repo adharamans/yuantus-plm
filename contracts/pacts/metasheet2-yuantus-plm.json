@@ -3395,6 +3395,237 @@
           }
         }
       }
+    },
+    {
+      "description": "fetch the advisory PLM integration capability manifest for an entitled tenant",
+      "providerStates": [
+        {
+          "name": "tenant-1 holds an active plm.bom_multitable license"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/integrations/capabilities",
+        "headers": {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.example",
+          "x-tenant-id": "tenant-1"
+        },
+        "matchingRules": {
+          "header": {
+            "$.Authorization": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^Bearer .+"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "schema_version": "v1",
+          "provider": "yuantus-plm",
+          "advisory": true,
+          "features": {
+            "bom_multitable": {
+              "supported": true,
+              "api_version": "v1",
+              "entitled": true,
+              "scenarios": [
+                "bom_review"
+              ],
+              "cache_scope": {
+                "supported": "global",
+                "entitled": "tenant"
+              }
+            }
+          }
+        },
+        "matchingRules": {
+          "body": {
+            "$.schema_version": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.provider": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.advisory": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.features.bom_multitable.supported": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.features.bom_multitable.entitled": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.features.bom_multitable.api_version": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "fetch the governed read-only BOM multitable context for an entitled part",
+      "providerStates": [
+        {
+          "name": "tenant-1 holds an active plm.bom_multitable license and part 01H000000000000000000000P1 has a Part-BOM line"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/bom/multitable/01H000000000000000000000P1/context",
+        "headers": {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.example",
+          "x-tenant-id": "tenant-1"
+        },
+        "matchingRules": {
+          "header": {
+            "$.Authorization": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^Bearer .+"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "feature_key": "bom_multitable",
+          "entitled": true,
+          "upgrade": {
+            "available": false
+          },
+          "context": {
+            "part": {
+              "part_id": "01H000000000000000000000P1",
+              "item_number": "P-0001",
+              "name": "Mounting Bracket",
+              "state": "Released",
+              "generation": 1
+            },
+            "lines": [
+              {
+                "bom_line_id": "01H000000000000000000000R1",
+                "part_id": "01H000000000000000000000P2",
+                "item_number": "P-0002",
+                "name": "Bolt M6",
+                "state": "Released",
+                "generation": 1,
+                "quantity": 4,
+                "uom": "ea",
+                "find_num": "10",
+                "refdes": "B1",
+                "level": 1,
+                "path": [
+                  "01H000000000000000000000P1"
+                ],
+                "path_labels": [
+                  "P-0001"
+                ],
+                "source_version": 1,
+                "source_updated_at": "2026-04-11T00:00:00.000Z",
+                "sync_status": "snapshot"
+              }
+            ],
+            "source_version": 1,
+            "source_updated_at": "2026-04-11T00:00:00.000Z",
+            "sync_status": "snapshot",
+            "template_key": "bom_review"
+          }
+        },
+        "matchingRules": {
+          "body": {
+            "$.feature_key": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.entitled": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.context.part.part_id": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.context.lines": {
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.context.lines[*].bom_line_id": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.context.lines[*].quantity": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.context.template_key": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ]
 }

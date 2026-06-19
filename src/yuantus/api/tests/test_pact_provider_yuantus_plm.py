@@ -1039,6 +1039,43 @@ def _seed_meta_engine_data() -> None:
                 )
         session.commit()
 
+    # PLM-COLLAB V1.1: seed an ACTIVE PERPETUAL plm.bom_multitable license for the pact tenant via the
+    # PROVEN import path (not a raw insert), so the new manifest + BOM-context interactions verify
+    # entitled:true. Ephemeral keypair signs; import_license takes the pubkeys as an argument.
+    import base64 as _b64
+    import uuid as _uuid
+    from cryptography.hazmat.primitives import serialization as _ser
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as _Ed25519
+    from yuantus.meta_engine.app_framework.license_verification import canonical_payload_bytes as _canon
+    from yuantus.meta_engine.app_framework.license_import_service import (
+        LicenseImportService as _LicenseImportService,
+    )
+
+    _lic_priv = _Ed25519.generate()
+    _lic_pub = _b64.b64encode(
+        _lic_priv.public_key().public_bytes(_ser.Encoding.Raw, _ser.PublicFormat.Raw)
+    ).decode()
+    _lic_payload = {
+        "tenant_id": PACT_TENANT_ID,
+        "app_names": ["plm.bom_multitable"],
+        "features": ["bom_multitable"],
+        "plan_type": "Pilot",
+        "license_key": _uuid.uuid4().hex,
+        "subject": "Pact",
+        "issued_at": "2026-04-11T00:00:00Z",
+        "expires_at": None,
+    }
+    _lic_obj = {
+        "alg": "Ed25519",
+        "kid": "pact-kid",
+        "payload": _lic_payload,
+        "signature": _b64.b64encode(_lic_priv.sign(_canon(_lic_payload))).decode(),
+    }
+    with db_mod.SessionLocal() as session:
+        _LicenseImportService(session).import_license(_lic_obj, {"pact-kid": _lic_pub})
+        session.commit()
+        sys.stderr.write("[seed] perpetual plm.bom_multitable license committed for V1.1 pact\n")
+
 
 def _seed_identity_user() -> None:
     """Create the test tenant and user that the auth/login pact uses."""
