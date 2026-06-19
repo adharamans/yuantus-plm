@@ -395,6 +395,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_cutted_parts_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_date_effectivity_obsolete_service.py \
             src/yuantus/meta_engine/tests/test_date_obsolete_wiring.py \
+            src/yuantus/meta_engine/tests/test_date_obsolete_worker_cli.py \
             src/yuantus/meta_engine/tests/test_db_cli_identity_contracts.py \
             src/yuantus/meta_engine/tests/test_dedup_admin_guard_contracts.py \
             src/yuantus/meta_engine/tests/test_delivery_doc_index_all_sections_sorting_contracts.py \

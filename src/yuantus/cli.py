@@ -267,6 +267,112 @@ def ecm_publication_worker(
         typer.echo(f"ECM publication worker '{w.worker_id}' stopped.", err=True)
 
 
+@app.command(name="date-obsolete-worker")
+def date_obsolete_worker(
+    worker_id: Optional[str] = typer.Option(None, help="Worker id"),
+    poll_interval: Optional[int] = typer.Option(
+        None, help="Poll interval seconds (default from settings)"
+    ),
+    once: bool = typer.Option(False, help="Run one sweep then exit"),
+    system_user_id: Optional[int] = typer.Option(
+        None,
+        "--system-user-id",
+        help=(
+            "User id recorded for the auto-obsolete lifecycle promote (default from "
+            "settings). Must be a real (service) user or the promote records "
+            "child_obsolete_failed and only the parent flag is written."
+        ),
+    ),
+    tenant: Optional[str] = typer.Option(None, "--tenant", help="Tenant id"),
+    org: Optional[str] = typer.Option(None, "--org", help="Org id"),
+) -> None:
+    """Run the CAD-PDM C3 date-BOM auto-obsolete worker (default-OFF, double-gated).
+
+    Each sweep scans EXPIRED date effectivities and, for every fully-expired Item
+    (no remaining effective version), promotes it to lifecycle Obsolete and flags
+    its depth-1 where-used parents; the sweep is idempotent, so re-running is safe.
+    Two gates, both required: the global kill-switch DATE_EFFECTIVITY_OBSOLETE_ENABLED
+    (restart-only) and the per-tenant `cadpdm_date_obsolete` entitlement.
+
+    Tenant scope: unlike the publication workers, this sweep is PER-TENANT -- it runs
+    under the context tenant's schema and checks that tenant's entitlement. In a
+    multi-tenant deployment run one invocation per tenant (pass --tenant); in
+    single-tenancy --tenant is not required.
+    """
+    settings = get_settings()
+    mode = getattr(settings, "TENANCY_MODE", "single")
+
+    # Operability guard: a multi-tenant deployment REQUIRES tenant (and, in
+    # db-per-tenant-org, org) context -- get_db_session() raises a bare RuntimeError
+    # otherwise, which on the --once path leaks as a raw traceback (run_forever logs and
+    # retries). Fail fast with a clear message + exit 2 instead.
+    if mode != "single" and tenant is None:
+        typer.echo(
+            f"--tenant is required in TENANCY_MODE={mode!r}: the date-obsolete sweep "
+            "runs per-tenant. Run one invocation per tenant.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if mode == "db-per-tenant-org" and org is None:
+        typer.echo(
+            f"--org is required in TENANCY_MODE={mode!r}: this mode scopes the session by "
+            "tenant AND org. Pass --org alongside --tenant.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    if tenant is not None:
+        tenant_id_var.set(tenant)
+    if org is not None:
+        org_id_var.set(org)
+
+    # Operability hints (no behaviour change -- the worker is a no-op when gated off).
+    if not getattr(settings, "DATE_EFFECTIVITY_OBSOLETE_ENABLED", False):
+        typer.echo(
+            "Note: DATE_EFFECTIVITY_OBSOLETE_ENABLED is off -- the worker is a no-op "
+            "until you enable it and restart (the setting is read once at startup).",
+            err=True,
+        )
+    effective_system_user = (
+        system_user_id
+        if system_user_id is not None
+        else getattr(settings, "DATE_EFFECTIVITY_OBSOLETE_SYSTEM_USER_ID", 0)
+    )
+    if not effective_system_user:
+        typer.echo(
+            "Note: system user id is 0 -- the lifecycle promote will record "
+            "child_obsolete_failed and only parent flags are written. Set "
+            "--system-user-id or DATE_EFFECTIVITY_OBSOLETE_SYSTEM_USER_ID to a real "
+            "service user to actually obsolete Items.",
+            err=True,
+        )
+
+    from yuantus.meta_engine.bootstrap import import_all_models
+    from yuantus.meta_engine.services.date_obsolete_worker import DateObsoleteWorker
+
+    import_all_models()
+
+    w = DateObsoleteWorker(
+        worker_id=worker_id or "cadpdm-date-obsolete-worker-1",
+        poll_interval_seconds=poll_interval,
+        system_user_id=system_user_id,
+    )
+    if once:
+        processed = w.run_once()
+        typer.echo(f"Processed {processed} expired date-effectivity row(s).")
+        return
+
+    typer.echo(
+        f"Date-obsolete worker '{w.worker_id}' started. Press Ctrl+C to stop.",
+        err=True,
+    )
+    try:
+        w.run_forever()
+    except KeyboardInterrupt:
+        w.stop()
+        typer.echo(f"Date-obsolete worker '{w.worker_id}' stopped.", err=True)
+
+
 @app.command()
 def scheduler(
     poll_interval: Optional[int] = typer.Option(
