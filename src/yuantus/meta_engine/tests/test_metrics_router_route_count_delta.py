@@ -47,7 +47,9 @@ from yuantus.api.app import create_app
 #   POST /api/v1/consumption/plans/{plan_id}/mes-actuals).
 # 716 = 713 + 3 MES inbox ops routes (Consumption R2.5b: list/get/replay).
 # 719 = 716 + 3 CAD-PDM C3 date-obsolete impact ops routes (list/get/acknowledge).
-EXPECTED_TOTAL_ROUTES = 719
+# 720 = 719 + 1 lifecycle transition-history read route (Slice 2:
+#   GET /api/v1/items/{item_id}/transition-history) -- authenticated read.
+EXPECTED_TOTAL_ROUTES = 720
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

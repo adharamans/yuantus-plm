@@ -230,6 +230,9 @@ from yuantus.meta_engine.web.parallel_tasks_consumption_router import (
 from yuantus.meta_engine.web.date_obsolete_ops_router import (
     date_obsolete_ops_router,
 )
+from yuantus.meta_engine.web.lifecycle_transition_history_router import (
+    lifecycle_transition_history_router,
+)
 from yuantus.meta_engine.web.parallel_tasks_doc_sync_router import (
     parallel_tasks_doc_sync_router,
 )
@@ -421,6 +424,7 @@ def create_app() -> FastAPI:
     app.include_router(parallel_tasks_cad_3d_router, prefix="/api/v1")
     app.include_router(parallel_tasks_consumption_router, prefix="/api/v1")
     app.include_router(date_obsolete_ops_router, prefix="/api/v1")
+    app.include_router(lifecycle_transition_history_router, prefix="/api/v1")
     app.include_router(parallel_tasks_doc_sync_router, prefix="/api/v1")
     app.include_router(parallel_tasks_eco_activities_router, prefix="/api/v1")
     app.include_router(parallel_tasks_ops_router, prefix="/api/v1")

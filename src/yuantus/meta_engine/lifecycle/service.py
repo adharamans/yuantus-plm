@@ -362,6 +362,26 @@ class LifecycleService:
             to_state=target_state_obj.name,
         )
 
+    def get_transition_history(self, item_id: str, *, limit: Optional[int] = None):
+        """Return an item's lifecycle transition-history rows, most-recent first.
+
+        Read surface (Slice 2) for the audit table written by ``promote()`` (Slice 1).
+        Ordered by ``created_at`` descending, with an ``id`` tiebreak for stable order;
+        optional ``limit``. Does NOT check item existence — the route does that, so it can
+        distinguish a 404 (no such item) from an empty list (item with no history yet).
+        """
+        query = (
+            self.session.query(LifecycleTransitionHistory)
+            .filter(LifecycleTransitionHistory.item_id == item_id)
+            .order_by(
+                LifecycleTransitionHistory.created_at.desc(),
+                LifecycleTransitionHistory.id.desc(),
+            )
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
+
     def _record_transition_history(
         self, item, from_state, to_state, transition, actor_user_id, comment, old_permission_id
     ) -> None:
