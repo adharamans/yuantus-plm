@@ -1132,6 +1132,12 @@ def seed_data(
         get_sessionmaker_for_tenant,
     )
     from yuantus.scripts.mock_data import run_seed
+    from yuantus.meta_engine.bootstrap import import_all_models
+
+    # Register all Meta Engine ORM models so FK targets (e.g. meta_item_types)
+    # resolve when seeding meta_items. init_db() does this at app startup, but
+    # the standalone CLI process does not boot the app.
+    import_all_models()
 
     settings = get_settings()
     if settings.TENANCY_MODE == "db-per-tenant-org":

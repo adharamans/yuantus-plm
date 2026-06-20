@@ -136,6 +136,7 @@ class DataSeeder:
         relationships_count = 0
 
         def add_children(parent: Item, current_depth: int):
+            nonlocal relationships_count
             if current_depth >= depth or not pool:
                 return
 
