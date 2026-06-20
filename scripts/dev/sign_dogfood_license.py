@@ -48,7 +48,7 @@ BOM_MULTITABLE_APP = "plm.bom_multitable"
 
 
 def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
-                   kid: str, plan_type: str, issued_at: str) -> dict:
+                   kid: str, plan_type: str, issued_at: str, seats: int | None = None) -> dict:
     payload = {
         "tenant_id": tenant_id,
         "app_names": [BOM_MULTITABLE_APP],
@@ -59,6 +59,10 @@ def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
         "issued_at": issued_at,
         "expires_at": None,  # perpetual -- V1 constraint (no grace until Phase 4)
     }
+    if seats is not None:
+        # PLM-COLLAB-V2 seats (Option A): projected onto identity-side TenantQuota.max_users
+        # at `yuantus license import` (see security/auth/seat_projection.py).
+        payload["seats"] = seats
     signature = base64.b64encode(priv.sign(canonical_payload_bytes(payload))).decode()
     return {"alg": "Ed25519", "kid": kid, "payload": payload, "signature": signature}
 
@@ -70,6 +74,9 @@ def main() -> int:
     ap.add_argument("--kid", default="dogfood-1",
                     help="key id; must match the deployment's YUANTUS_LICENSE_PUBLIC_KEYS entry")
     ap.add_argument("--plan-type", default="Pilot")
+    ap.add_argument("--seats", type=int, default=None,
+                    help="optional paid seat cap (int >= 1); projected onto TenantQuota.max_users "
+                         "at import (PLM-COLLAB-V2 Option A). Omit for no cap (unlimited).")
     ap.add_argument("--issued-at", default=None, help="ISO-8601; default: now (UTC)")
     ap.add_argument("--out", default="dogfood-license.json", help="output license file path")
     ap.add_argument("--priv-out", default=None,
@@ -86,7 +93,7 @@ def main() -> int:
 
     license_obj = build_and_sign(
         priv, tenant_id=args.tenant_id, subject=args.subject,
-        kid=args.kid, plan_type=args.plan_type, issued_at=issued_at,
+        kid=args.kid, plan_type=args.plan_type, issued_at=issued_at, seats=args.seats,
     )
 
     # Self-check: the deployment MUST accept what we just signed (same offline verify path).
