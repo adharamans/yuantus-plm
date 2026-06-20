@@ -1,8 +1,12 @@
 # PLM-Collab V2 — Seats (per-license user limit): design for review
 
-**Status:** design-only. No code in this PR. This is the `draft → review → build`
-gate: review this, decide the one open fork (§4: **A vs B2**; B1 is the trap to
-avoid), then S1 is built.
+**Status:** design-only. No code in this PR.
+
+**DECISION (2026-06-19, owner-ratified): Option A.** The paid seat cap is sourced from
+the license and projected at **import time** into the identity-side
+`TenantQuota.max_users`; `is_entitled()` stays seats-free. **No** new per-SKU quota
+(that is the deferred B2 / assignment subsystem, §4 — explicitly not built now to avoid
+the B1 masquerade). S1 builds this projection.
 
 **Scope.** How a "seats" cap (a limit on how many users a paid feature covers) is
 *modeled, counted, and enforced* for the collab SKU(s). Deliberately small and
