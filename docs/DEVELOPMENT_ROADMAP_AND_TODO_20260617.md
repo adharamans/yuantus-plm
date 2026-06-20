@@ -1,7 +1,9 @@
 # YuantusPLM — Development Roadmap & TODO (current snapshot)
 
 Date: 2026-06-17 · Original snapshot baseline `main` @ `91da3591`; execution-roadmap body
-**updated through `main` @ `1eebc293`** (MES line + CAD-PDM C3 merged), with a 2026-06-18
+**updated through `main` @ `1eebc293`** (MES line + CAD-PDM C3 merged; the three C3 follow-ups
+**#803/#804/#806** reclassified as landed on 2026-06-19 — see §3/§5, body not otherwise re-reconciled
+past `1eebc293`), with a 2026-06-18
 PLM x MetaSheet status pointer added after `main` @ `18389f81` (#780).
 Status: **living snapshot** — the current **working roadmap** (execution entry point) as of this date.
 
@@ -125,8 +127,9 @@ against live code first.
   rounds caught + fixed real bugs (false-obsolete on open-start versions; a permanently-dead
   entitlement gate; a non-converging batch). Owner-ratified decisions: obsolete = Item lifecycle
   "Obsolete" via `promote` (**not** B1 `is_superseded`, which is orthogonal), flag-not-cascade,
-  depth-1, polling worker. **Out of scope (follow-ups)**: BOM-line (`item_id`-scoped) effectivities;
-  a standalone worker-daemon CLI; the pre-existing `find_effective_version` NULL-start narrowness.
+  depth-1, polling worker. **Originally out-of-scope follow-ups, since landed on main 2026-06-18/19**: BOM-line
+  (`item_id`-scoped) effectivities → **#806**; a standalone worker-daemon CLI → **#803**; the
+  pre-existing `find_effective_version` NULL-start narrowness → **#804**.
 
 - [ ] **MetaSheet bridge activation** · size **M** · SSO-gated. `api/routers/metasheet_bridge.py`
   still returns a static `{"active": false, "entitlement_required": true}`. Depends on the
@@ -150,15 +153,19 @@ cross-repo, not on more solo build:
 
 1. **jti denylist / MetaSheet bridge** — both need the **SSO / cross-repo decision** (they live
    behind metasheet2 + the not-yet-opted identity-session slice); not clean Yuantus-only builds.
-2. **Optional Yuantus-local follow-ups** surfaced this cycle: the pre-existing
-   `find_effective_version` NULL-start narrowness (a separate, regression-scanned fix), C3's
-   BOM-line-scoped effectivities, and a standalone C3 worker-daemon CLI. None urgent; pick on a
-   concrete driver.
+2. **Optional Yuantus-local follow-ups** surfaced this cycle — **all three since MERGED to main**,
+   no longer open TODO: `find_effective_version` NULL-start narrowness → **#804**; C3 BOM-line
+   (`item_id`-scoped) effectivities → **#806**; standalone C3 worker-daemon CLI → **#803**. With
+   these landed, **no C3-specific follow-up from this three-item §5.2 list remains open**; the next
+   picked item is the owner/cross-repo SSO slice (item 1). Unrelated open tails elsewhere in this
+   roadmap (e.g. the §2 MES_INGEST_TENANT_ID attribution follow-up, and #804's ratifiable
+   "no-Date = always-effective?" semantic note) are not closed by this reclassification.
 
 ## 6. Maintenance
 
 Point-in-time snapshot (`2026-06-17`, original `main@91da3591`, execution-roadmap body **updated
-through `main@1eebc293`** after the MES line merged; PLM x MetaSheet pointer added on
+through `main@1eebc293`** after the MES line merged (the three C3 follow-ups #803/#804/#806
+reclassified as landed 2026-06-19; body not otherwise re-reconciled past `1eebc293`); PLM x MetaSheet pointer added on
 `2026-06-18` after `main@18389f81`). Update it as slices land; **re-verify any item against current
 code/git before starting** — the formal plan docs went stale precisely because that step was
 skipped.
