@@ -47,13 +47,13 @@ def project_license_seats(
         return None
 
     # A seat cap must be a concrete positive integer. Skip (fail-open: leave max_users
-    # untouched = unlimited) and log loudly on anything else, rather than projecting a
+    # unchanged, preserving any prior cap) and log loudly on anything else, rather than projecting a
     # footgun -- e.g. ``max_users=0`` would lock the whole tenant out under enforce mode.
     # ``bool`` is an ``int`` subclass, so reject it explicitly.
     if isinstance(seats, bool) or not isinstance(seats, int) or seats < 1:
         logger.warning(
             "seat projection skipped: license for tenant %r has invalid seats=%r "
-            "(need an int >= 1); TenantQuota.max_users left unchanged (unlimited). "
+            "(need an int >= 1); TenantQuota.max_users left unchanged (any prior cap preserved). "
             "Re-issue the license with a valid seat count.",
             payload.get("tenant_id"),
             seats,

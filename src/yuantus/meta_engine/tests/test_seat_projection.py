@@ -135,7 +135,7 @@ def test_projected_cap_is_enforceable_at_provisioning(identity_session, monkeypa
 # --- signer fail-fast: the mint side must refuse what the projection would skip --------------
 # Finding: scripts/dev/sign_dogfood_license.py accepted any int for --seats while its help text
 # and seat_projection.py both require >= 1, so `--seats 0` minted a self-verifying-but-inert
-# license (PASS, imports, then projects no cap). The signer must enforce its own contract.
+# license (PASS, imports, then projects nothing). The signer must enforce its own contract.
 
 _SIGN_KW = dict(tenant_id="acme", subject="X", kid="k1", plan_type="Pilot",
                 issued_at="2026-01-01T00:00:00+00:00")
