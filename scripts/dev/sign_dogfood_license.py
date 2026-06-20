@@ -49,6 +49,12 @@ BOM_MULTITABLE_APP = "plm.bom_multitable"
 
 def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
                    kid: str, plan_type: str, issued_at: str, seats: int | None = None) -> dict:
+    # Refuse to MINT what seat_projection.py would refuse to HONOR: a seats clause < 1 is
+    # fail-open-skipped at import (silently no cap), so enforce the signer's stated "int >= 1"
+    # contract at the source rather than emitting a self-verifying-but-inert license. bool is an
+    # int subclass -> reject explicitly; this mirrors security/auth/seat_projection.py.
+    if seats is not None and (isinstance(seats, bool) or not isinstance(seats, int) or seats < 1):
+        raise ValueError(f"seats must be an int >= 1 when provided (omit for no cap); got {seats!r}")
     payload = {
         "tenant_id": tenant_id,
         "app_names": [BOM_MULTITABLE_APP],
@@ -67,6 +73,23 @@ def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
     return {"alg": "Ed25519", "kid": kid, "payload": payload, "signature": signature}
 
 
+def _seats_arg(raw: str) -> int:
+    """argparse ``type=`` for ``--seats``: enforce the int >= 1 contract at parse time.
+
+    Fail fast so an operator cannot mint a self-verifying license whose seats clause the
+    import-time projection then silently rejects (< 1 -> fail-open no-op = no cap).
+    """
+    try:
+        value = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--seats must be an integer >= 1; got {raw!r}")
+    if value < 1:
+        raise argparse.ArgumentTypeError(
+            f"--seats must be >= 1 (a 0 or negative cap projects as 'no cap'); got {value}"
+        )
+    return value
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sign a perpetual plm.bom_multitable dogfood license.")
     ap.add_argument("--tenant-id", required=True, help="tenant the license activates for")
@@ -74,9 +97,9 @@ def main() -> int:
     ap.add_argument("--kid", default="dogfood-1",
                     help="key id; must match the deployment's YUANTUS_LICENSE_PUBLIC_KEYS entry")
     ap.add_argument("--plan-type", default="Pilot")
-    ap.add_argument("--seats", type=int, default=None,
-                    help="optional paid seat cap (int >= 1); projected onto TenantQuota.max_users "
-                         "at import (PLM-COLLAB-V2 Option A). Omit for no cap (unlimited).")
+    ap.add_argument("--seats", type=_seats_arg, default=None,
+                    help="optional paid seat cap (int >= 1; values < 1 are rejected); projected onto "
+                         "TenantQuota.max_users at import (PLM-COLLAB-V2 Option A). Omit for no cap.")
     ap.add_argument("--issued-at", default=None, help="ISO-8601; default: now (UTC)")
     ap.add_argument("--out", default="dogfood-license.json", help="output license file path")
     ap.add_argument("--priv-out", default=None,
