@@ -48,7 +48,13 @@ BOM_MULTITABLE_APP = "plm.bom_multitable"
 
 
 def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
-                   kid: str, plan_type: str, issued_at: str) -> dict:
+                   kid: str, plan_type: str, issued_at: str, seats: int | None = None) -> dict:
+    # Refuse to MINT what seat_projection.py would refuse to HONOR: a seats clause < 1 is
+    # fail-open-skipped at import (silently no projection), so enforce the signer's stated "int >= 1"
+    # contract at the source rather than emitting a self-verifying-but-inert license. bool is an
+    # int subclass -> reject explicitly; this mirrors security/auth/seat_projection.py.
+    if seats is not None and (isinstance(seats, bool) or not isinstance(seats, int) or seats < 1):
+        raise ValueError(f"seats must be an int >= 1 when provided (omit to skip projection); got {seats!r}")
     payload = {
         "tenant_id": tenant_id,
         "app_names": [BOM_MULTITABLE_APP],
@@ -59,8 +65,29 @@ def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
         "issued_at": issued_at,
         "expires_at": None,  # perpetual -- V1 constraint (no grace until Phase 4)
     }
+    if seats is not None:
+        # PLM-COLLAB-V2 seats (Option A): projected onto identity-side TenantQuota.max_users
+        # at `yuantus license import` (see security/auth/seat_projection.py).
+        payload["seats"] = seats
     signature = base64.b64encode(priv.sign(canonical_payload_bytes(payload))).decode()
     return {"alg": "Ed25519", "kid": kid, "payload": payload, "signature": signature}
+
+
+def _seats_arg(raw: str) -> int:
+    """argparse ``type=`` for ``--seats``: enforce the int >= 1 contract at parse time.
+
+    Fail fast so an operator cannot mint a self-verifying license whose seats clause the
+    import-time projection then silently rejects (< 1 -> fail-open no-op = no projection).
+    """
+    try:
+        value = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--seats must be an integer >= 1; got {raw!r}")
+    if value < 1:
+        raise argparse.ArgumentTypeError(
+            f"--seats must be >= 1 (a 0 or negative cap is skipped at import: no projection); got {value}"
+        )
+    return value
 
 
 def main() -> int:
@@ -70,6 +97,10 @@ def main() -> int:
     ap.add_argument("--kid", default="dogfood-1",
                     help="key id; must match the deployment's YUANTUS_LICENSE_PUBLIC_KEYS entry")
     ap.add_argument("--plan-type", default="Pilot")
+    ap.add_argument("--seats", type=_seats_arg, default=None,
+                    help="optional paid seat cap (int >= 1; values < 1 are rejected); projected onto "
+                         "TenantQuota.max_users at import (PLM-COLLAB-V2 Option A). Omit to skip "
+                         "projection: max_users is left unchanged (an existing cap is preserved, not cleared).")
     ap.add_argument("--issued-at", default=None, help="ISO-8601; default: now (UTC)")
     ap.add_argument("--out", default="dogfood-license.json", help="output license file path")
     ap.add_argument("--priv-out", default=None,
@@ -86,7 +117,7 @@ def main() -> int:
 
     license_obj = build_and_sign(
         priv, tenant_id=args.tenant_id, subject=args.subject,
-        kid=args.kid, plan_type=args.plan_type, issued_at=issued_at,
+        kid=args.kid, plan_type=args.plan_type, issued_at=issued_at, seats=args.seats,
     )
 
     # Self-check: the deployment MUST accept what we just signed (same offline verify path).

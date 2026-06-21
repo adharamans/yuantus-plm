@@ -55,6 +55,30 @@ def license_import(
         typer.echo(f"license import failed: {exc}", err=True)
         raise typer.Exit(code=1)
 
+    # The license is committed (the commercial source of truth). Best-effort: project any
+    # paid seat cap (payload["seats"]) onto the identity-side TenantQuota.max_users -- the
+    # cap the QuotaService provisioning gate enforces (QUOTA_MODE-gated, default-off).
+    # A failure here never un-activates the license; re-running the import re-projects.
+    try:
+        from yuantus.security.auth.database import get_identity_db_session
+        from yuantus.security.auth.seat_projection import project_license_seats
+
+        # license_obj["payload"] is the SAME object import_license() just verified
+        # (verify_license checks the Ed25519 signature over it), so this raw read is the
+        # signature-authenticated value -- not untrusted input -- even post-commit.
+        with get_identity_db_session() as identity_session:
+            projected = project_license_seats(
+                identity_session, license_obj.get("payload") or {}
+            )
+        if projected is not None:
+            typer.echo(f"seat cap projected: TenantQuota.max_users={projected}")
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never fail an activated license
+        typer.echo(
+            f"warning: seat-cap projection failed ({exc}); license is active, seat cap "
+            f"not applied (TenantQuota.max_users left unchanged). Re-run `yuantus license import` to retry.",
+            err=True,
+        )
+
 
 @app.callback()
 def _root() -> None:
