@@ -19,14 +19,17 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from yuantus.api.app import create_app
-from yuantus.api.dependencies.auth import get_current_user
+from yuantus.api.dependencies.admin_auth import require_superuser
+from yuantus.api.dependencies.auth import get_current_identity, get_current_user
 from yuantus.database import get_db
 from yuantus.meta_engine.lifecycle.models import LifecycleTransitionHistory
 from yuantus.meta_engine.models.item import Item
 from yuantus.models.base import Base
 
 _USER = SimpleNamespace(id=1, roles=["user"], is_superuser=False)
+_ADMIN = SimpleNamespace(id=9, roles=["superuser"], is_superuser=True)
 _URL = "/api/v1/items/{}/transition-history"
+_FORENSIC = "/api/v1/transition-history/forensic/{}"
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +78,7 @@ def client(Session):
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_current_user] = lambda: _USER
+    app.dependency_overrides[get_current_identity] = lambda: _ADMIN
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -166,3 +170,53 @@ def test_route_is_auth_gated():
     # the get_current_user dependency must be wired (item-read auth pattern).
     deps = [d.call for d in _the_route().dependant.dependencies]
     assert get_current_user in deps
+
+
+# -- forensic admin route (GET /api/v1/transition-history/forensic/{item_id}) --
+def test_forensic_returns_deleted_item_history(client, db):
+    # No _item(): the item never exists in the table (a *deleted* item). Its FK-free history rows
+    # are still present and MUST be returned — the whole point of the forensic route.
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), to_state_name="A")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), to_state_name="B")
+    r = client.get(_FORENSIC.format("GONE"))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 2
+    assert [x["to_state_name"] for x in body["items"]] == ["B", "A"]  # created_at desc
+
+
+def test_forensic_never_existed_id_is_empty_200_not_404(client, db):
+    # Behavioral inverse of the item-scoped route's 404: a forensic lookup of an id with no
+    # history is an empty 200, never 404 — this route deliberately does not resolve the item.
+    r = client.get(_FORENSIC.format("neverwas"))
+    assert r.status_code == 200 and r.json() == {"items": [], "count": 0}
+
+
+def test_forensic_requires_superuser(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1))
+    # a non-superuser identity must be rejected (require_superuser -> 403)
+    client.app.dependency_overrides[get_current_identity] = lambda: SimpleNamespace(is_superuser=False)
+    assert client.get(_FORENSIC.format("GONE")).status_code == 403
+
+
+def _forensic_route():
+    app = create_app()
+    return next(
+        r for r in app.routes
+        if getattr(r, "path", "") == "/api/v1/transition-history/forensic/{item_id}"
+    )
+
+
+def test_forensic_route_is_registered_and_owned():
+    import yuantus.meta_engine.web.lifecycle_transition_history_router as mod
+
+    route = _forensic_route()
+    assert "GET" in route.methods
+    assert route.endpoint.__module__ == mod.__name__  # owned by our router module
+
+
+def test_forensic_route_is_admin_gated():
+    # require_superuser must be wired; the bare get_current_user item-read pattern must NOT be.
+    deps = [d.call for d in _forensic_route().dependant.dependencies]
+    assert require_superuser in deps
+    assert get_current_user not in deps

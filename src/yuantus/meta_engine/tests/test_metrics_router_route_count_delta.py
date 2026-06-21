@@ -49,7 +49,9 @@ from yuantus.api.app import create_app
 # 719 = 716 + 3 CAD-PDM C3 date-obsolete impact ops routes (list/get/acknowledge).
 # 720 = 719 + 1 lifecycle transition-history read route (Slice 2:
 #   GET /api/v1/items/{item_id}/transition-history) -- authenticated read.
-EXPECTED_TOTAL_ROUTES = 720
+# 721 = 720 + 1 lifecycle transition-history forensic admin route
+#   (GET /api/v1/transition-history/forensic/{item_id}) -- superuser-gated, no item-existence gate.
+EXPECTED_TOTAL_ROUTES = 721
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
