@@ -80,6 +80,41 @@ def license_import(
         )
 
 
+@license_app.command("status")
+def license_status(
+    tenant_id: str = typer.Option(
+        ..., "--tenant-id", help="tenant to report entitlement/license status for"
+    ),
+) -> None:
+    """Print a tenant's collaboration entitlement + offline-license status (read-only).
+
+    Safe for an operator support bundle: no private keys, no raw license_data.
+    """
+    from yuantus.database import get_db_session
+    from yuantus.meta_engine.app_framework.license_status import collect_license_status
+
+    token = tenant_id_var.set(str(tenant_id or "").strip())
+    try:
+        with get_db_session() as session:
+            status = collect_license_status(session, tenant_id)
+    finally:
+        tenant_id_var.reset(token)
+
+    typer.echo(f"license status for tenant: {status.tenant_id}")
+    typer.echo("features (sellable SKUs):")
+    for key, entitled in status.features.items():
+        typer.echo(f"  {key:<24} {'ENTITLED' if entitled else 'not entitled'}")
+    typer.echo(f"licenses ({len(status.licenses)}):")
+    if not status.licenses:
+        typer.echo("  (none for this tenant)")
+    for row in status.licenses:
+        expires = row.expires_at or "perpetual"
+        typer.echo(
+            f"  app={row.app_name:<24} status={row.status:<8} "
+            f"expires={expires:<26} plan={row.plan_type or '-'}  key={row.license_key}"
+        )
+
+
 @app.callback()
 def _root() -> None:
     invoked_as = Path(sys.argv[0]).name
