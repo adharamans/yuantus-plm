@@ -636,9 +636,15 @@ class VersionService:
                     getattr(version, "id", "?"),
                 )
                 return
-        except Exception:
+        except Exception as exc:
             # unknown key during rollout / missing tenant context / any error -> not
             # entitled. Must never propagate into the release transaction.
+            logger.debug(
+                "ECM publish enqueue skipped: entitlement check raised %s, "
+                "treated as not entitled (version=%s)",
+                type(exc).__name__,
+                getattr(version, "id", "?"),
+            )
             return
 
         try:
