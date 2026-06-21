@@ -60,11 +60,10 @@ recipes/specs live in the cross-referenced docs at the bottom.
 
 ## #26 — Athena memory refresh ✅ DONE
 
-- Added an ad-hoc memory update note:
-  `/Users/chouhua/.codex/memories/extensions/ad_hoc/notes/20260621T060420-0700-yuantus-athena-ecm-publish-current-state.md`.
+- Added an ad-hoc memory update note recorded outside the repo (in the Codex memory store).
 - The note supersedes the older point-in-time PLM-to-ECM assumptions (CMIS Browser,
   Keycloak service account, Phase 0 CMIS validation) with the current verified line:
-  Transfer Receiver + BASIC auth + symmetric opt-in override + #826 durable reachability closeout.
+  Transfer Receiver + custom credential headers (`X-Athena-Transfer-User` / `X-Athena-Transfer-Secret`, not HTTP BASIC) + symmetric opt-in override + #826 durable reachability closeout.
 - `MEMORY.md` was not edited directly; the update follows the current memory extension
   convention of appending an ad-hoc note for the generator/registry to consume.
 
