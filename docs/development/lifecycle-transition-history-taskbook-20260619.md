@@ -150,9 +150,6 @@ its error propagate), then `begin_nested()` scopes best-effort to the history ro
   `bom_where_used` / `impact` do). ~10 lines + one 403 test, **no route-count change**. A
   hardening option, not a correctness gap; trigger if item-scoped reads need consistent per-item
   gating across the lifecycle/audit surface. *(Provenance: #816 read-auth review.)*
-- **All-attempts logging (D2)** — already reserved via the `outcome` column (§1, §3); a future
-  non-breaking extension to log *rejected* transitions, not just successes. Cross-referenced here
-  for completeness of the deferred list.
 
 ## 6. Risks / gotchas
 
