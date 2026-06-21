@@ -43,6 +43,18 @@ def _auth_optional(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _perm_allow(monkeypatch):
+    # The item-scoped read now does a per-item ACL (check_permission(item_type_id, get) -> 403,
+    # matching bom_where_used/impact). Default-allow here so the existing read tests exercise the
+    # 200 path; the deny -> 403 path has its own test that re-patches to False.
+    monkeypatch.setattr(
+        "yuantus.meta_engine.web.lifecycle_transition_history_router.MetaPermissionService",
+        lambda db: SimpleNamespace(check_permission=lambda *a, **k: True),
+    )
+    yield
+
+
 @pytest.fixture()
 def Session():
     from yuantus.meta_engine.bootstrap import import_all_models
@@ -127,6 +139,16 @@ def test_empty_list_for_existing_item_with_no_history(client, db):
 
 def test_404_for_missing_item(client, db):
     assert client.get(_URL.format("ghost")).status_code == 404
+
+
+def test_item_route_403_without_read_permission(client, db, monkeypatch):
+    # per-item ACL (2a): a caller without get-permission on the item's type gets 403, not data.
+    _item(db, "I")
+    monkeypatch.setattr(
+        "yuantus.meta_engine.web.lifecycle_transition_history_router.MetaPermissionService",
+        lambda db: SimpleNamespace(check_permission=lambda *a, **k: False),
+    )
+    assert client.get(_URL.format("I")).status_code == 403
 
 
 def test_limit_caps_to_most_recent(client, db):

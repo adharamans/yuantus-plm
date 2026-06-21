@@ -2,8 +2,9 @@
 
 Read APIs over the audit rows written by ``LifecycleService.promote()`` (Slice 1):
 
-- ``GET /api/v1/items/{item_id}/transition-history`` (Slice 2) — the item-scoped read; an
-  authenticated user, **404** if the item does not exist.
+- ``GET /api/v1/items/{item_id}/transition-history`` (Slice 2) — the item-scoped read; **per-item
+  ACL** (``check_permission(item_type_id, AMLAction.get)`` → **403**, matching
+  ``bom_where_used``/``impact``), **404** if the item does not exist.
 - ``GET /api/v1/transition-history/forensic/{item_id}`` (forensic admin route) — retrieval by
   recorded ``item_id`` with **no item-existence gate**, so a *deleted* item's retained (FK-free)
   history stays reachable (the #819-archived forensic item). **Superuser-gated**; see the route
@@ -24,6 +25,8 @@ from yuantus.database import get_db
 from yuantus.meta_engine.lifecycle.models import LifecycleTransitionHistory
 from yuantus.meta_engine.lifecycle.service import LifecycleService
 from yuantus.meta_engine.models.item import Item
+from yuantus.meta_engine.schemas.aml import AMLAction
+from yuantus.meta_engine.services.meta_permission_service import MetaPermissionService
 
 lifecycle_transition_history_router = APIRouter(tags=["Lifecycle"])
 
@@ -52,15 +55,25 @@ def _serialize(row: LifecycleTransitionHistory) -> Dict[str, Any]:
 def get_item_transition_history(
     item_id: str,
     limit: Optional[int] = Query(None, ge=1, le=500),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """List an item's lifecycle transitions, most-recent first.
 
-    404 if the item does not exist; an empty list for an existing item with no history.
+    404 if the item does not exist; **403** if the caller lacks read permission on the item's
+    type (per-item ACL via ``check_permission(item_type_id, AMLAction.get)``, matching
+    ``bom_where_used``/``impact``); an empty list for an existing, readable item with no history.
     """
-    if db.get(Item, item_id) is None:
+    item = db.get(Item, item_id)
+    if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
+    if not MetaPermissionService(db).check_permission(
+        item.item_type_id,
+        AMLAction.get,
+        user_id=str(user.id),
+        user_roles=user.roles,
+    ):
+        raise HTTPException(status_code=403, detail="Permission denied")
     rows = LifecycleService(db).get_transition_history(item_id, limit=limit)
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}
 
