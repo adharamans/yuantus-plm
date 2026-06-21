@@ -18,14 +18,13 @@ are listed with their gates in §5 — that deferral *is* how this push honours 
 | S0 | design + A-vs-B2 decision (Option A) | #813 MERGED |
 | S1 | license `seats` → identity `TenantQuota.max_users` at import; `is_entitled()` seats-free; default-off via `QUOTA_MODE` | #817 MERGED (`80859d6b`) |
 | S1+ | signer enforces `--seats >= 1` at mint; "omit = no projection / cap unchanged" operator wording | merged with S1 |
-| **S2** | source-of-truth handshake + cap-projection audit (this doc) | **#820 — green; merges before this doc** |
+| **S2** | source-of-truth handshake + cap-projection audit (this doc) | **#820 MERGED (`62b5df7f`)** |
 
 S1 detail is in the S1 companion doc and is not repeated here.
 
-> **Merge & finalization.** This doc (#824) is the final main-branch verification record and should
-> **merge last**: **#820 → #823 → #824**. The PR / branch heads recorded below are *authoring-time*
-> references; at merge, replace them with the **squash-merge SHAs** and mark #820 / #823 **MERGED**, so
-> this record does not go stale the moment it lands.
+> **Merge & finalization.** Merge order was **#820 → #823 → #824** (this doc lands last). #820 merged as
+> squash **`62b5df7f`** and #823 as squash **`a6e6183b`**; §1 / §3 below cite those merged commits. This
+> doc is the final main-branch verification record for the set.
 
 ## 2. S2 + this push — what shipped
 
@@ -53,23 +52,23 @@ S1 detail is in the S1 companion doc and is not repeated here.
 
 ## 3. Verification evidence
 
-**#820 (S2 + slice A + [P3])** — head `eb42dad9`:
+**#820 (S2 + slice A + [P3])** — merged as squash `62b5df7f` (was head `eb42dad9`):
 - `contracts` PASS (9m16s): **1801 passed, 1 skipped** (1798 at the S2 baseline → +3: the two new
   two-DB integration tests + the [P3] normalization test). `test_license_import.py` is in the contracts
   explicit list, so these executed **in CI**, not only locally.
 - `regression` PASS (4m9s); `playwright-esign`, `plugin-tests`, `detect_changes` PASS.
 - Local: 18 passed no-DB (`test_license_import.py`).
 
-**#823 (slice C + B)** — head `34a2d490`:
+**#823 (slice C + B)** — merged as squash `a6e6183b` (was head `34a2d490`):
 - Local: `test_license_status.py` **5 passed** no-DB (entitled / tenant-scoped / whitelist /
   tenant-normalization / **blank-tenant rejection**). End-to-end CLI smoke: `license status` lists
   `bom_multitable: ENTITLED` plus the active license, with no `license_data` / key leak.
-- `contracts` PASS (**1800 passed, 1 skipped** at `49b7e08e`): `test_license_status.py` is in the
-  contracts explicit list and **executed in CI** (confirmed in the job log); `regression` PASS. The
-  blank-tenant hardening (`34a2d490`, `--tenant-id " "` would otherwise report the single-mode
-  "default" tenant against an empty summary) adds one test on the same green path. *(A first run flagged
-  the ci.yml list-order maintenance contract — the test itself ran + passed; the entry was repositioned
-  to its path-sorted slot.)*
+- `contracts` PASS: **1801 passed, 1 skipped** — `test_license_status.py` (incl. the blank-tenant
+  rejection test) is in the contracts explicit list and **executed in CI** (confirmed in the job log);
+  `regression` PASS. *(An earlier push flagged the ci.yml list-order maintenance contract — the test
+  itself ran + passed; the entry was repositioned to its path-sorted slot, and the blank-tenant
+  hardening — `--tenant-id " "` would otherwise report the single-mode "default" tenant against an empty
+  summary — added the +1 test that took the count 1800 → 1801.)*
 
 ## 4. Invariants held
 
@@ -108,5 +107,6 @@ repo's existing posture.
 
 ---
 
-*PRs: #820 (S2 + slice A + [P3]), #823 (slice C + B). Design: `plm-collab-v2-seats-design-20260619.md`.
-S1: `DEV_AND_VERIFICATION_V2_SEATS_S1_LICENSE_PROJECTION_20260620.md`.*
+*PRs: #820 → squash `62b5df7f` (S2 + slice A + [P3]); #823 → squash `a6e6183b` (slice C + B); #824 → this
+doc. Design: `plm-collab-v2-seats-design-20260619.md`. S1:
+`DEV_AND_VERIFICATION_V2_SEATS_S1_LICENSE_PROJECTION_20260620.md`.*
