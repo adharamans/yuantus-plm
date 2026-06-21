@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, List, Mapping, Optional
 
@@ -26,6 +27,23 @@ from yuantus.meta_engine.app_framework.license_verification import (
 )
 from yuantus.meta_engine.app_framework.store_models import AppLicense
 from yuantus.models.audit import AuditLog
+
+
+@dataclass
+class LicenseImportResult:
+    """Result of :meth:`LicenseImportService.import_license`.
+
+    ``activated`` is the list of upserted ``AppLicense`` rows; ``payload`` is the
+    VERIFIED, signature-covered payload (the dict ``verify_license`` returned). Callers
+    needing post-import data (e.g. the CLI's seat-cap projection) read it from here
+    instead of re-reading the raw, unverified ``license_obj["payload"]`` off disk.
+    """
+
+    activated: List[AppLicense]
+    payload: Mapping[str, Any]
+    # the NORMALIZED (stripped) tenant id the activation + projection use, so downstream
+    # callers (e.g. the CLI seat-cap audit) record the SAME tenant, never a raw padded value.
+    tenant_id: str
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
@@ -48,7 +66,7 @@ class LicenseImportService:
         public_keys: Mapping[str, str],
         *,
         installed_by: Optional[int] = None,
-    ) -> List[AppLicense]:
+    ) -> "LicenseImportResult":
         # Verify first; raises LicenseVerificationError on any failure.
         payload = verify_license(license_obj, public_keys)
 
@@ -102,4 +120,37 @@ class LicenseImportService:
                 duration_ms=0,
             )
         )
-        return activated
+        return LicenseImportResult(activated=activated, payload=payload, tenant_id=tenant_id)
+
+
+def record_seat_cap_audit(
+    meta_session: Session,
+    *,
+    tenant_id: str,
+    max_users: int,
+    installed_by: Optional[int] = None,
+) -> None:
+    """Write a meta-side audit row noting a seat cap was PROJECTED at license import.
+
+    Mirrors the import audit (``method="LICENSE"``, synthetic CLI ``path``). Kept
+    meta-side -- where ``audit_logs`` reliably lives and the import audit already is --
+    not the identity DB: ``audit_logs`` is not guaranteed there under
+    ``SCHEMA_MODE=migrations``, and a failed audit write in the identity session would
+    roll back the seat-cap projection itself. The caller commits; this is best-effort
+    observability, decoupled from the cap write.
+
+    ``project_license_seats`` returns the cap on every valid import (idempotent
+    re-imports included), so this records "projected", not "changed" -- consistent with
+    the import audit, which likewise fires each run. The value rides in ``path`` because
+    ``AuditLog`` has no structured-detail column.
+    """
+    meta_session.add(
+        AuditLog(
+            tenant_id=tenant_id,
+            user_id=installed_by,
+            method="LICENSE",
+            path=f"cli:license/seat-cap?max_users={max_users}",
+            status_code=200,
+            duration_ms=0,
+        )
+    )

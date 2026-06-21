@@ -37,12 +37,12 @@ def project_license_seats(
     """Land ``payload['seats']`` onto ``TenantQuota.max_users`` for the license's tenant.
 
     Returns the projected seat count, or ``None`` when there was nothing to project (the
-    license carries no seat cap, or an invalid one). Raises only on an actual DB failure --
+    license omits a ``seats`` clause, or carries an invalid one). Raises only on a DB failure --
     which the CLI catches and reports without failing the already-activated license.
     """
     seats = payload.get("seats")
     if seats is None:
-        # License carries no seat cap -> nothing to project. Backward-compatible: every
+        # License omits a seats clause -> nothing to project. Backward-compatible: every
         # license issued before this slice (and the pact seed) has no ``seats`` key.
         return None
 

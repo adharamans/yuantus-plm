@@ -32,6 +32,7 @@ def license_import(
     from yuantus.database import get_db_session
     from yuantus.meta_engine.app_framework.license_import_service import (
         LicenseImportService,
+        record_seat_cap_audit,
     )
     from yuantus.meta_engine.app_framework.license_verification import (
         LicenseVerificationError,
@@ -42,11 +43,11 @@ def license_import(
     public_keys = get_settings().LICENSE_PUBLIC_KEYS
     try:
         with get_db_session() as session:
-            activated = LicenseImportService(session).import_license(
+            result = LicenseImportService(session).import_license(
                 license_obj, public_keys
             )
             session.commit()
-            for lic in activated:
+            for lic in result.activated:
                 typer.echo(
                     f"activated tenant={lic.tenant_id} app={lic.app_name} "
                     f"expires={lic.expires_at}"
@@ -56,20 +57,22 @@ def license_import(
         raise typer.Exit(code=1)
 
     # The license is committed (the commercial source of truth). Best-effort: project any
-    # paid seat cap (payload["seats"]) onto the identity-side TenantQuota.max_users -- the
-    # cap the QuotaService provisioning gate enforces (QUOTA_MODE-gated, default-off).
-    # A failure here never un-activates the license; re-running the import re-projects.
+    # paid seat cap onto the identity-side TenantQuota.max_users -- the cap the QuotaService
+    # provisioning gate enforces (QUOTA_MODE-gated, default-off). A failure here never
+    # un-activates the license; re-running the import re-projects.
+    projected = None
     try:
         from yuantus.security.auth.database import get_identity_db_session
         from yuantus.security.auth.seat_projection import project_license_seats
 
-        # license_obj["payload"] is the SAME object import_license() just verified
-        # (verify_license checks the Ed25519 signature over it), so this raw read is the
-        # signature-authenticated value -- not untrusted input -- even post-commit.
+        # Use the VERIFIED payload returned by import_license (its signature was checked),
+        # not a second, unauthenticated read of the raw license_obj from disk.
         with get_identity_db_session() as identity_session:
-            projected = project_license_seats(
-                identity_session, license_obj.get("payload") or {}
-            )
+            applied = project_license_seats(identity_session, result.payload)
+        # Assign `projected` only AFTER the identity transaction commits (on with-exit). If
+        # that commit fails, the exception skips this line -> `projected` stays None, so the
+        # audit below never records a cap that did not actually land.
+        projected = applied
         if projected is not None:
             typer.echo(f"seat cap projected: TenantQuota.max_users={projected}")
     except Exception as exc:  # noqa: BLE001 -- best-effort; never fail an activated license
@@ -78,6 +81,24 @@ def license_import(
             f"not applied (TenantQuota.max_users left unchanged). Re-run `yuantus license import` to retry.",
             err=True,
         )
+
+    # Audit the projection on the meta DB (where audit_logs lives and the import audit is),
+    # in its OWN best-effort guard so an audit failure cannot masquerade as a projection
+    # failure. Post-commit, so it can never touch the activated license.
+    if projected is not None:
+        try:
+            with get_db_session() as audit_session:
+                record_seat_cap_audit(
+                    audit_session,
+                    tenant_id=result.tenant_id,
+                    max_users=projected,
+                )
+                audit_session.commit()
+        except Exception as exc:  # noqa: BLE001 -- audit is observability; never fail the CLI
+            typer.echo(
+                f"warning: seat-cap audit log not written ({exc}); the cap was applied.",
+                err=True,
+            )
 
 
 @app.callback()

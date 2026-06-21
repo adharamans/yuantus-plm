@@ -31,7 +31,10 @@ from yuantus.meta_engine.app_framework.license_verification import (
     LicenseVerificationError,
     canonical_payload_bytes,
 )
-from yuantus.meta_engine.app_framework.license_import_service import LicenseImportService
+from yuantus.meta_engine.app_framework.license_import_service import (
+    LicenseImportService,
+    record_seat_cap_audit,
+)
 from yuantus.meta_engine.app_framework.models import AppRegistry
 from yuantus.meta_engine.app_framework.store_models import AppLicense
 from yuantus.security.rbac.models import RBACUser
@@ -106,8 +109,9 @@ def test_valid_license_activates_tenant_scoped_app_license(session, keypair):
     priv, pubkeys = keypair
     payload = _payload(tenant_id="tenant-1")
     lic_obj = _sign(priv, payload)
-    activated = LicenseImportService(session).import_license(lic_obj, pubkeys)
+    result = LicenseImportService(session).import_license(lic_obj, pubkeys)
     session.commit()
+    activated = result.activated
     assert len(activated) == 1
     lic = activated[0]
     assert lic.tenant_id == "tenant-1"  # from the SIGNED payload, not request context
@@ -182,8 +186,8 @@ def test_canonical_signing_is_field_order_independent(session, keypair):
     # rebuild the payload dict with the keys in a different insertion order
     reordered = {k: payload[k] for k in reversed(list(payload.keys()))}
     lic_obj["payload"] = reordered
-    activated = LicenseImportService(session).import_license(lic_obj, pubkeys)  # must still verify
-    assert activated[0].tenant_id == "tenant-1"
+    result = LicenseImportService(session).import_license(lic_obj, pubkeys)  # must still verify
+    assert result.activated[0].tenant_id == "tenant-1"
 
 
 def test_reimport_is_idempotent_upsert(session, keypair):
@@ -225,3 +229,126 @@ def test_audit_row_written(session, keypair):
     rows = session.query(AuditLog).filter_by(method="LICENSE", tenant_id="tenant-1").all()
     assert len(rows) == 1
     assert rows[0].path == "cli:license/import"
+
+
+def test_import_license_returns_verified_payload(session, keypair):
+    priv, pubkeys = keypair
+    payload = _payload(tenant_id="tenant-1", seats=20)
+    result = LicenseImportService(session).import_license(_sign(priv, payload), pubkeys)
+    # the VERIFIED payload is threaded back so the CLI never re-reads the raw input file
+    assert result.payload["tenant_id"] == "tenant-1"
+    assert result.payload["seats"] == 20
+    assert result.activated[0].app_name == "plm.collab"
+
+
+def test_record_seat_cap_audit_writes_meta_row(session):
+    # The cap-projection audit is a meta-side row (method=LICENSE), value encoded in path.
+    record_seat_cap_audit(session, tenant_id="tenant-1", max_users=20)
+    session.commit()
+    rows = session.query(AuditLog).filter_by(method="LICENSE", tenant_id="tenant-1").all()
+    assert len(rows) == 1
+    assert "seat-cap" in rows[0].path and "max_users=20" in rows[0].path
+
+
+def test_import_result_tenant_id_is_normalized(session, keypair):
+    priv, pubkeys = keypair
+    # A padded tenant in the signed payload activates/projects under the stripped id; the
+    # result carries that normalized id so the CLI seat-cap audit records the same tenant
+    # (not the raw " tenant-1 "), keeping audit lookups consistent with activation/projection.
+    result = LicenseImportService(session).import_license(
+        _sign(priv, _payload(tenant_id="  tenant-1  ")), pubkeys
+    )
+    assert result.tenant_id == "tenant-1"
+    assert result.payload["tenant_id"] == "  tenant-1  "  # raw payload preserved
+    assert result.activated[0].tenant_id == "tenant-1"    # activation used the stripped id
+
+
+# --- CLI two-DB integration: exercise the cli.py orchestration glue end-to-end ---------------
+# Closes the coverage boundary named in #820: import -> activate (meta) -> project cap
+# (identity) -> seat-cap audit (meta). Both DBs point at one shared file-sqlite (single mode).
+
+def _wire_single_db_cli(tmp_path, monkeypatch, pubkeys):
+    import json
+
+    import yuantus.database as ydb
+    import yuantus.security.auth.database as authdb
+    from yuantus.security.auth.models import AuthUser, Organization, Tenant, TenantQuota
+
+    url = f"sqlite:///{tmp_path / 'cli.db'}"
+    # settings reads the YUANTUS_-prefixed env; identity re-resolves its URL via settings, so
+    # the prefix matters (the meta side is redirected directly via SessionLocal below).
+    monkeypatch.setenv("YUANTUS_DATABASE_URL", url)
+    monkeypatch.setenv("YUANTUS_IDENTITY_DATABASE_URL", url)
+    monkeypatch.setenv("YUANTUS_LICENSE_PUBLIC_KEYS", json.dumps(pubkeys))
+    get_settings.cache_clear()
+
+    eng = ydb.create_db_engine(url)  # FK + WAL pragmas, like production
+    Base.metadata.create_all(
+        bind=eng,
+        tables=[
+            # meta side (AppLicense FKs meta_app_registry, so AppRegistry must exist)
+            RBACUser.__table__, AppRegistry.__table__, AppLicense.__table__, AuditLog.__table__,
+            # identity side
+            Tenant.__table__, TenantQuota.__table__, AuthUser.__table__, Organization.__table__,
+        ],
+    )
+    SessionLocal = sessionmaker(bind=eng, expire_on_commit=False)
+    # meta globals are import-time bound; identity caches its engine -> redirect both to `eng`.
+    monkeypatch.setattr(ydb, "engine", eng)
+    monkeypatch.setattr(ydb, "SessionLocal", SessionLocal)
+    monkeypatch.setattr(authdb, "_engine", eng)
+    monkeypatch.setattr(authdb, "_sessionmaker", SessionLocal)
+    monkeypatch.setattr(authdb, "_engine_url", url)
+    return SessionLocal
+
+
+def test_cli_license_import_projects_seat_cap_and_audits(tmp_path, monkeypatch, keypair):
+    import json
+
+    from yuantus.cli import license_import
+    from yuantus.security.auth.models import TenantQuota
+
+    priv, pubkeys = keypair
+    SessionLocal = _wire_single_db_cli(tmp_path, monkeypatch, pubkeys)
+
+    # PADDED tenant -> exercises audit-tenant normalization end-to-end
+    lic_file = tmp_path / "lic.json"
+    lic_file.write_text(json.dumps(_sign(priv, _payload(tenant_id="  acme  ", seats=7))), encoding="utf-8")
+    license_import(str(lic_file))  # the CLI command fn; raises typer.Exit on failure
+
+    s = SessionLocal()
+    try:
+        activated = s.query(AppLicense).filter_by(tenant_id="acme").all()
+        assert len(activated) == 1 and activated[0].status == "Active"      # meta: activated
+        quota = s.get(TenantQuota, "acme")
+        assert quota is not None and quota.max_users == 7                    # identity: projected
+        paths = [a.path for a in s.query(AuditLog).filter_by(method="LICENSE", tenant_id="acme").all()]
+        assert "cli:license/import" in paths                                 # import audit
+        assert any("seat-cap" in p and "max_users=7" in p for p in paths)    # seat-cap audit
+        # the padded payload tenant never leaks into any DB key
+        assert s.query(AuditLog).filter(AuditLog.tenant_id == "  acme  ").count() == 0
+    finally:
+        s.close()
+
+
+def test_cli_license_import_without_seats_writes_no_seat_cap_audit(tmp_path, monkeypatch, keypair):
+    import json
+
+    from yuantus.cli import license_import
+    from yuantus.security.auth.models import TenantQuota
+
+    priv, pubkeys = keypair
+    SessionLocal = _wire_single_db_cli(tmp_path, monkeypatch, pubkeys)
+
+    lic_file = tmp_path / "lic.json"
+    lic_file.write_text(json.dumps(_sign(priv, _payload(tenant_id="acme"))), encoding="utf-8")  # no seats
+    license_import(str(lic_file))
+
+    s = SessionLocal()
+    try:
+        assert s.query(AppLicense).filter_by(tenant_id="acme").count() == 1
+        assert s.get(TenantQuota, "acme") is None                           # nothing projected
+        seat_cap = [a for a in s.query(AuditLog).filter_by(method="LICENSE").all() if "seat-cap" in a.path]
+        assert seat_cap == []                                               # only the import audit
+    finally:
+        s.close()
