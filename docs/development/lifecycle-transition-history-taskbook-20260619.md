@@ -134,22 +134,18 @@ its error propagate), then `begin_nested()` scopes best-effort to the history ro
   (`GET /items/{item_id}/transition-history` or under the lifecycle router) + tests + bump the
   four route-count pin sites.
 
-### Deferred / future (recorded, not scheduled — so they are not silently dropped)
+### Follow-ups — both now shipped (kept for provenance)
 
-- **Deleted-item forensic admin route.** `item_id` is FK-free, so audit rows survive an item
-  hard-delete (`DeleteOperation` → `session.delete(item)`; no cascade, and the `ItemDeletedEvent`
-  listeners only log + de-index). But the Slice-2 item-scoped route resolves the item first
-  (`db.get(Item, item_id)` → **404** if absent), so a deleted item's *retained* history is
-  unreachable through it. A future **admin/audit-gated** route keyed by `item_id` with **no**
-  item-existence gate (likely cross-item / time-range / actor search) covers forensic retrieval —
-  a distinct authz model and query shape from the item-scoped read, hence its own slice.
-  *(Provenance: #816 [P3] review.)*
-- **Optional per-item ACL hardening.** The Slice-2 read is authenticated-only
-  (`Depends(get_current_user)`, matching `cad_history_router` + the item-read pattern). Optional
-  tightening: per-item `check_permission(item_type_id, AMLAction.get)` → **403** (as
-  `bom_where_used` / `impact` do). ~10 lines + one 403 test, **no route-count change**. A
-  hardening option, not a correctness gap; trigger if item-scoped reads need consistent per-item
-  gating across the lifecycle/audit surface. *(Provenance: #816 read-auth review.)*
+- **Deleted-item forensic admin route — ✅ Landed (#827).** `item_id` is FK-free, so audit rows
+  survive an item hard-delete, but the Slice-2 item-scoped route 404s on a missing item. Shipped as
+  `GET /api/v1/transition-history/forensic/{item_id}` — **superuser-gated**, keyed by `item_id`,
+  **no** item-existence gate, so a deleted item's retained history stays reachable.
+  *(Provenance: #816 [P3] review; built #827.)*
+- **Per-item ACL hardening — ✅ Landed (#831, option 2a).** The Slice-2 read **was** authenticated-only;
+  it now enforces a per-item `check_permission(item_type_id, AMLAction.get)` → **403**, matching
+  `bom_where_used` / `impact` (no route-count change). The result is a two-tier model: the
+  item-scoped read uses a per-item ACL, the forensic route stays superuser (#827).
+  *(Provenance: #816 read-auth review; built #831.)*
 
 ## 6. Risks / gotchas
 

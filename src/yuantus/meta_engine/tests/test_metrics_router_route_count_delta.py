@@ -48,7 +48,7 @@ from yuantus.api.app import create_app
 # 716 = 713 + 3 MES inbox ops routes (Consumption R2.5b: list/get/replay).
 # 719 = 716 + 3 CAD-PDM C3 date-obsolete impact ops routes (list/get/acknowledge).
 # 720 = 719 + 1 lifecycle transition-history read route (Slice 2:
-#   GET /api/v1/items/{item_id}/transition-history) -- authenticated read.
+#   GET /api/v1/items/{item_id}/transition-history) -- per-item ACL since #831 (was authenticated read).
 # 721 = 720 + 1 lifecycle transition-history forensic admin route
 #   (GET /api/v1/transition-history/forensic/{item_id}) -- superuser-gated, no item-existence gate.
 EXPECTED_TOTAL_ROUTES = 721
