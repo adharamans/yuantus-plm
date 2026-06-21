@@ -187,6 +187,15 @@ Per §2's granularity principle, only two models are coherent — plus one trap:
 - **MetaSheet-consumer seat reconciliation**: cross-service, V1.2-embed-era, advisory.
 - **Admin seat UX**: no Yuantus frontend exists; surface limits via API/CLI only.
 - **multi-kid**: V1.2-embed-gated, unchanged from the prior ladder note.
+- **Explicit seat-cap clearing / lowering** (omit / `null` `seats` → clear or reduce
+  `max_users`): S1/S2 `project_license_seats` treats absent/invalid `seats` as a **no-op** — it
+  *raises* a cap but never **clears or lowers** an existing `TenantQuota.max_users`. So "omit = no
+  cap" only holds for a tenant with no prior cap; once a seat-bearing license has set `max_users`,
+  a later cap-free import leaves it in place (#817 [P2]). Deliberately **not** built in S1/S2:
+  having absent seats clear the cap could clobber an admin-set quota or old-license behavior. A
+  future design picks the intended *remove / lower* semantics (an explicit sentinel such as
+  `seats: 0` / `null` meaning "uncap", or a separate admin action), kept distinct from the
+  import-time projection. *(Provenance: #817 [P2] review.)*
 
 ---
 

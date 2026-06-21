@@ -134,6 +134,23 @@ its error propagate), then `begin_nested()` scopes best-effort to the history ro
   (`GET /items/{item_id}/transition-history` or under the lifecycle router) + tests + bump the
   four route-count pin sites.
 
+### Deferred / future (recorded, not scheduled — so they are not silently dropped)
+
+- **Deleted-item forensic admin route.** `item_id` is FK-free, so audit rows survive an item
+  hard-delete (`DeleteOperation` → `session.delete(item)`; no cascade, and the `ItemDeletedEvent`
+  listeners only log + de-index). But the Slice-2 item-scoped route resolves the item first
+  (`db.get(Item, item_id)` → **404** if absent), so a deleted item's *retained* history is
+  unreachable through it. A future **admin/audit-gated** route keyed by `item_id` with **no**
+  item-existence gate (likely cross-item / time-range / actor search) covers forensic retrieval —
+  a distinct authz model and query shape from the item-scoped read, hence its own slice.
+  *(Provenance: #816 [P3] review.)*
+- **Optional per-item ACL hardening.** The Slice-2 read is authenticated-only
+  (`Depends(get_current_user)`, matching `cad_history_router` + the item-read pattern). Optional
+  tightening: per-item `check_permission(item_type_id, AMLAction.get)` → **403** (as
+  `bom_where_used` / `impact` do). ~10 lines + one 403 test, **no route-count change**. A
+  hardening option, not a correctness gap; trigger if item-scoped reads need consistent per-item
+  gating across the lifecycle/audit surface. *(Provenance: #816 read-auth review.)*
+
 ## 6. Risks / gotchas
 
 - **Tenant-baseline drift-guard.** A new per-tenant model must be in the generator's ambient
