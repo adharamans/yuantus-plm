@@ -100,7 +100,10 @@ so you do not over-promise an automation product — that is a V1.1 MetaSheet (o
 
 1. **Real license:** `scripts/dev/sign_dogfood_license.py` produces a license whose self-verify passes
    and which `yuantus license import` accepts; `integrations/capabilities` then shows
-   `bom_multitable.entitled = true` for the pilot tenant.
+   `bom_multitable.entitled = true` for the pilot tenant. Operators can confirm the same directly
+   (no HTTP) with **`yuantus license status --tenant-id <PILOT_TENANT>`** — a read-only support-bundle
+   view that lists `bom_multitable: ENTITLED` plus the active license (status / expiry), without
+   exposing any key material.
 2. **Combined profile boots**; `base` profile stays MetaSheet-free (route surface unchanged with
    `YUANTUS_ENABLE_METASHEET=false`).
 3. **BOM Review Path A states** (use `scripts/dev/smoke_bom_review_api.sh`) — **Path A = manifest + context only**:
