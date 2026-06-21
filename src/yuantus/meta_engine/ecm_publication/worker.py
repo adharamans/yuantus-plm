@@ -8,9 +8,10 @@ A standalone worker that auto-drains ``meta_ecm_publication_outbox``, mirroring
              by default, with a release-revalidate that drops stale snapshots) ->
              reschedule retryable failures (reschedule_retry).
 
-P1C uses the no-I/O Null adapter (a worker ``send`` reaches ``sent`` via Null,
-exactly as the manual route does); the real Athena CMIS connector is P1D
-(Phase-0-gated). The revalidation is the one part with no mechanical erp mirror
+The worker resolves the adapter per row via the registry: the real Athena
+Transfer Receiver adapter (``transfer_receiver_adapter.py``) when a live target
+is configured, else the no-I/O Null adapter (tests / unconfigured). The
+revalidation is the one part with no mechanical erp mirror
 (erp reuses a readiness verdict; ECM has none) -- it re-fetches the released
 version + the specific controlled file and recomputes the content fingerprint;
 a no-longer-released version, a deleted controlled file, or fingerprint drift =>
