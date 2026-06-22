@@ -4,7 +4,7 @@
 seat-cap projection landed (#817: `seat_projection.py`, best-effort `yuantus license import`
 projection, dogfood signer `--seats`, `test_seat_projection.py`). `TenantQuota.max_users` is the
 identity-side enforcement cache; `is_entitled()` stays seats-free. **Still future:** B2 assignment
-subsystem, MetaSheet-consumer reconciliation, explicit cap clearing/lowering (all §5), and the
+subsystem, MetaSheet-consumer reconciliation (both §5), and the
 **vendor-private license issuance tool** (the dogfood signer is a dev stand-in, not production
 minting). The original design text below is preserved as the record.
 
@@ -193,15 +193,11 @@ Per §2's granularity principle, only two models are coherent — plus one trap:
 - **MetaSheet-consumer seat reconciliation**: cross-service, V1.2-embed-era, advisory.
 - **Admin seat UX**: no Yuantus frontend exists; surface limits via API/CLI only.
 - **multi-kid**: V1.2-embed-gated, unchanged from the prior ladder note.
-- **Explicit seat-cap clearing / lowering** (omit / `null` `seats` → clear or reduce
-  `max_users`): S1/S2 `project_license_seats` treats absent/invalid `seats` as a **no-op** — it
-  *raises* a cap but never **clears or lowers** an existing `TenantQuota.max_users`. So "omit = no
-  cap" only holds for a tenant with no prior cap; once a seat-bearing license has set `max_users`,
-  a later cap-free import leaves it in place (#817 [P2]). Deliberately **not** built in S1/S2:
-  having absent seats clear the cap could clobber an admin-set quota or old-license behavior. A
-  future design picks the intended *remove / lower* semantics (an explicit sentinel such as
-  `seats: 0` / `null` meaning "uncap", or a separate admin action), kept distinct from the
-  import-time projection. *(Provenance: #817 [P2] review.)*
+- **Explicit seat-cap clearing / lowering — ✅ Shipped (#836).** Resolved as the **`seats: null`**
+  option (design: `plm-collab-v2-seats-cap-clearing-design-20260621.md`): an explicit `seats: null`
+  in the signed payload clears `max_users` (→ unlimited), distinct from **absent** (still a no-op)
+  and `seats: 0` (still illegal); the dogfood signer gained `--clear-seats`. **Lowering** to a
+  smaller positive cap already worked via re-import. *(Provenance: #817 [P2] review; built #836.)*
 
 ---
 

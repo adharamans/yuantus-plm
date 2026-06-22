@@ -1,9 +1,9 @@
 # PLM-Collab V2 — Seats: explicit cap clearing / lowering (design, docs-first)
 
-**Status:** design-only, no code. Docs-first by owner direction — the choice here changes
-**commercial / ops semantics**, so it is decided before any implementation. Parked item from
-`plm-collab-v2-seats-design-20260619.md` §5 and the #819 archive; surfaced by the #817 [P2]
-review ("omit = no projection").
+**Status:** ✅ **Implemented (#836)** — Option 2.1 (`seats: null` clears `TenantQuota.max_users` →
+unlimited). This doc was docs-first (the choice changed **commercial / ops semantics**, so it was
+decided before code); the owner chose 2.1 and #836 shipped it. Parked item from
+`plm-collab-v2-seats-design-20260619.md` §5 and the #819 archive; surfaced by the #817 [P2] review.
 
 ## 1. The gap (and the part that already works)
 
@@ -76,8 +76,9 @@ defined (license re-import wins; admin clear is an interim ops lever). What must
    still no-ops; lowering via re-import unchanged).
 3. **Add 2.3 only if** ops needs a license-independent lever, and only with a written precedence
    rule (re-import re-asserts the license cap).
-4. Until decided, the **current no-op behavior is correct and documented** (#817 [P2]: "omit = no
-   projection; existing cap preserved"). No interim code.
+4. ✅ **Shipped (#836):** 2.1 implemented — explicit `seats: null` clears `max_users` (→ unlimited);
+   **absent** stays a no-op; `seats: 0` stays illegal; the dogfood signer gained `--clear-seats`
+   (mutually exclusive with `--seats`); the audit records `max_users=cleared` (never a false `=N`).
 
 ## 5. Non-goals / already-settled
 
