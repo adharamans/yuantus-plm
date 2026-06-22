@@ -1,7 +1,8 @@
 # PLM-Collab V1 / V2 — current status closeout (2026-06-22)
 
-**Authority / scope.** A point-in-time snapshot of what is **landed on `main`** (`origin/main`
-`b49bbf44`), what is **deferred** (named, owner-gated), and the **next-phase gates**. Complements
+**Authority / scope.** A point-in-time snapshot of what is **landed on `main`** (observed at review
+time; `main` moves fast, so the **per-PR refs below are the durable anchors**, not a main SHA), what
+is **deferred** (named, owner-gated), and the **next-phase gates**. Complements
 — does not replace — the broader roadmap
 (`plm-collaboration-current-state-commercialization-and-roadmap-20260618.md`) and the V1 pact
 boundary (`plm-collab-v1-pact-boundary-and-staging-checklist-20260621.md`, #833). No code change.
@@ -14,7 +15,7 @@ boundary (`plm-collab-v1-pact-boundary-and-staging-checklist-20260621.md`, #833)
   read-only). Unentitled → `entitled:false` / `context:null`, **no existence leak**.
 - A **consumer-driven pact** (32 interactions, artifact hash `5ecbe1ee…`) pins both sides; the V1.1
   provider seed + consumer sync landed in **#805**. Pact protection boundary + operator staging
-  checklist documented in **#833** *(pending 合)*.
+  checklist documented in **#833** (the V1 pact boundary + staging-checklist record).
 
 **V2 — seats (Option A)**
 - **S1/S2 import-time projection** (#817): a vendor-signed license's `seats` → identity-side
