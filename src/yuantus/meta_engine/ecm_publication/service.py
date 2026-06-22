@@ -314,8 +314,8 @@ class EcmPublicationOutboxService:
             row.reason = None
             row.error_message = None
             row.dispatched_at = datetime.now(timezone.utc)
-            # merge (do not overwrite): the real CMIS adapter (P1D) may add
-            # athena_folder_id/athena_object_id alongside remote_id.
+            # merge (do not overwrite): the real Transfer Receiver adapter may add
+            # athena_document_id/athena_disposition alongside remote_id.
             row.properties = {
                 **(row.properties or {}),
                 "remote_id": getattr(send_result, "remote_id", None),
@@ -379,7 +379,8 @@ class EcmPublicationOutboxService:
     def replay(self, row: EcmPublicationOutbox) -> EcmPublicationOutbox:
         """Operator replay from the ops router: reset a retryable FAILED row to
         PENDING for the worker to pick up again. PURE state reset -- NO adapter
-        resend (the real Athena adapter is P1D-deferred). Only remote_error /
+        resend here (the worker's live Transfer Receiver adapter does the resend on its
+        next tick). Only remote_error /
         adapter_error are replayable; the terminal reasons raise
         EcmPublicationReplayError (router -> 409). attempt_count is RESET to 0 so a
         dead-lettered row gets fresh retries (a deliberate P1C choice; documented

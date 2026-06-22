@@ -2,7 +2,7 @@
 
 A durable, release-triggered outbox: when a version is released, the entitled,
 controlled files are enqueued (one row per file) for later async publication to
-Athena's CMIS repository. Modeled on the proven `erp_publication` outbox
+Athena (the ECM controlled-record repo, via the Transfer Receiver). Modeled on the proven `erp_publication` outbox
 (state-vs-reason split, content fingerprint, retry/worker fields), with two ECM
 specifics: a per-file idempotency key, and **conflict-as-audit** (a changed
 fingerprint vs an already-SENT row is recorded as a CONFLICT/SKIPPED row, never

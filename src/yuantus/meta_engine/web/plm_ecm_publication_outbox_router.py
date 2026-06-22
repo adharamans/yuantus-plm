@@ -9,8 +9,9 @@ manual route, is the normal dispatch path):
     POST /plm-ecm/publication-outbox/{id}/replay  (failed -> pending reset)
 
 ``replay`` is a PURE state reset for the worker to re-pick-up -- it does NOT
-resend via an adapter (the real Athena CMIS adapter is P1D-deferred). Gate order
-is admin -> is_entitled, both 403 BEFORE any row read (no existence leak).
+itself resend; the worker (with the live Transfer Receiver adapter) performs the
+actual resend on its next tick. Gate order is admin -> is_entitled, both 403
+BEFORE any row read (no existence leak).
 """
 from __future__ import annotations
 

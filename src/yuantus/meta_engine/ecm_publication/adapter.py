@@ -2,9 +2,11 @@
 
 The abstract seam an ECM/CMIS adapter implements, mirroring
 ``erp_publication/adapter.py`` (ABC + @abstractmethod, the repo idiom). The
-concrete real Athena CMIS adapter is a LATER, separate slice (P1D, gated on
-Phase 0 U1-U5); P1C ships only the no-I/O Null adapter so the full outbox state
-machine is exercisable end to end without any external write.
+concrete real Athena adapter shipped as the Transfer Receiver adapter
+(``transfer_receiver_adapter.py``, the P1D-retarget production path; durable
+reachability verified on staging, Yuantus #826). The no-I/O Null adapter below is
+retained for tests and an unconfigured target, exercising the full outbox state
+machine without any external write.
 
 ``dry_run`` is intentionally NOT a method here. Dry-run is an outbox-SERVICE
 operation that calls build_payload + validate_contract only and never ``send`` --
@@ -61,11 +63,13 @@ class EcmPublicationAdapter(ABC):
 class NullEcmPublicationAdapter(EcmPublicationAdapter):
     """In-repo, no-external-I/O adapter.
 
-    The ONLY path that can reach ``sent`` before the real CMIS connector (P1D):
+    The no-external-I/O adapter for tests and for an unconfigured target:
     ``send`` records the dispatch LOCALLY (no network, no external write) so the
     full outbox state machine is exercisable end to end. ``sent`` via this
     adapter explicitly does NOT mean Athena received anything; production
-    ``sent`` requires the deferred real-connector taskbook (P1D, Phase-0-gated).
+    publishing goes through the real Transfer Receiver adapter
+    (``transfer_receiver_adapter.py``), which the registry resolves when a live
+    target is configured.
     """
 
     def build_payload(self, snapshot: dict) -> dict:
