@@ -69,18 +69,37 @@ def check_csproj_targets_net46() -> None:
     require(len(shared_refs) == 1, "Bridge csproj must ProjectReference Shared exactly once")
 
 
-def check_lisp_function_set(bridge_sources: str) -> None:
-    # After Slice B the bridge exposes EXACTLY two Lisp primitives: the S9
-    # JSON call and the Slice B multipart upload. Keep the set strict.
-    names = set(re.findall(r'\[LispFunction\("([^"]+)"\)\]', bridge_sources))
-    occurrences = re.findall(r"\[LispFunction\(", bridge_sources)
-    require(
-        len(occurrences) == 2,
-        f"Bridge must expose exactly two LispFunctions; found {len(occurrences)}",
+def check_lisp_function_set(bridge_root: Path) -> None:
+    # The bridge exposes EXACTLY two Lisp primitives: the S9 JSON call and the
+    # Slice B multipart upload. Each per-CAD-host adapter (AutoCAD, GstarCAD,
+    # ...) binds to a different managed CAD SDK, so each registers its own
+    # attributed methods under its own `#if <HOST>` guard — but every host
+    # adapter must register exactly those two names, and no host may add, drop,
+    # or rename one. (The regex ignores #if, so each adapter file is checked on
+    # its own rather than counting occurrences across the concatenated source.)
+    expected = {"yuantus-helper-call", "yuantus-helper-upload"}
+    adapters = sorted(
+        p
+        for p in bridge_root.rglob("*HostAdapter.cs")
+        if not any(part in {"bin", "obj"} for part in p.parts)
     )
+    require(adapters, "Bridge must define at least one CAD-host adapter (*HostAdapter.cs)")
+    union = set()
+    for adapter in adapters:
+        src = read(adapter)
+        occurrences = re.findall(r"\[LispFunction\(", src)
+        names = set(re.findall(r'\[LispFunction\("([^"]+)"\)\]', src))
+        require(
+            len(occurrences) == 2 and names == expected,
+            f"{adapter.name} must register exactly "
+            f"{{yuantus-helper-call, yuantus-helper-upload}}; "
+            f"found {sorted(names)} ({len(occurrences)} attribute(s))",
+        )
+        union |= names
     require(
-        names == {"yuantus-helper-call", "yuantus-helper-upload"},
-        f"Bridge LispFunctions must be exactly {{yuantus-helper-call, yuantus-helper-upload}}; found {sorted(names)}",
+        union == expected,
+        f"Bridge LispFunctions across all host adapters must be exactly "
+        f"{{yuantus-helper-call, yuantus-helper-upload}}; found {sorted(union)}",
     )
 
 
@@ -317,7 +336,7 @@ def main() -> int:
     bridge_sources = gather_sources(BRIDGE)
     checks = [
         ("csproj targets net46 + Shared reference", check_csproj_targets_net46),
-        ("exactly two LispFunctions {yuantus-helper-call, yuantus-helper-upload}", lambda: check_lisp_function_set(bridge_sources)),
+        ("each host adapter registers exactly {yuantus-helper-call, yuantus-helper-upload}", lambda: check_lisp_function_set(BRIDGE)),
         ("upload endpoint allowlist gates multipart transport", lambda: check_upload_endpoint_allowlist(bridge_sources)),
         ("no direct HttpClient / DPAPI / LocalTokenStore / Process.Start", lambda: check_no_direct_httpclient_or_dpapi(bridge_sources)),
         ("EndpointValidator rejects absolute schemes / network paths / backslash / percent / control chars", lambda: check_no_absolute_scheme_forwarding(bridge_sources)),
