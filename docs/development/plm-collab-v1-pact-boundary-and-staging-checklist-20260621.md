@@ -65,13 +65,14 @@ it reports `pact_sync=ok` + the provider verifier passes.
 ## 4. Pinned version pair (verified-compatible)
 
 The real invariant is the **pact artifact hash** `5ecbe1ee…` (32 interactions): both repos' copies hash to
-it, so the *commit* can move while the contract stays pinned (verified identical at Yuantus `d6f17742` and
-MetaSheet2 `de2052bdf` / current main `085ce92be`).
+it, so the *commit* can move while the contract stays pinned. The commits in the table are the **baseline**
+at which the pact was verified identical — **not** the current main tips. As of this review the live mains
+have advanced to Yuantus `b49bbf44` / MetaSheet2 `085ce92be`, both still hashing to `5ecbe1ee…`.
 
-| Repo | main commit | pact state |
+| Repo | verified pact-baseline commit | pact state |
 |---|---|---|
-| Yuantus | `d6f17742` | provider copy = 32 interactions; verifier green in `contracts` |
-| MetaSheet2 | `de2052bdf` | consumer source = 32 interactions; contract test green; byte-identical to provider |
+| Yuantus | `d6f17742` | provider copy = 32 interactions, hash `5ecbe1ee…`; verifier green in `contracts` |
+| MetaSheet2 | `de2052bdf` | consumer source = 32 interactions, hash `5ecbe1ee…`; byte-identical to provider |
 
 ## 5. Operator staging checklist (the test line)
 
