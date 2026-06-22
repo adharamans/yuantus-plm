@@ -121,6 +121,10 @@ def _row_response(row: EcmPublicationOutbox) -> EcmOutboxRowResponse:
 )
 def list_publication_outbox(
     state: Optional[str] = Query(None),
+    conflict: Optional[bool] = Query(
+        None,
+        description="true = only conflict-after-sent rows; false = exclude them",
+    ),
     limit: int = Query(200, ge=1, le=1000),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -135,7 +139,19 @@ def list_publication_outbox(
                 detail=f"invalid state {state!r}; expected one of {sorted(valid)}",
             )
         query = query.filter(EcmPublicationOutbox.state == state)
-    # Bounded: the outbox accumulates SENT rows indefinitely (no retention path yet).
+    # Item-B Opt-2 (visibility): filter on the conflict_after_sent audit flag. Use
+    # `is True/False` (not `is not None`) so a direct call that omits the FastAPI
+    # Query default (a FieldInfo, not None) does NOT trigger a spurious filter.
+    if conflict is True:
+        query = query.filter(
+            EcmPublicationOutbox.properties["conflict_after_sent"].as_boolean().is_(True)
+        )
+    elif conflict is False:
+        # NULL-safe inverse: rows with no conflict flag (key absent or properties NULL).
+        query = query.filter(
+            EcmPublicationOutbox.properties["conflict_after_sent"].as_boolean().isnot(True)
+        )
+    # Terminal rows are pruned by the default-off Item-C retention job (#839).
     rows = query.order_by(EcmPublicationOutbox.created_at.desc()).limit(limit).all()
     return EcmOutboxListResponse(
         rows=[_row_response(r) for r in rows], count=len(rows)
