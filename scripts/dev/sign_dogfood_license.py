@@ -48,7 +48,12 @@ BOM_MULTITABLE_APP = "plm.bom_multitable"
 
 
 def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
-                   kid: str, plan_type: str, issued_at: str, seats: int | None = None) -> dict:
+                   kid: str, plan_type: str, issued_at: str, seats: int | None = None,
+                   clear_seats: bool = False) -> dict:
+    # --seats and --clear-seats are mutually exclusive: one SETS a cap, the other CLEARS it. Guard
+    # here too (not just argparse), because the tests call build_and_sign directly.
+    if clear_seats and seats is not None:
+        raise ValueError("seats and clear_seats are mutually exclusive: one sets a cap, the other clears it")
     # Refuse to MINT what seat_projection.py would refuse to HONOR: a seats clause < 1 is
     # fail-open-skipped at import (silently no projection), so enforce the signer's stated "int >= 1"
     # contract at the source rather than emitting a self-verifying-but-inert license. bool is an
@@ -65,7 +70,11 @@ def build_and_sign(priv: Ed25519PrivateKey, *, tenant_id: str, subject: str,
         "issued_at": issued_at,
         "expires_at": None,  # perpetual -- V1 constraint (no grace until Phase 4)
     }
-    if seats is not None:
+    if clear_seats:
+        # Explicit ``seats: null`` -> CLEARS TenantQuota.max_users (-> unlimited) at import.
+        # Distinct from omitting seats (no-op); the null is part of the signed canonical payload.
+        payload["seats"] = None
+    elif seats is not None:
         # PLM-COLLAB-V2 seats (Option A): projected onto identity-side TenantQuota.max_users
         # at `yuantus license import` (see security/auth/seat_projection.py).
         payload["seats"] = seats
@@ -97,10 +106,14 @@ def main() -> int:
     ap.add_argument("--kid", default="dogfood-1",
                     help="key id; must match the deployment's YUANTUS_LICENSE_PUBLIC_KEYS entry")
     ap.add_argument("--plan-type", default="Pilot")
-    ap.add_argument("--seats", type=_seats_arg, default=None,
+    seats_group = ap.add_mutually_exclusive_group()
+    seats_group.add_argument("--seats", type=_seats_arg, default=None,
                     help="optional paid seat cap (int >= 1; values < 1 are rejected); projected onto "
                          "TenantQuota.max_users at import (PLM-COLLAB-V2 Option A). Omit to skip "
                          "projection: max_users is left unchanged (an existing cap is preserved, not cleared).")
+    seats_group.add_argument("--clear-seats", action="store_true",
+                    help="emit an explicit seats:null -> CLEARS TenantQuota.max_users (unlimited) at "
+                         "import. Mutually exclusive with --seats.")
     ap.add_argument("--issued-at", default=None, help="ISO-8601; default: now (UTC)")
     ap.add_argument("--out", default="dogfood-license.json", help="output license file path")
     ap.add_argument("--priv-out", default=None,
@@ -118,6 +131,7 @@ def main() -> int:
     license_obj = build_and_sign(
         priv, tenant_id=args.tenant_id, subject=args.subject,
         kid=args.kid, plan_type=args.plan_type, issued_at=issued_at, seats=args.seats,
+        clear_seats=args.clear_seats,
     )
 
     # Self-check: the deployment MUST accept what we just signed (same offline verify path).

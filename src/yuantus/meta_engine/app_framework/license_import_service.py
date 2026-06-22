@@ -127,10 +127,11 @@ def record_seat_cap_audit(
     meta_session: Session,
     *,
     tenant_id: str,
-    max_users: int,
+    max_users: Optional[int],
     installed_by: Optional[int] = None,
 ) -> None:
-    """Write a meta-side audit row noting a seat cap was PROJECTED at license import.
+    """Write a meta-side audit row noting a seat cap was PROJECTED (set to N), or CLEARED
+    (explicit seats:null -> unlimited), at license import.
 
     Mirrors the import audit (``method="LICENSE"``, synthetic CLI ``path``). Kept
     meta-side -- where ``audit_logs`` reliably lives and the import audit already is --
@@ -139,17 +140,20 @@ def record_seat_cap_audit(
     roll back the seat-cap projection itself. The caller commits; this is best-effort
     observability, decoupled from the cap write.
 
-    ``project_license_seats`` returns the cap on every valid import (idempotent
+    ``project_license_seats`` reports a set-or-clear outcome on every valid import (idempotent
     re-imports included), so this records "projected", not "changed" -- consistent with
     the import audit, which likewise fires each run. The value rides in ``path`` because
     ``AuditLog`` has no structured-detail column.
     """
+    # ``max_users is None`` marks a CLEAR (explicit seats:null) -> record "cleared", never a
+    # false ``?max_users=N``. A set keeps the numeric value, as before.
+    cap = max_users if max_users is not None else "cleared"
     meta_session.add(
         AuditLog(
             tenant_id=tenant_id,
             user_id=installed_by,
             method="LICENSE",
-            path=f"cli:license/seat-cap?max_users={max_users}",
+            path=f"cli:license/seat-cap?max_users={cap}",
             status_code=200,
             duration_ms=0,
         )

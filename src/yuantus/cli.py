@@ -73,8 +73,10 @@ def license_import(
         # that commit fails, the exception skips this line -> `projected` stays None, so the
         # audit below never records a cap that did not actually land.
         projected = applied
-        if projected is not None:
-            typer.echo(f"seat cap projected: TenantQuota.max_users={projected}")
+        if projected.action == "set":
+            typer.echo(f"seat cap projected: TenantQuota.max_users={projected.seats}")
+        elif projected.action == "clear":
+            typer.echo("seat cap cleared: TenantQuota.max_users -> unlimited (NULL)")
     except Exception as exc:  # noqa: BLE001 -- best-effort; never fail an activated license
         typer.echo(
             f"warning: seat-cap projection failed ({exc}); license is active, seat cap "
@@ -85,13 +87,13 @@ def license_import(
     # Audit the projection on the meta DB (where audit_logs lives and the import audit is),
     # in its OWN best-effort guard so an audit failure cannot masquerade as a projection
     # failure. Post-commit, so it can never touch the activated license.
-    if projected is not None:
+    if projected is not None and projected.action in ("set", "clear"):
         try:
             with get_db_session() as audit_session:
                 record_seat_cap_audit(
                     audit_session,
                     tenant_id=result.tenant_id,
-                    max_users=projected,
+                    max_users=projected.seats,  # None for a clear -> audit records "cleared"
                 )
                 audit_session.commit()
         except Exception as exc:  # noqa: BLE001 -- audit is observability; never fail the CLI

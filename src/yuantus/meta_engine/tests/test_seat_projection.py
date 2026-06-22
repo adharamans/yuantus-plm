@@ -8,11 +8,13 @@ intentionally not exercised here -- seats live entirely outside the entitlement 
 """
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
@@ -83,21 +85,21 @@ def _payload(tenant_id="acme", **extra):
 def test_projects_valid_seats_to_max_users(identity_session):
     result = project_license_seats(identity_session, _payload(seats=20))
     identity_session.flush()
-    assert result == 20
+    assert result.action == "set" and result.seats == 20
     quota = identity_session.get(TenantQuota, "acme")
     assert quota is not None and quota.max_users == 20
     assert identity_session.get(Tenant, "acme") is not None  # ensure_tenant ran (FK satisfied)
 
 
 def test_absent_seats_projects_nothing(identity_session):
-    assert project_license_seats(identity_session, _payload()) is None
+    assert project_license_seats(identity_session, _payload()).action == "noop"
     assert identity_session.get(TenantQuota, "acme") is None
 
 
 @pytest.mark.parametrize("bad", [0, -1, -5, True, "20", 1.5])
 def test_invalid_seats_is_fail_open_noop(identity_session, bad):
     # 0 / negative / bool / str / float -> skipped: no max_users written, no tenant lockout.
-    assert project_license_seats(identity_session, _payload(seats=bad)) is None
+    assert project_license_seats(identity_session, _payload(seats=bad)).action == "noop"
     assert identity_session.get(TenantQuota, "acme") is None
 
 
@@ -107,6 +109,40 @@ def test_reimport_updates_cap_license_is_source_of_truth(identity_session):
     project_license_seats(identity_session, _payload(seats=30))
     identity_session.flush()
     assert identity_session.get(TenantQuota, "acme").max_users == 30
+
+
+def test_explicit_null_clears_cap(identity_session):
+    # Set a cap, then an explicit ``seats: null`` clears it (max_users -> None = unlimited).
+    project_license_seats(identity_session, _payload(seats=20))
+    identity_session.flush()
+    assert identity_session.get(TenantQuota, "acme").max_users == 20
+    outcome = project_license_seats(identity_session, _payload(seats=None))
+    identity_session.flush()
+    assert outcome.action == "clear" and outcome.seats is None
+    assert identity_session.get(TenantQuota, "acme").max_users is None  # cleared
+
+
+def test_absent_vs_null_are_distinct(identity_session):
+    # The crux of the feature: absent seats is a no-op (preserves the cap); explicit null clears
+    # it. payload.get can't tell them apart -- the helper keys on ``"seats" in payload``.
+    project_license_seats(identity_session, _payload(seats=20))
+    identity_session.flush()
+    assert project_license_seats(identity_session, _payload()).action == "noop"  # absent
+    identity_session.flush()
+    assert identity_session.get(TenantQuota, "acme").max_users == 20  # absent preserved the cap
+    assert project_license_seats(identity_session, _payload(seats=None)).action == "clear"  # null
+    identity_session.flush()
+    assert identity_session.get(TenantQuota, "acme").max_users is None  # null cleared it
+
+
+def test_clear_with_no_prior_quota_creates_unlimited_row(identity_session):
+    # Documented choice: clearing a tenant that never had a quota row creates one with
+    # max_users=None (= unlimited = the default) -- harmless, matching the set path's create.
+    outcome = project_license_seats(identity_session, _payload(seats=None))
+    identity_session.flush()
+    assert outcome.action == "clear"
+    q = identity_session.get(TenantQuota, "acme")
+    assert q is not None and q.max_users is None
 
 
 def test_fk_is_actually_enforced_in_this_env(identity_session):
@@ -153,6 +189,40 @@ def test_build_and_sign_mints_valid_seats_and_omits_none(signer):
     priv = Ed25519PrivateKey.generate()
     assert signer.build_and_sign(priv, seats=5, **_SIGN_KW)["payload"]["seats"] == 5
     assert "seats" not in signer.build_and_sign(priv, seats=None, **_SIGN_KW)["payload"]
+
+
+def test_build_and_sign_clear_seats_emits_signed_explicit_null(signer):
+    # --clear-seats emits an explicit ``seats: null`` (distinct from absent) that is part of the
+    # signed canonical payload -- and it ROUND-TRIPS through verification (the load-bearing claim:
+    # the null survives sign -> verify, not just canonical_payload_bytes being deterministic).
+    priv = Ed25519PrivateKey.generate()
+    obj = signer.build_and_sign(priv, clear_seats=True, **_SIGN_KW)
+    assert "seats" in obj["payload"] and obj["payload"]["seats"] is None
+    pub = base64.b64encode(
+        priv.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+    ).decode()
+    signer.verify_license(obj, {_SIGN_KW["kid"]: pub})  # raises if the signature doesn't cover the null
+
+
+def test_build_and_sign_rejects_seats_and_clear_together(signer):
+    # build_and_sign guards mutual exclusion itself (tests/callers hit it directly, bypassing argparse).
+    with pytest.raises(ValueError):
+        signer.build_and_sign(Ed25519PrivateKey.generate(), seats=5, clear_seats=True, **_SIGN_KW)
+
+
+def test_cli_rejects_seats_and_clear_seats_together(tmp_path):
+    # argparse mutually-exclusive group -> non-zero exit, no file written.
+    signer_path = Path(__file__).resolve().parents[4] / "scripts" / "dev" / "sign_dogfood_license.py"
+    out = tmp_path / "lic.json"
+    result = subprocess.run(
+        [sys.executable, str(signer_path), "--tenant-id", "x", "--seats", "5",
+         "--clear-seats", "--out", str(out)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not out.exists()
 
 
 def test_seats_arg_validator_enforces_ge_1(signer):
