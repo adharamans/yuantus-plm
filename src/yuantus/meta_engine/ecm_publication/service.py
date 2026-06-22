@@ -407,3 +407,41 @@ class EcmPublicationOutboxService:
         row.properties = {**(row.properties or {}), "replayed": True}
         self.session.flush()
         return row
+
+    # -- retention (scheduler-driven prune; Item C, default-off) ---------
+    def prune_terminal(
+        self,
+        *,
+        retention_days: int,
+        now: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> int:
+        """Delete terminal SENT rows older than ``retention_days`` (by dispatched_at).
+        Default-OFF: retention_days <= 0 is a no-op (returns 0). NEVER deletes
+        pending/failed/skipped rows, and ALWAYS preserves rows flagged
+        ``conflict_after_sent`` (the Item-B audit signal). Bounded by ``limit``.
+        Returns the number of rows deleted."""
+        if not retention_days or retention_days <= 0:
+            return 0
+        now = now or datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=retention_days)
+        q = (
+            self.session.query(EcmPublicationOutbox)
+            .filter(
+                EcmPublicationOutbox.state == EcmPublicationState.SENT.value,
+                EcmPublicationOutbox.dispatched_at.isnot(None),
+                EcmPublicationOutbox.dispatched_at < cutoff,
+            )
+            .order_by(EcmPublicationOutbox.dispatched_at.asc())
+        )
+        if limit and limit > 0:
+            q = q.limit(limit)
+        deleted = 0
+        for row in q.all():
+            if (row.properties or {}).get("conflict_after_sent"):
+                continue  # preserve the conflict-after-sent audit row
+            self.session.delete(row)
+            deleted += 1
+        if deleted:
+            self.session.flush()
+        return deleted

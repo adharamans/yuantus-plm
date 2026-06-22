@@ -91,6 +91,21 @@ def default_scheduler_tasks(settings: Any) -> List[SchedulerTask]:
             ),
         ),
         SchedulerTask(
+            name="ecm_publication_outbox_prune",
+            task_type="ecm_publication_outbox_prune",
+            interval_seconds=int(
+                getattr(settings, "SCHEDULER_ECM_OUTBOX_PRUNE_INTERVAL_SECONDS", 3600)
+                or 0
+            ),
+            priority=int(
+                getattr(settings, "SCHEDULER_ECM_OUTBOX_PRUNE_PRIORITY", 95) or 95
+            ),
+            enabled=bool(getattr(settings, "SCHEDULER_ECM_OUTBOX_PRUNE_ENABLED", True)),
+            max_attempts=int(
+                getattr(settings, "SCHEDULER_ECM_OUTBOX_PRUNE_MAX_ATTEMPTS", 1) or 1
+            ),
+        ),
+        SchedulerTask(
             name="bom_to_mbom_sync",
             task_type="bom_to_mbom_sync",
             interval_seconds=int(

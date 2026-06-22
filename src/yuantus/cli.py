@@ -206,6 +206,7 @@ def worker(
     from yuantus.meta_engine.tasks.scheduler_tasks import (
         audit_retention_prune,
         bom_to_mbom_sync,
+        ecm_publication_outbox_prune,
         eco_approval_escalation,
     )
     from yuantus.meta_engine.tasks.breakage_tasks import (
@@ -228,6 +229,7 @@ def worker(
     w.register_handler("quota_test", quota_test)
     w.register_handler("eco_approval_escalation", eco_approval_escalation)
     w.register_handler("audit_retention_prune", audit_retention_prune)
+    w.register_handler("ecm_publication_outbox_prune", ecm_publication_outbox_prune)
     w.register_handler("bom_to_mbom_sync", bom_to_mbom_sync)
     w.register_handler("breakage_helpdesk_sync_stub", breakage_helpdesk_sync_stub)
     w.register_handler("breakage_incidents_export", breakage_incidents_export)

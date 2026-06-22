@@ -555,6 +555,21 @@ class Settings(BaseSettings):
         default=900,
         description="Reclaim publication-outbox rows claimed but unprocessed beyond this (seconds)",
     )
+    PUBLICATION_ECM_OUTBOX_RETENTION_DAYS: int = Field(
+        default=0,
+        description=(
+            "Prune terminal SENT ECM publication-outbox rows older than N days "
+            "(0=disabled). conflict_after_sent audit rows are always preserved. "
+            "Ratified Item-C policy: 90 days when enabled."
+        ),
+    )
+    PUBLICATION_ECM_OUTBOX_RETENTION_BATCH_SIZE: int = Field(
+        default=1000,
+        description=(
+            "Max ECM outbox rows deleted per scheduler prune run (0 = unbounded). "
+            "Bounds a single prune job so a large backlog drains over multiple runs."
+        ),
+    )
     # PLM->ERP publication connector (G2 R3, generic outbound HTTP)
     PUBLICATION_ERP_TARGET_SYSTEM: str = Field(
         default="",
@@ -776,6 +791,22 @@ class Settings(BaseSettings):
     SCHEDULER_AUDIT_RETENTION_MAX_ATTEMPTS: int = Field(
         default=1,
         description="Max attempts for audit retention scheduler jobs",
+    )
+    SCHEDULER_ECM_OUTBOX_PRUNE_ENABLED: bool = Field(
+        default=True,
+        description="Enable periodic ECM publication outbox prune job enqueue",
+    )
+    SCHEDULER_ECM_OUTBOX_PRUNE_INTERVAL_SECONDS: int = Field(
+        default=3600,
+        description="Minimum seconds between ECM outbox prune scheduler jobs",
+    )
+    SCHEDULER_ECM_OUTBOX_PRUNE_PRIORITY: int = Field(
+        default=95,
+        description="Queue priority for ECM outbox prune scheduler jobs",
+    )
+    SCHEDULER_ECM_OUTBOX_PRUNE_MAX_ATTEMPTS: int = Field(
+        default=1,
+        description="Max attempts for ECM outbox prune scheduler jobs",
     )
     SCHEDULER_BOM_TO_MBOM_ENABLED: bool = Field(
         default=False,
