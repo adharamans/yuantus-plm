@@ -251,9 +251,10 @@ def test_default_task_registry_keeps_scheduler_tasks_bounded(session):
     assert names == [
         "eco_approval_escalation",
         "audit_retention_prune",
+        "ecm_publication_outbox_prune",
         "bom_to_mbom_sync",
     ]
-    bom_to_mbom = tasks[2]
+    bom_to_mbom = tasks[3]
     assert bom_to_mbom.enabled is False
     assert bom_to_mbom.payload == {
         "source_item_ids": ["part-1", "part-2"],
@@ -317,6 +318,52 @@ def test_audit_retention_scheduler_task_skips_when_retention_disabled():
             result = audit_retention_prune({}, MagicMock())
 
     prune.assert_not_called()
+    assert result["skipped"] is True
+    assert result["reason"] == "retention_disabled"
+
+
+def test_ecm_outbox_prune_scheduler_task_passes_batch_limit():
+    from yuantus.meta_engine.tasks.scheduler_tasks import ecm_publication_outbox_prune
+
+    settings = SimpleNamespace(
+        PUBLICATION_ECM_OUTBOX_RETENTION_DAYS=90,
+        PUBLICATION_ECM_OUTBOX_RETENTION_BATCH_SIZE=1000,
+    )
+    session = MagicMock()
+    with patch(
+        "yuantus.meta_engine.tasks.scheduler_tasks.get_settings", return_value=settings
+    ):
+        with patch(
+            "yuantus.meta_engine.ecm_publication.service.EcmPublicationOutboxService"
+        ) as Svc:
+            Svc.return_value.prune_terminal.return_value = 7
+            result = ecm_publication_outbox_prune({}, session)
+
+    # the production path MUST bound the delete by the batch size (regression guard)
+    Svc.return_value.prune_terminal.assert_called_once_with(
+        retention_days=90, limit=1000
+    )
+    assert result["deleted"] == 7
+    assert result["retention_days"] == 90
+    assert result["batch_size"] == 1000
+
+
+def test_ecm_outbox_prune_scheduler_task_skips_when_disabled():
+    from yuantus.meta_engine.tasks.scheduler_tasks import ecm_publication_outbox_prune
+
+    settings = SimpleNamespace(
+        PUBLICATION_ECM_OUTBOX_RETENTION_DAYS=0,
+        PUBLICATION_ECM_OUTBOX_RETENTION_BATCH_SIZE=1000,
+    )
+    with patch(
+        "yuantus.meta_engine.tasks.scheduler_tasks.get_settings", return_value=settings
+    ):
+        with patch(
+            "yuantus.meta_engine.ecm_publication.service.EcmPublicationOutboxService"
+        ) as Svc:
+            result = ecm_publication_outbox_prune({}, MagicMock())
+
+    Svc.return_value.prune_terminal.assert_not_called()
     assert result["skipped"] is True
     assert result["reason"] == "retention_disabled"
 
@@ -453,4 +500,5 @@ def test_cli_registers_scheduler_command_and_worker_handlers():
     assert '"would_enqueue": [d.__dict__ for d in result.would_enqueue]' in scheduler_src
     assert "eco_approval_escalation" in worker_src
     assert "audit_retention_prune" in worker_src
+    assert "ecm_publication_outbox_prune" in worker_src
     assert "bom_to_mbom_sync" in worker_src

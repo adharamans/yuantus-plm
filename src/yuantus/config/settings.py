@@ -563,6 +563,13 @@ class Settings(BaseSettings):
             "Ratified Item-C policy: 90 days when enabled."
         ),
     )
+    PUBLICATION_ECM_OUTBOX_RETENTION_BATCH_SIZE: int = Field(
+        default=1000,
+        description=(
+            "Max ECM outbox rows deleted per scheduler prune run (0 = unbounded). "
+            "Bounds a single prune job so a large backlog drains over multiple runs."
+        ),
+    )
     # PLM->ERP publication connector (G2 R3, generic outbound HTTP)
     PUBLICATION_ERP_TARGET_SYSTEM: str = Field(
         default="",
