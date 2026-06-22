@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,8 @@ from .models import (
     EcmPublicationReason,
     EcmPublicationState,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EcmPublicationReplayError(Exception):
@@ -186,6 +189,16 @@ class EcmPublicationOutboxService:
         if existing.state == EcmPublicationState.SENT.value:
             # D3 / R3: a changed fingerprint vs an already-SENT row is conflict-as-audit
             # -- record it on the published row, do NOT raise (call site is release()).
+            # Item-B Opt-2 (visibility): surface the conflict -- it was previously silent.
+            logger.warning(
+                "ECM publish conflict-after-sent: controlled file content changed after "
+                "a SENT publish (item=%s version=%s file=%s role=%s); recorded as audit, "
+                "NOT auto-republished.",
+                existing.item_id,
+                existing.version_id,
+                existing.file_id,
+                existing.file_role,
+            )
             existing.properties = {
                 **(existing.properties or {}),
                 "conflict_after_sent": True,
