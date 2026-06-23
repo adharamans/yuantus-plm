@@ -86,10 +86,11 @@ are recommended for an integration pass.
 - The forensic read surface itself is unchanged in shape (it already returned all rows; it now
   simply also carries non-success rows). `is_entitled()` and the write business behavior are
   untouched.
-- **CI / main-health note (at PR time):** this PR's `contracts` inherited **two pre-existing
-  ECM-line main breakages** (a separate development line, merged red — the repo has no required
-  checks): an unindexed `DEV_AND_VERIFICATION_ECM_PUBLISH_A1_DISPOSITION` doc, and a datetime-format
-  assertion in `test_ecm_transfer_receiver_adapter`. The A1 doc-index entry is folded in here (a
-  one-line main-health fix that clears the completeness gate for every doc-touching PR); the datetime
-  assertion is **ECM-line logic, flagged for that line — not fixed here** (fixing it would mix lines).
-  This PR's own changes are green.
+- **CI / main-health note (at PR time):** this PR's `contracts` inherited a **recurring ECM-line
+  main-health gap** (a separate development line, merged red — the repo has no required checks): the
+  ECM line keeps merging `DEV_AND_VERIFICATION` docs *without indexing them*, red-ing the shared
+  doc-index completeness gate for **every** doc-touching PR. The currently-unindexed ECM docs
+  (`ECM_PUBLISH_A1_DISPOSITION`, `ECM_PUBLISH_LINE`) are folded into the index here as a one-line
+  main-health fix. (An earlier ECM datetime-format test failure was fixed on the ECM line in the
+  interim.) **This PR's own changes are green** — the fold-ins are only to clear the shared gate so
+  this PR can; the durable fix is the ECM line indexing its own docs.
