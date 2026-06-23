@@ -74,7 +74,10 @@ def get_item_transition_history(
         user_roles=user.roles,
     ):
         raise HTTPException(status_code=403, detail="Permission denied")
-    rows = LifecycleService(db).get_transition_history(item_id, limit=limit)
+    # success_only: the item-scoped read must NOT surface failed/denied/blocked/aborted attempts —
+    # those are a forensic-tier signal (a denial reveals "who was blocked"). The forensic route below
+    # returns every outcome.
+    rows = LifecycleService(db).get_transition_history(item_id, limit=limit, success_only=True)
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}
 
 
@@ -96,7 +99,9 @@ def get_forensic_transition_history(
     deleted-item history. The auth model is settled (the per-item-ACL decision chose 2a, #831):
     the forensic route **stays superuser**, while the item-scoped read
     (``/items/{item_id}/transition-history``) uses a **per-item ACL**
-    (``check_permission(item_type_id, AMLAction.get)``).
+    (``check_permission(item_type_id, AMLAction.get)``). This route returns **all** outcomes,
+    including failed/denied/blocked/aborted attempts — those are forensic-tier-only; the item-scoped
+    route filters to ``success_only``.
     """
-    rows = LifecycleService(db).get_transition_history(item_id, limit=limit)
+    rows = LifecycleService(db).get_transition_history(item_id, limit=limit, success_only=False)
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}

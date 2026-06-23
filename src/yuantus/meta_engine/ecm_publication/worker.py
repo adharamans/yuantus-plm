@@ -204,6 +204,33 @@ class EcmPublicationOutboxWorker:
             eligible=True, version_id=version.id, fingerprint=fingerprint(snapshot)
         )
 
+    def _superseded_by_newer_sent(
+        self, session: Session, row: EcmPublicationOutbox
+    ) -> bool:
+        """A1 latest-wins: True iff a SENT row for the SAME
+        ``(item_id, file_role, target_system)`` carries a strictly NEWER snapshot
+        ``released_at`` than this row. ``released_at`` is a naive ISO string in the
+        snapshot (build_snapshot), so a lexicographic compare == chronological."""
+        my_released = str((row.snapshot or {}).get("released_at") or "")
+        if not my_released:
+            return False
+        sent = (
+            session.query(EcmPublicationOutbox)
+            .filter(
+                EcmPublicationOutbox.item_id == row.item_id,
+                EcmPublicationOutbox.file_role == row.file_role,
+                EcmPublicationOutbox.target_system == row.target_system,
+                EcmPublicationOutbox.state == EcmPublicationState.SENT.value,
+                EcmPublicationOutbox.id != row.id,
+            )
+            .all()
+        )
+        for other in sent:
+            other_released = str((other.snapshot or {}).get("released_at") or "")
+            if other_released and other_released > my_released:
+                return True
+        return False
+
     def _process_row(
         self,
         session: Session,
@@ -217,6 +244,27 @@ class EcmPublicationOutboxWorker:
             row.worker_id = None
             row.claimed_at = None
             session.commit()
+            return
+
+        # A1 ordering guard (latest-wins): if a SENT row for the same lineage already
+        # carries a NEWER released_at, this row is superseded -> SKIPPED/not_eligible,
+        # never dispatched (the stable (item, file_role) Athena identity would otherwise
+        # let an out-of-order older publish overwrite the newer content).
+        if self._superseded_by_newer_sent(session, row):
+            row.state = EcmPublicationState.SKIPPED.value
+            row.reason = EcmPublicationReason.NOT_ELIGIBLE.value
+            row.properties = {**(row.properties or {}), "superseded_by_newer_sent": True}
+            row.worker_id = None
+            row.claimed_at = None
+            session.commit()
+            logger.info(
+                "ecm-publication-worker '%s' skipped row %s: superseded by a newer SENT "
+                "publish for (item=%s role=%s).",
+                self.worker_id,
+                row.id,
+                row.item_id,
+                row.file_role,
+            )
             return
 
         def _revalidate() -> EcmRevalidation:

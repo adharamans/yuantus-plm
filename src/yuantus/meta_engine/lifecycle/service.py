@@ -142,6 +142,11 @@ class LifecycleService:
             .first()
         )
         if not target_state_obj:
+            self._record_transition_attempt(
+                outcome="denied", reason_code="target_state_not_found", item=item,
+                actor_user_id=user_id, from_state=current_state_obj, to_state_name=target_state_name,
+                lifecycle_map=lifecycle_map, from_permission_id=getattr(item, "permission_id", None),
+            )
             return PromoteResult(
                 success=False,
                 error=f"Target lifecycle state '{target_state_name}' not found in map '{lifecycle_map.name}'.",
@@ -158,6 +163,11 @@ class LifecycleService:
         )
 
         if not transition_obj:
+            self._record_transition_attempt(
+                outcome="denied", reason_code="transition_missing", item=item, actor_user_id=user_id,
+                from_state=current_state_obj, to_state=target_state_obj, lifecycle_map=lifecycle_map,
+                from_permission_id=getattr(item, "permission_id", None),
+            )
             return PromoteResult(
                 success=False,
                 error=f"No valid transition found from '{current_state_obj.name}' to '{target_state_name}'.",
@@ -180,11 +190,21 @@ class LifecycleService:
 
             user = self.session.get(RBACUser, user_id)
             if not user:
+                self._record_transition_attempt(
+                    outcome="denied", reason_code="actor_missing", item=item, actor_user_id=user_id,
+                    from_state=current_state_obj, to_state=target_state_obj, transition=transition_obj,
+                    lifecycle_map=lifecycle_map, from_permission_id=getattr(item, "permission_id", None),
+                )
                 return PromoteResult(success=False, error="User not found.")
 
             # Superuser bypass, else any of the user's roles must satisfy (be, or inherit
             # from) the allowed role — the whole decision is in _user_allowed_for_transition.
             if not self._user_allowed_for_transition(user, transition_obj):
+                self._record_transition_attempt(
+                    outcome="denied", reason_code="permission_denied", item=item, actor_user_id=user_id,
+                    from_state=current_state_obj, to_state=target_state_obj, transition=transition_obj,
+                    lifecycle_map=lifecycle_map, from_permission_id=getattr(item, "permission_id", None),
+                )
                 return PromoteResult(
                     success=False,
                     error=f"Permission denied. Role requirement not met for transition '{transition_obj.id}'.",
@@ -210,6 +230,13 @@ class LifecycleService:
                 item.id
             )
             if child_errors:
+                self._record_transition_attempt(
+                    outcome="blocked", reason_code="assembly_release_blocked", item=item,
+                    actor_user_id=user_id, from_state=current_state_obj, to_state=target_state_obj,
+                    transition=transition_obj, lifecycle_map=lifecycle_map,
+                    from_permission_id=getattr(item, "permission_id", None),
+                    public_message=f"{len(child_errors)} unreleased assembly child(ren)",
+                )
                 return PromoteResult(success=False, error="; ".join(child_errors))
 
         # 4. 执行 before_transition hooks
@@ -219,6 +246,12 @@ class LifecycleService:
             context,
         )
         if context.abort:
+            self._record_transition_attempt(
+                outcome="aborted", reason_code="before_transition_aborted", item=item,
+                actor_user_id=user_id, from_state=current_state_obj, to_state=target_state_obj,
+                transition=transition_obj, lifecycle_map=lifecycle_map,
+                from_permission_id=getattr(item, "permission_id", None),
+            )
             return PromoteResult(success=False, error=context.abort_reason)
 
         # 5. 条件检查
@@ -242,6 +275,12 @@ class LifecycleService:
                 context = self.hook_registry.execute(
                     item.item_type_id, HookType.ON_PROMOTE_FAIL, context
                 )
+                self._record_transition_attempt(
+                    outcome="aborted", reason_code="condition_failed", item=item,
+                    actor_user_id=user_id, from_state=current_state_obj, to_state=target_state_obj,
+                    transition=transition_obj, lifecycle_map=lifecycle_map,
+                    from_permission_id=getattr(item, "permission_id", None),
+                )
                 return PromoteResult(
                     success=False, error="Transition condition not met."
                 )
@@ -251,6 +290,11 @@ class LifecycleService:
             item.item_type_id, HookType.ON_EXIT_STATE, context
         )
         if context.abort:
+            self._record_transition_attempt(
+                outcome="aborted", reason_code="on_exit_aborted", item=item, actor_user_id=user_id,
+                from_state=current_state_obj, to_state=target_state_obj, transition=transition_obj,
+                lifecycle_map=lifecycle_map, from_permission_id=getattr(item, "permission_id", None),
+            )
             return PromoteResult(success=False, error=context.abort_reason)
 
         # --- 执行状态变更 ---
@@ -285,6 +329,11 @@ class LifecycleService:
             item.state = old_state_name
             item.current_state = old_state_id
             item.permission_id = old_permission_id
+            self._record_transition_attempt(
+                outcome="aborted", reason_code="on_enter_aborted", item=item, actor_user_id=user_id,
+                from_state=current_state_obj, to_state=target_state_obj, transition=transition_obj,
+                lifecycle_map=lifecycle_map, from_permission_id=old_permission_id, rolled_back=True,
+            )
             return PromoteResult(success=False, error=context.abort_reason)
 
         # 7.5 Workflow Integration (Phase 2.5)
@@ -314,6 +363,13 @@ class LifecycleService:
                 item.state = old_state_name
                 item.current_state = old_state_id
                 item.permission_id = old_permission_id
+                self._record_transition_attempt(
+                    outcome="failed", reason_code="workflow_start_failed", item=item,
+                    actor_user_id=user_id, from_state=current_state_obj, to_state=target_state_obj,
+                    transition=transition_obj, lifecycle_map=lifecycle_map,
+                    from_permission_id=old_permission_id, rolled_back=True,
+                    public_message="workflow start failed",
+                )
                 return PromoteResult(
                     success=False, error=f"Failed to start workflow: {str(e)}"
                 )
@@ -335,6 +391,13 @@ class LifecycleService:
                 item.state = old_state_name
                 item.current_state = old_state_id
                 item.permission_id = old_permission_id
+                self._record_transition_attempt(
+                    outcome="failed", reason_code="version_release_failed", item=item,
+                    actor_user_id=user_id, from_state=current_state_obj, to_state=target_state_obj,
+                    transition=transition_obj, lifecycle_map=lifecycle_map,
+                    from_permission_id=old_permission_id, rolled_back=True,
+                    public_message="version release failed",
+                )
                 return PromoteResult(
                     success=False, error=f"Version release failed: {str(e)}"
                 )
@@ -362,21 +425,28 @@ class LifecycleService:
             to_state=target_state_obj.name,
         )
 
-    def get_transition_history(self, item_id: str, *, limit: Optional[int] = None):
+    def get_transition_history(
+        self, item_id: str, *, limit: Optional[int] = None, success_only: bool = False
+    ):
         """Return an item's lifecycle transition-history rows, most-recent first.
 
-        Read surface (Slice 2) for the audit table written by ``promote()`` (Slice 1).
-        Ordered by ``created_at`` descending, with an ``id`` tiebreak for stable order;
-        optional ``limit``. Does NOT check item existence — the route does that, so it can
-        distinguish a 404 (no such item) from an empty list (item with no history yet).
+        Read surface (Slice 2) for the audit table written by ``promote()``. Ordered by
+        ``created_at`` descending, with an ``id`` tiebreak; optional ``limit``. Does NOT check
+        item existence — the route does that.
+
+        ``success_only=True`` returns only ``outcome == "success"`` rows — the **item-scoped**
+        read surface, which must NOT leak failed/denied/blocked/aborted attempts (those are a
+        forensic-tier signal). The **forensic** (superuser) route passes ``success_only=False``
+        to see every outcome.
         """
-        query = (
-            self.session.query(LifecycleTransitionHistory)
-            .filter(LifecycleTransitionHistory.item_id == item_id)
-            .order_by(
-                LifecycleTransitionHistory.created_at.desc(),
-                LifecycleTransitionHistory.id.desc(),
-            )
+        query = self.session.query(LifecycleTransitionHistory).filter(
+            LifecycleTransitionHistory.item_id == item_id
+        )
+        if success_only:
+            query = query.filter(LifecycleTransitionHistory.outcome == "success")
+        query = query.order_by(
+            LifecycleTransitionHistory.created_at.desc(),
+            LifecycleTransitionHistory.id.desc(),
         )
         if limit is not None:
             query = query.limit(limit)
@@ -428,6 +498,82 @@ class LifecycleService:
             logger.warning(
                 "transition-history write failed for item %s: %s",
                 getattr(item, "id", "?"),
+                exc,
+            )
+
+    def _record_transition_attempt(
+        self,
+        *,
+        outcome: str,
+        reason_code: str,
+        item,
+        actor_user_id,
+        from_state=None,
+        to_state=None,
+        transition=None,
+        lifecycle_map=None,
+        to_state_name: Optional[str] = None,
+        from_permission_id=None,
+        to_permission_id=None,
+        public_message: Optional[str] = None,
+        rolled_back: bool = False,
+    ) -> None:
+        """Best-effort audit of a FAILED / denied / blocked / aborted ``promote()`` attempt.
+
+        Unlike the success write (same-session ``begin_nested``), this writes through a SEPARATE
+        ``get_db_session()`` that commits independently, so the row SURVIVES the caller rolling
+        back the failed attempt: ``operations/promote_op.py`` raises ``ValidationError`` on a
+        failed ``PromoteResult``, so the AML apply transaction never commits — a same-session
+        attempt row would vanish. ``get_db_session`` is tenant-aware (it binds the tenant schema
+        via its ``after_begin`` ``SET LOCAL search_path`` listener), so the row lands in the right
+        schema. The history table's reference columns (``item_id`` / ``from_state_id`` /
+        ``transition_id`` / ``lifecycle_map_id`` ...) are all **FK-free**, so this independent
+        INSERT can never block on an FK the caller's uncommitted transaction is holding.
+
+        Best-effort: never touches / flushes / commits ``self.session``; never raises; never
+        changes the ``PromoteResult`` (the attempt already failed). With no tenant context (a
+        non-request caller) ``get_db_session`` raises and we swallow it — no row, promote
+        unaffected. Default-on, gated by ``LIFECYCLE_TRANSITION_HISTORY_ENABLED``. Records only a
+        bounded ``reason_code`` + optional sanitized ``public_message`` — never a raw exception.
+        """
+        from yuantus.config import get_settings  # lazy: avoid an import cycle at module load
+
+        if not getattr(get_settings(), "LIFECYCLE_TRANSITION_HISTORY_ENABLED", True):
+            return
+
+        # Read plain values now, while the ORM objects are live on self.session; the separate
+        # session is handed values only, never an object bound to another session.
+        properties = {"reason_code": reason_code}
+        if public_message:
+            properties["public_message"] = public_message
+        if rolled_back:
+            properties["rolled_back"] = True
+        values = dict(
+            item_id=getattr(item, "id", None),
+            from_state_id=getattr(from_state, "id", None),
+            from_state_name=getattr(from_state, "name", None),
+            to_state_id=getattr(to_state, "id", None),
+            to_state_name=to_state_name or getattr(to_state, "name", None),
+            from_permission_id=from_permission_id,
+            to_permission_id=to_permission_id,
+            transition_id=getattr(transition, "id", None),
+            lifecycle_map_id=getattr(transition, "lifecycle_map_id", None)
+            or getattr(lifecycle_map, "id", None),
+            actor_user_id=actor_user_id,
+            outcome=outcome,
+            properties=properties,
+        )
+        try:
+            from yuantus.database import get_db_session
+
+            with get_db_session() as audit_session:
+                audit_session.add(LifecycleTransitionHistory(**values))
+                audit_session.commit()
+        except Exception as exc:  # best-effort: an attempt audit must never break the promote
+            logger.warning(
+                "transition-attempt audit failed for item %s (outcome=%s): %s",
+                values["item_id"],
+                outcome,
                 exc,
             )
 

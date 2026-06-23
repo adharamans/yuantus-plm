@@ -130,7 +130,7 @@ def test_build_payload_folds_identity_into_stable_source_node_id():
     payload = _payload()
     assert payload["source_repository_id"] == "yuantus-plm"
     assert payload["source_node_id"] == build_transfer_source_node_id(_SNAP)
-    assert payload["source_last_modified_at"] == "2026-06-16T12:30:45"
+    assert payload["source_last_modified_at"] == "2026-06-16T12:30:45.000000"  # #848: microsecond watermark
     assert payload["conflict_policy"] == "SKIP"
     assert payload["root_folder_id"] == _ROOT
     assert (
@@ -138,9 +138,13 @@ def test_build_payload_folds_identity_into_stable_source_node_id():
         == payload["folders"]["item"]["source_node_id"]
     )
 
+    # A1 (#848): source_node_id folds only (item_id, file_role) — STABLE across version + file,
+    # changes only on role, so Athena revisions the same document in place (N+1 supersedes N).
     changed_version = dict(_SNAP, version_id="v-2")
+    changed_file = dict(_SNAP, file_id="f-2")
     changed_role = dict(_SNAP, file_role="pdf")
-    assert build_transfer_source_node_id(changed_version) != payload["source_node_id"]
+    assert build_transfer_source_node_id(changed_version) == payload["source_node_id"]
+    assert build_transfer_source_node_id(changed_file) == payload["source_node_id"]
     assert build_transfer_source_node_id(changed_role) != payload["source_node_id"]
 
 

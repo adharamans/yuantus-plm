@@ -481,7 +481,9 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/DEV_AND_VERIFICATION_DOCUMENT_SYNC_ROUTER_DECOMPOSITION_R8_CLOSEOUT_20260424.md: `docs/DEV_AND_VERIFICATION_DOCUMENT_SYNC_ROUTER_DECOMPOSITION_R8_CLOSEOUT_20260424.md`
 - docs/DEV_AND_VERIFICATION_DOCUMENT_SYNC_ROUTER_SHELL_REMOVAL_20260426.md: `docs/DEV_AND_VERIFICATION_DOCUMENT_SYNC_ROUTER_SHELL_REMOVAL_20260426.md`
 - docs/DEV_AND_VERIFICATION_DOC_INDEX_CONTRACT_DISCIPLINE_20260426.md: `docs/DEV_AND_VERIFICATION_DOC_INDEX_CONTRACT_DISCIPLINE_20260426.md`
+- docs/DEV_AND_VERIFICATION_ECM_PUBLISH_A1_DISPOSITION_20260622.md: `docs/DEV_AND_VERIFICATION_ECM_PUBLISH_A1_DISPOSITION_20260622.md`
 - docs/DEV_AND_VERIFICATION_ECM_PUBLISH_DURABLE_REACHABILITY_20260619.md: `docs/DEV_AND_VERIFICATION_ECM_PUBLISH_DURABLE_REACHABILITY_20260619.md`
+- docs/DEV_AND_VERIFICATION_ECM_PUBLISH_LINE_20260622.md: `docs/DEV_AND_VERIFICATION_ECM_PUBLISH_LINE_20260622.md`
 - docs/DEV_AND_VERIFICATION_ECM_PUBLISH_P1A_RELEASE_HARDENING_IMPL_20260616.md: `docs/DEV_AND_VERIFICATION_ECM_PUBLISH_P1A_RELEASE_HARDENING_IMPL_20260616.md`
 - docs/DEV_AND_VERIFICATION_ECM_PUBLISH_P1B_OUTBOX_ENQUEUE_IMPL_20260616.md: `docs/DEV_AND_VERIFICATION_ECM_PUBLISH_P1B_OUTBOX_ENQUEUE_IMPL_20260616.md`
 - docs/DEV_AND_VERIFICATION_ECM_PUBLISH_P1C_WORKER_ROUTES_IMPL_20260616.md: `docs/DEV_AND_VERIFICATION_ECM_PUBLISH_P1C_WORKER_ROUTES_IMPL_20260616.md`
@@ -521,6 +523,8 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/DEV_AND_VERIFICATION_IMPACT_SUMMARY_20260207.md: `docs/DEV_AND_VERIFICATION_IMPACT_SUMMARY_20260207.md`
 - docs/DEV_AND_VERIFICATION_ITEM_COCKPIT_EXPORT_20260207.md: `docs/DEV_AND_VERIFICATION_ITEM_COCKPIT_EXPORT_20260207.md`
 - docs/DEV_AND_VERIFICATION_ITEM_EQUIVALENTS_E2E_20260214.md: `docs/DEV_AND_VERIFICATION_ITEM_EQUIVALENTS_E2E_20260214.md`
+- docs/DEV_AND_VERIFICATION_LIFECYCLE_ALL_ATTEMPTS_COVERAGE_20260622.md: `docs/DEV_AND_VERIFICATION_LIFECYCLE_ALL_ATTEMPTS_COVERAGE_20260622.md`
+- docs/DEV_AND_VERIFICATION_LIFECYCLE_ALL_ATTEMPTS_LOGGING_20260622.md: `docs/DEV_AND_VERIFICATION_LIFECYCLE_ALL_ATTEMPTS_LOGGING_20260622.md`
 - docs/DEV_AND_VERIFICATION_LIFECYCLE_PERMISSION_ROLLBACK_20260619.md: `docs/DEV_AND_VERIFICATION_LIFECYCLE_PERMISSION_ROLLBACK_20260619.md`
 - docs/DEV_AND_VERIFICATION_LIFECYCLE_ROLE_HIERARCHY_20260619.md: `docs/DEV_AND_VERIFICATION_LIFECYCLE_ROLE_HIERARCHY_20260619.md`
 - docs/DEV_AND_VERIFICATION_LIFECYCLE_SUSPENDED_GUARD_20260421.md: `docs/DEV_AND_VERIFICATION_LIFECYCLE_SUSPENDED_GUARD_20260421.md`
@@ -1226,7 +1230,10 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/aml-metadata-federation-design-verification-20260411.md: `docs/development/aml-metadata-federation-design-verification-20260411.md`
 - docs/development/aml-metadata-pact-design-and-verification-20260411.md: `docs/development/aml-metadata-pact-design-and-verification-20260411.md`
 - docs/development/aml-metadata-session-handoff-20260411.md: `docs/development/aml-metadata-session-handoff-20260411.md`
+- docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md: `docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md`
 - docs/development/lifecycle-transition-history-taskbook-20260619.md: `docs/development/lifecycle-transition-history-taskbook-20260619.md`
+- docs/development/plm-collab-pact-broker-autogate-design-20260621.md: `docs/development/plm-collab-pact-broker-autogate-design-20260621.md`
+- docs/development/plm-collab-pact-broker-phase-a-dev-verification-20260622.md: `docs/development/plm-collab-pact-broker-phase-a-dev-verification-20260622.md`
 - docs/development/plm-collab-v1-pact-boundary-and-staging-checklist-20260621.md: `docs/development/plm-collab-v1-pact-boundary-and-staging-checklist-20260621.md`
 - docs/development/plm-collab-v1-v2-status-closeout-20260622.md: `docs/development/plm-collab-v1-v2-status-closeout-20260622.md`
 - docs/development/plm-collaboration-current-state-commercialization-and-roadmap-20260618.md: `docs/development/plm-collaboration-current-state-commercialization-and-roadmap-20260618.md`

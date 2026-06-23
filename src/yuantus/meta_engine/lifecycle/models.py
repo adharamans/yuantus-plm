@@ -143,12 +143,17 @@ class StateIdentityPermission(Base):
 
 
 class LifecycleTransitionHistory(Base):
-    """Durable audit record of a SUCCESSFUL lifecycle state transition.
+    """Durable audit record of a lifecycle transition — a successful move, or a failed / denied /
+    blocked / aborted **attempt** (all-attempts, T2).
 
-    Written once per committed promote() (best-effort: a write failure never fails the
-    transition). Records the state move, the state-driven permission move (#808), the actor,
-    and the promote() comment. ``outcome`` is always "success" in v1 — reserved so a future
-    all-attempts slice can record denied/failed attempts without a schema change.
+    A **success** row is written once per committed promote() on the caller's session (best-effort:
+    a write failure never fails the transition). A **failure** attempt (denied/blocked/aborted/
+    failed) is written via a SEPARATE best-effort session that commits independently, so it survives
+    the caller rolling back the failed attempt (see ``LifecycleService._record_transition_attempt``).
+    ``outcome`` is the low-cardinality discriminator — ``success`` | ``denied`` | ``blocked`` |
+    ``aborted`` | ``failed`` — with the exact reason in ``properties.reason_code`` (never a raw
+    exception). Records the state move, the state-driven permission move (#808), the actor, and the
+    promote() comment.
 
     ``actor_user_id`` is intentionally FK-free (a system/automated promote may run with an
     unvalidated user id, e.g. 0); ``item_id`` is a recorded value (no FK) so the audit row

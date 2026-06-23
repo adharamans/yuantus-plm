@@ -147,7 +147,21 @@ def abort_on_enter():
         hook_registry._hooks[key] = before
 
 
-def test_rolled_back_transition_writes_no_row(session, abort_on_enter):
+def test_rolled_back_transition_writes_no_row(session, abort_on_enter, monkeypatch):
+    # The SUCCESS write is skipped on a failed transition. The all-attempts FAILURE write (T2) goes
+    # via a SEPARATE audit session (covered in test_lifecycle_transition_attempts.py); make it a
+    # no-op here so this Slice-1 test stays focused on "the caller's session holds no row for a
+    # rolled-back transition" and never touches the global session.
+    import contextlib
+
+    import yuantus.database as ydb
+
+    @contextlib.contextmanager
+    def _no_audit_session():
+        raise RuntimeError("no audit session in this slice-1 test")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(ydb, "get_db_session", _no_audit_session)
     item = _draft_item(session)
     res = LifecycleService(session).promote(item, "Released", user_id=1)
     session.commit()
