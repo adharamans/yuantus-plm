@@ -43,12 +43,17 @@ The broker needs a base URL + an auth token in **both** repos' CI — and these 
 
 ## 3. Version + tag naming  *(decision)*
 
+- **Pacticipant names** = the names embedded in the committed pact artifact: consumer
+  `Metasheet2`, provider `YuantusPLM`. Do **not** substitute repo slugs such as
+  `metasheet2`, `yuantus`, or `yuantus-plm`; those create different pacticipants in the broker.
 - **Version** = git commit SHA; **branch** = the GitHub ref name, recorded via the broker's first-class
   `--branch` (e.g. `pact-broker publish --consumer-app-version <sha> --branch main`). Use the **branch**
   concept to carry branch semantics — **not** legacy `--tag`; add a `--tag` only if a legacy integration
   still needs it.
-- The pilot publishes consumer `metasheet2@<sha>` on branch `main`; Yuantus publishes provider
-  verification results for `yuantus@<sha>` on branch `main`.
+- The pilot publishes consumer `Metasheet2@<sha>` on branch `main` from the post-merge
+  `push: main` run; Yuantus publishes provider verification results for `YuantusPLM@<sha>`.
+  A provider PR run records its own PR ref as the provider branch; the post-merge `push: main`
+  run records branch `main`.
 - `can-i-deploy` in Phase A (advisory) targets the **`main` branch / latest compatible pair**. The
   **environment / deployment** model (`--to-environment …`) is defined later, at the Phase B blocking
   flip. Standard pact-broker `branch`/`version` convention; no custom scheme.
@@ -73,13 +78,17 @@ until Phase B; after Phase B the broker is authoritative and the copy is a conve
 
 1. **(this) design ratified** — hosting, secrets, naming, migration, fallback agreed.
 2. **MetaSheet2 PR** — consumer CI publishes the pact to the broker (`pact-broker publish`, consumer
-   version = SHA, `--branch` = ref) instead of only committing the JSON. Owner-gated merge (metasheet2).
-3. **Yuantus PR** — provider CI pulls the consumer pact from the broker, verifies it (augmenting the
-   local copy), **publishes the verification results back to the broker** (the write the §2 provider
-   token is scoped for), then runs `can-i-deploy` **advisory**. `sync_metasheet2_pact.sh` retained as
+   version = SHA, `--branch` = ref) instead of only committing the JSON. Owner-gated merge
+   (metasheet2). A pull-request run can prove the wiring only; it publishes a PR ref, not `main`.
+   The first real `mainBranch` consumer pact is produced by the post-merge `push: main` run.
+3. **Yuantus PR** — after the MetaSheet2 `push: main` publish exists, provider CI pulls the
+   consumer `mainBranch` pact from the broker, verifies it (augmenting the local copy),
+   **publishes the verification results back to the broker** (the write the §2 provider token is
+   scoped for), then runs `can-i-deploy` **advisory**. `sync_metasheet2_pact.sh` retained as
    fallback.
 
-Sequencing matters: the provider-pull (3) needs the consumer to have published at least once (2).
+Sequencing matters: the provider-pull (3) needs the consumer to have published from `main` first.
+Publishing from a MetaSheet2 pull request branch does not satisfy Yuantus's `mainBranch` selector.
 
 ## 7. Scope / non-goals
 

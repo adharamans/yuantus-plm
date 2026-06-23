@@ -34,8 +34,10 @@ PactFlow account or secrets yet:
 - the only real verification today is the **local** gates (committed pact + `test:contract`), which are
   untouched and live.
 
-So Phase A is **reviewable wiring that activates on provisioning**, not a verified gate. Both build PRs
-are **DRAFT** and must not merge until provisioned **and** one real run is green (§5).
+So Phase A is **reviewable wiring that activates on provisioning**, not a verified gate. The two build
+PRs do not have the same activation shape: the MetaSheet2 consumer publish can only prove its
+`mainBranch` broker path after it merges and the `push: main` workflow runs; the Yuantus provider PR can
+be verified pre-merge only after that consumer main-branch publish exists (§5).
 
 ## 3. What IS verified (locally, this session)
 
@@ -57,15 +59,22 @@ Nothing works until ops provisions:
 
 ## 5. Activation + verification runbook (run AFTER provisioning — this is the verification)
 
-1. **Consumer publish** — re-run MetaSheet2 `yuantus-pact-consumer.yml`; the "Publish consumer pact"
-   step should now run (not skip) and the pact should appear in PactFlow as `metasheet2@<sha>` on branch
-   `main`. *If it errors:* confirm the `pact-broker publish` flags + auth against the PactFlow CLI docs.
-2. **Provider verify+publish** — re-run Yuantus `contracts`; the "Pact broker verify…" step should run,
-   `pact-provider-verifier` should verify the broker pact against the seeded provider and publish results
-   as `yuantus-plm@<sha>` branch `main`. *If it errors:* confirm the `pact-provider-verifier` flags +
+1. **Consumer publish first** — merge/activate MetaSheet2#3065 only after ops has provisioned
+   `PACT_BROKER_BASE_URL` + `PACT_BROKER_TOKEN`. The pull-request run can validate the workflow shape,
+   but it publishes the PR ref (`GITHUB_REF_NAME`), not `main`; it therefore cannot satisfy a Yuantus
+   `mainBranch` selector. The real verification is the post-merge `push: main` run: the "Publish
+   consumer pact" step should run (not skip) and the pact should appear in PactFlow as
+   `Metasheet2@<sha>` on branch `main`. *If it errors:* confirm the `pact-broker publish` flags +
+   auth against the PactFlow CLI docs.
+2. **Provider verify+publish second** — only after step 1 has produced the consumer `mainBranch` pact,
+   re-run Yuantus#854 / the `contracts` workflow. The "Pact broker verify…" step should run,
+   `pact-provider-verifier` should verify the broker pact against the seeded provider and publish
+   results as `YuantusPLM@<sha>`. On the PR run its provider branch is the PR ref; after merge, the
+   `push: main` run records branch `main`. *If it errors:* confirm the `pact-provider-verifier` flags +
    broker auth — the script's CLI invocation is **best-effort and must be confirmed here**.
-3. **can-i-deploy** — `can-i-deploy --pacticipant yuantus-plm --version <sha>` should return a matrix
-   answer (not an auth/empty error), proving the published results populate the matrix.
+3. **can-i-deploy** — `can-i-deploy --pacticipant YuantusPLM --version <sha>` should return a matrix
+   answer (not an auth/empty error), proving the published `Metasheet2` pact and `YuantusPLM`
+   verification results populate the matrix.
 4. **Drift catch** — deliberately break a pinned field on one side; confirm the broker verification goes
    **red** (advisory) — proving the gate would catch the drift that the §3 boundary doc flagged.
 5. **Phase B flip** — only after a stable window of green advisory runs **and** owner sign-off: remove
@@ -88,5 +97,6 @@ Nothing works until ops provisions:
 ---
 
 *PRs: #843 (design, ratified), #854 (Yuantus provider, draft), zensgit/metasheet2#3065 (consumer, draft).
-Local fallback retained: `scripts/sync_metasheet2_pact.sh`. The two build PRs are draft + held until ops
-provisioning and one real verification run (§5).*
+Local fallback retained: `scripts/sync_metasheet2_pact.sh`. Activation order is asymmetric: consumer
+publish lands first and proves the `main` pact on the post-merge push; provider verify follows once that
+main-branch pact exists (§5).*
