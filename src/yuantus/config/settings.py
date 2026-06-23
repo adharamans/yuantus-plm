@@ -714,10 +714,11 @@ class Settings(BaseSettings):
     LIFECYCLE_TRANSITION_HISTORY_ENABLED: bool = Field(
         default=True,
         description=(
-            "When true (default), a successful LifecycleService.promote() records a row in "
-            "meta_lifecycle_transition_history (actor / from+to state / from+to permission / "
-            "comment / time). Best-effort: a write failure is logged and never fails the "
-            "transition. Set false to disable the audit write."
+            "When true (default), LifecycleService.promote() records a row in "
+            "meta_lifecycle_transition_history for a successful transition AND for a failed / "
+            "denied / blocked / aborted attempt (T2 all-attempts; actor / from+to state / from+to "
+            "permission / outcome / reason_code / time). Best-effort: a write failure is logged "
+            "and never fails the transition. Set false to disable both audit writes."
         ),
     )
     PUBLICATION_ECM_PATH: str = Field(
