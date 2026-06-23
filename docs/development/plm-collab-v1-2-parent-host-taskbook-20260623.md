@@ -17,6 +17,8 @@ Do not open the V1.2 runtime implementation until all gates are true:
    - `can-i-deploy` returns a real matrix answer;
    - a deliberate drift breaks the advisory broker gate.
 2. Staging evidence exists for the V1/V1.1/V2-seats trial baseline:
+   - recorded in `plm-collab-v1-v2-staging-evidence-template-20260623.md`;
+   - its trialability decision is **Full post-broker baseline**, not pre-broker staging only;
    - version pair and pact hash;
    - real vendor-signed license import and `yuantus license status`;
    - capability manifest and BOM context;
