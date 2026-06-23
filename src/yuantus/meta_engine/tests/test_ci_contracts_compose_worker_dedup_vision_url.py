@@ -43,13 +43,17 @@ def _as_str_list(val):
     raise AssertionError(f"Unexpected list-like type: {type(val)}")
 
 
-def test_compose_worker_sets_dedup_vision_base_url() -> None:
+def _load_compose_services() -> dict:
     repo_root = _find_repo_root(Path(__file__))
     compose_yml = repo_root / "docker-compose.yml"
     assert compose_yml.is_file(), f"Missing {compose_yml}"
 
     doc = yaml.safe_load(compose_yml.read_text(encoding="utf-8", errors="replace"))
-    services = (doc or {}).get("services") or {}
+    return (doc or {}).get("services") or {}
+
+
+def test_compose_worker_sets_dedup_vision_base_url() -> None:
+    services = _load_compose_services()
     worker = services.get("worker") or {}
     env = _env_to_dict(worker.get("environment"))
 
@@ -88,12 +92,7 @@ def test_compose_worker_sets_dedup_vision_base_url() -> None:
 
 
 def test_compose_api_sets_dedup_fallback_env_vars() -> None:
-    repo_root = _find_repo_root(Path(__file__))
-    compose_yml = repo_root / "docker-compose.yml"
-    assert compose_yml.is_file(), f"Missing {compose_yml}"
-
-    doc = yaml.safe_load(compose_yml.read_text(encoding="utf-8", errors="replace"))
-    services = (doc or {}).get("services") or {}
+    services = _load_compose_services()
     api = services.get("api") or {}
     env = _env_to_dict(api.get("environment"))
 
@@ -117,12 +116,7 @@ def test_compose_api_sets_dedup_fallback_env_vars() -> None:
 
 
 def test_compose_worker_sets_host_gateway_mapping_for_dedup_fallback() -> None:
-    repo_root = _find_repo_root(Path(__file__))
-    compose_yml = repo_root / "docker-compose.yml"
-    assert compose_yml.is_file(), f"Missing {compose_yml}"
-
-    doc = yaml.safe_load(compose_yml.read_text(encoding="utf-8", errors="replace"))
-    services = (doc or {}).get("services") or {}
+    services = _load_compose_services()
     worker = services.get("worker") or {}
     extra_hosts = _as_str_list(worker.get("extra_hosts"))
 
@@ -135,3 +129,29 @@ def test_compose_worker_sets_host_gateway_mapping_for_dedup_fallback() -> None:
         "'host.docker.internal:host-gateway' for Linux compatibility."
         f"\nGot: {extra_hosts}"
     )
+
+
+def test_compose_api_and_worker_expose_render_service_env() -> None:
+    services = _load_compose_services()
+    required = {
+        "YUANTUS_RENDER_SERVICE_BASE_URL",
+        "YUANTUS_RENDER_SERVICE_SERVICE_TOKEN",
+        "YUANTUS_RENDER_SERVICE_TIMEOUT_SECONDS",
+        "YUANTUS_CIRCUIT_BREAKER_RENDER_SERVICE_ENABLED",
+        "YUANTUS_CIRCUIT_BREAKER_RENDER_SERVICE_FAILURE_THRESHOLD",
+        "YUANTUS_CIRCUIT_BREAKER_RENDER_SERVICE_WINDOW_SECONDS",
+        "YUANTUS_CIRCUIT_BREAKER_RENDER_SERVICE_RECOVERY_SECONDS",
+        "YUANTUS_CIRCUIT_BREAKER_RENDER_SERVICE_HALF_OPEN_MAX_CALLS",
+        "YUANTUS_CIRCUIT_BREAKER_RENDER_SERVICE_BACKOFF_MAX_SECONDS",
+    }
+
+    for service_name in ("api", "worker"):
+        service = services.get(service_name) or {}
+        env = _env_to_dict(service.get("environment"))
+        missing = sorted(required - set(env))
+        assert not missing, (
+            f"docker-compose.yml {service_name} must expose render-service env vars "
+            f"so DXF preview jobs can enable the VemCAD render service. Missing: {missing}"
+        )
+        assert env["YUANTUS_RENDER_SERVICE_BASE_URL"] == "${YUANTUS_RENDER_SERVICE_BASE_URL:-}"
+        assert env["YUANTUS_CIRCUIT_BREAKER_RENDER_SERVICE_ENABLED"].endswith(":-false}")
