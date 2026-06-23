@@ -66,6 +66,8 @@ be verified pre-merge only after that consumer main-branch publish exists (§5).
 - the wiring matches the ratified design: provider uses a scoped-**write** token to *publish verification
   results* (not read-only); consumer a scoped-**write** token to *publish the pact*; both use the broker's
   first-class `--branch` (not legacy tags); `can-i-deploy` is informational in Phase A.
+  Because Phase A deliberately does not choose a `--to-environment` / deployment model, this command
+  is a broker-population smoke (matrix answer exists), not a release/deployment approval gate.
 
 ## 4. Ops prerequisite (the gating item — yours, not mine)
 
@@ -95,7 +97,8 @@ Nothing works until ops provisions:
    broker auth — the script's CLI invocation is **best-effort and must be confirmed here**.
 3. **can-i-deploy** — `can-i-deploy --pacticipant YuantusPLM --version <sha>` should return a matrix
    answer (not an auth/empty error), proving the published `Metasheet2` pact and `YuantusPLM`
-   verification results populate the matrix.
+   verification results populate the matrix. This is not a deployment approval: Phase A intentionally
+   has no `--to-environment` / deployment record. Choose that model at the Phase B blocking flip.
 4. **Drift catch** — deliberately break a pinned field on one side; confirm the broker verification goes
    **red** (advisory) — proving the gate would catch the drift that the §3 boundary doc flagged.
 5. **Phase B flip** — only after a stable window of green advisory runs **and** owner sign-off: remove
