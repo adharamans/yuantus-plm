@@ -115,7 +115,7 @@ scripts/stop_cad_ml_docker.sh
 
 ## Auth (dev)
 
-Default is `YUANTUS_AUTH_MODE=optional` (backward compatible).
+Default is `YUANTUS_AUTH_MODE=required`: every route except `GET /api/v1/health`, `POST /api/v1/auth/login`, and the docs requires a JWT (enforced globally by `AuthEnforcementMiddleware`).
 
 Seed identity (tenant/org/user) and login:
 ```bash
@@ -137,9 +137,10 @@ ORG_TOKEN=$(curl -s -X POST http://127.0.0.1:7910/api/v1/auth/switch-org \
   -d '{"org_id":"org-1"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
 ```
 
-To require JWT globally (except `GET /api/v1/health`, `POST /api/v1/auth/login`, and docs):
+For casual local development you can relax enforcement so unauthenticated
+requests pass through (a bearer token is still honored when present):
 ```bash
-export YUANTUS_AUTH_MODE=required
+export YUANTUS_AUTH_MODE=optional   # or: disabled
 ```
 
 ## Verification
