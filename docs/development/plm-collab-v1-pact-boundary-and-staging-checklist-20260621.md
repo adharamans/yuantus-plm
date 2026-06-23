@@ -91,13 +91,22 @@ Run against a deployed **combined-profile** staging/dogfood instance. Importing 
    - `scripts/dev/smoke_bom_review_api.sh` — unentitled → `context:null` (existing vs missing part
      identical = no leak); entitled → `context` with `part` + `lines[]`; manifest `entitled` toggles.
      Env: `YUANTUS_BASE_URL`, `ENTITLED_TENANT`, `UNENTITLED_TENANT`, `PART_ID`, `AUTH_HEADER`.
-3. **Seats** (only if testing the cap): set `YUANTUS_QUOTA_MODE=enforce`, import a license carrying
-   `seats=N`, confirm the import prints `seat cap projected: TenantQuota.max_users=N`, then attempt to
-   provision the (N+1)-th user → expect a quota block (soft warning header under `soft`,
+3. **Seats — set + enforce** (only if testing the cap): set `YUANTUS_QUOTA_MODE=enforce`, import a
+   license carrying `seats=N`, confirm the import prints `seat cap projected: TenantQuota.max_users=N`,
+   then attempt to provision the (N+1)-th user → expect a quota block (soft warning header under `soft`,
    `429 QUOTA_EXCEEDED` under `enforce`). Projection + the enforcement decision are CI-covered by
    `test_seat_projection.py` (incl. `test_projected_cap_is_enforceable_at_provisioning`); the live
    create-user 429 is the manual staging confirmation.
-4. **Contract pin:** before re-pinning the version pair after any patch, run §3's sync + verify.
+4. **Seats — clear the cap (#836):** re-import a license with explicit **`seats:null`** → confirm it
+   **clears** `TenantQuota.max_users` (tenant returns to uncapped) and the audit row records
+   **`max_users=cleared`**; the previously-blocked (N+1)-th user now provisions. Contrast: `seats`
+   **absent** is a no-op (prior cap untouched) and `seats:0`/invalid is a no-op too — only explicit
+   `null` clears. (Day-1 semantics of the #830 design; shipped in `6aa5f3c7`.)
+5. **Contract pin:** before re-pinning the version pair after any patch, run §3's sync + verify.
+6. **Record the evidence:** capture a short MD / issue comment with the **environment**, the **Yuantus +
+   MetaSheet2 version pair + pact hash `5ecbe1ee…`**, the **license type** (dogfood ephemeral-key vs real
+   vendor-signed), the **passed items**, and an **explicit "untested" list**. That artifact — not a green
+   local run — is what lets us call the V1 / V1.1 / V2-seats baseline *trialable*.
 
 ## 6. Scope (deferred — unchanged)
 

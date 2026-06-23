@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,8 @@ from .models import (
     EcmPublicationReason,
     EcmPublicationState,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EcmPublicationReplayError(Exception):
@@ -143,15 +146,36 @@ class EcmPublicationOutboxService:
         controlled_roles=CONTROLLED_FILE_ROLES,
     ) -> List[EcmPublicationOutbox]:
         """Enqueue the released version's controlled files (one row per file). Pure DB;
-        no remote I/O, no byte reads. Idempotent + conflict-as-audit. Returns the rows."""
+        no remote I/O, no byte reads. Idempotent + conflict-as-audit. Returns the rows.
+
+        A1 same-role guard: under the stable ``(item, file_role)`` Athena identity, >1
+        controlled file of one role would fold into a single Athena doc, so such files
+        are fail-closed SKIPPED (logged), never published with an ambiguous identity."""
         roles = {str(r).lower() for r in controlled_roles}
-        rows: List[EcmPublicationOutbox] = []
+        controlled: List = []
+        role_counts: dict = {}
         for vf in (getattr(version, "version_files", None) or []):
-            if str(getattr(vf, "file_role", "") or "").lower() not in roles:
+            role = str(getattr(vf, "file_role", "") or "").lower()
+            if role not in roles:
+                continue
+            if getattr(vf, "file", None) is None:
+                continue
+            controlled.append(vf)
+            role_counts[role] = role_counts.get(role, 0) + 1
+        rows: List[EcmPublicationOutbox] = []
+        for vf in controlled:
+            role = str(getattr(vf, "file_role", "") or "").lower()
+            if role_counts[role] > 1:
+                logger.warning(
+                    "ECM publish skip: released version %s carries %d '%s' controlled "
+                    "files; skipped (A1 same-role guard) to avoid a stable-identity "
+                    "collision.",
+                    getattr(version, "id", "?"),
+                    role_counts[role],
+                    role,
+                )
                 continue
             file = getattr(vf, "file", None)
-            if file is None:
-                continue
             snapshot = build_snapshot(version, vf, file, target_system=target_system)
             fp = fingerprint(snapshot)
             existing = self._find(
@@ -186,6 +210,16 @@ class EcmPublicationOutboxService:
         if existing.state == EcmPublicationState.SENT.value:
             # D3 / R3: a changed fingerprint vs an already-SENT row is conflict-as-audit
             # -- record it on the published row, do NOT raise (call site is release()).
+            # Item-B Opt-2 (visibility): surface the conflict -- it was previously silent.
+            logger.warning(
+                "ECM publish conflict-after-sent: controlled file content changed after "
+                "a SENT publish (item=%s version=%s file=%s role=%s); recorded as audit, "
+                "NOT auto-republished.",
+                existing.item_id,
+                existing.version_id,
+                existing.file_id,
+                existing.file_role,
+            )
             existing.properties = {
                 **(existing.properties or {}),
                 "conflict_after_sent": True,

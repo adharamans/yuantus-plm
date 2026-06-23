@@ -67,12 +67,12 @@ def build_publication_ecm_transfer_breaker() -> CircuitBreaker:
 
 
 def build_transfer_source_node_id(snapshot: dict) -> str:
-    """Fold the PLM per-file identity into Athena's single UUID discriminator."""
-
-    basis = "|".join(
-        str(snapshot.get(k) or "")
-        for k in ("item_id", "version_id", "file_id", "file_role")
-    )
+    """A1 (disposition): a STABLE-across-versions identity for the logical controlled
+    file ``(item_id, file_role)`` so Athena revisions the SAME document in place
+    (version N+1 supersedes N) instead of creating a new doc per version. Pairs with the
+    enqueue-side same-role guard, which fail-closes when a version carries >1 controlled
+    file of one role (else two PLM files would fold into one Athena doc)."""
+    basis = "|".join(str(snapshot.get(k) or "") for k in ("item_id", "file_role"))
     return str(uuid.uuid5(_NAMESPACE_PLM, basis))
 
 
@@ -106,7 +106,7 @@ def _local_datetime(value: object) -> str:
         dt = value
         if dt.tzinfo is not None:
             dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt.isoformat(timespec="seconds")
+        return dt.isoformat(timespec="microseconds")
     text = str(value).strip()
     if not text:
         raise _PayloadProblem("missing released_at")

@@ -118,6 +118,25 @@ def test_list_returns_all_then_filters_by_state(db):
     assert pend.count == 1 and pend.rows[0].state == "pending"
 
 
+def test_list_filters_by_conflict_after_sent(db):
+    _row(db, state="sent", file_role="native_cad")  # no conflict flag
+    c = _row(db, state="sent", file_role="drawing")
+    c.properties = {"conflict_after_sent": True, "conflict_fingerprint": "x"}
+    db.flush()
+    db.commit()
+
+    allr = list_publication_outbox(state=None, conflict=None, limit=200, user=_ADMIN, db=db)
+    assert allr.count == 2
+
+    only = list_publication_outbox(state=None, conflict=True, limit=200, user=_ADMIN, db=db)
+    assert only.count == 1
+    assert (only.rows[0].properties or {}).get("conflict_after_sent") is True
+
+    non = list_publication_outbox(state=None, conflict=False, limit=200, user=_ADMIN, db=db)
+    assert non.count == 1
+    assert (non.rows[0].properties or {}).get("conflict_after_sent") is None
+
+
 def test_list_rejects_invalid_state_422(db):
     with pytest.raises(HTTPException) as ei:
         list_publication_outbox(state="bogus", limit=200, user=_ADMIN, db=db)

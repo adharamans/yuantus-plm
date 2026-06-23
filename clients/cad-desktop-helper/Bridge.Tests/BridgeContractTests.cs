@@ -40,12 +40,27 @@ namespace Yuantus.Cad.Bridge.Tests
         [Fact]
         public void test_s9_bridge_exposes_exactly_two_lisp_functions_call_and_upload()
         {
-            var sources = ReadBridgeSources();
+            // Each per-CAD-host adapter (AutoCAD, GstarCAD, ZWCAD, ...) binds to a
+            // different managed CAD SDK under its own #if <HOST> guard, so each
+            // registers its own attributed methods. The invariant is: EVERY host
+            // adapter registers EXACTLY the two transport primitives — no host may
+            // add, drop, or rename one. (Counting across the concatenated source
+            // would scale with the number of host adapters.)
+            var bridgeRoot = Path.Combine(FindRepoRoot(), "clients", "cad-desktop-helper", "Bridge");
+            var adapters = Directory.GetFiles(bridgeRoot, "*HostAdapter.cs", SearchOption.AllDirectories)
+                .Where(p => !p.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar.ToString()))
+                .Where(p => !p.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar.ToString()))
+                .OrderBy(p => p)
+                .ToList();
 
-            var lispFunctionCount = CountOccurrences(sources, "[LispFunction(");
-            Assert.Equal(2, lispFunctionCount);
-            Assert.Contains("[LispFunction(\"yuantus-helper-call\")]", sources);
-            Assert.Contains("[LispFunction(\"yuantus-helper-upload\")]", sources);
+            Assert.NotEmpty(adapters);
+            foreach (var adapter in adapters)
+            {
+                var source = File.ReadAllText(adapter);
+                Assert.Equal(2, CountOccurrences(source, "[LispFunction("));
+                Assert.Contains("[LispFunction(\"yuantus-helper-call\")]", source);
+                Assert.Contains("[LispFunction(\"yuantus-helper-upload\")]", source);
+            }
         }
 
         [Fact]
