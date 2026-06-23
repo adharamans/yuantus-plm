@@ -28,6 +28,8 @@ def test_ci_contracts_job_wires_pact_provider_verifier() -> None:
     assert "pip install -r requirements.lock pytest pact-python==3.2.1" in text
     assert "Pact provider verifier (Metasheet2 -> Yuantus)" in text
     assert "src/yuantus/api/tests/test_pact_provider_yuantus_plm.py" in text
+    assert "scripts/ci/pact_broker_provider_verify.py" in text
+    assert "pact-broker can-i-deploy --pacticipant YuantusPLM" in text
 
 
 def test_ci_change_scope_covers_pact_provider_and_cad_diff_surface() -> None:
@@ -38,6 +40,7 @@ def test_ci_change_scope_covers_pact_provider_and_cad_diff_surface() -> None:
     text = _read(ci_yml)
     for token in (
         "contracts/pacts/*.json",
+        "scripts/ci/pact_broker_provider_verify.py",
         "src/yuantus/api/tests/test_pact_provider_yuantus_plm.py",
         "src/yuantus/meta_engine/tests/test_ci_contracts_pact_provider_gate.py",
         "src/yuantus/meta_engine/web/cad_backend_profile_router.py",
@@ -56,3 +59,18 @@ def test_ci_change_scope_covers_pact_provider_and_cad_diff_surface() -> None:
         "src/yuantus/web/cad_review.html",
     ):
         assert token in text, f"Expected detect_changes contract trigger token: {token}"
+
+
+def test_pact_broker_provider_name_matches_committed_pact() -> None:
+    repo_root = _find_repo_root(Path(__file__))
+    script = repo_root / "scripts" / "ci" / "pact_broker_provider_verify.py"
+    pact = repo_root / "contracts" / "pacts" / "metasheet2-yuantus-plm.json"
+
+    assert script.is_file()
+    assert pact.is_file()
+
+    script_text = _read(script)
+    pact_text = _read(pact)
+    assert 'PROVIDER = "YuantusPLM"' in script_text
+    assert '"provider":' in pact_text
+    assert '"name": "YuantusPLM"' in pact_text

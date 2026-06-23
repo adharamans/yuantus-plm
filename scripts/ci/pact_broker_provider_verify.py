@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-PROVIDER = "yuantus-plm"
+PROVIDER = "YuantusPLM"
 
 
 def main() -> int:
