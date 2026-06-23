@@ -44,8 +44,9 @@ change**, so no dual-registration trap). The module fidelity docstring is update
 The property: a failed `promote()` raises in `operations/promote_op.py` → the caller's transaction
 rolls back; the audit row, written through a SEPARATE `get_db_session()` that **commits
 independently**, must remain. `StaticPool` (one shared connection) literally cannot exhibit this. The
-test instead uses **file-backed sqlite** (`sqlite:///{tmp_path}/xconn.db`, default pool), so each
-session checks out its OWN physical connection to the same file, then:
+test instead uses **file-backed sqlite** (`sqlite:///{tmp_path}/xconn.db`, `poolclass=NullPool`), so
+each session checks out its OWN brand-new physical connection to the same file (NullPool makes the
+separate-connection guarantee unconditional, not an artifact of the pool default), then:
 
 1. seeds the lifecycle + a Draft item on a throwaway connection;
 2. redirects the helper's `get_db_session()` to a session on a **different** connection;

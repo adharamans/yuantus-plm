@@ -25,7 +25,7 @@ import contextlib
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 import yuantus.database as ydb
 from yuantus.meta_engine.lifecycle.hooks import HookType, hook_registry
@@ -389,7 +389,9 @@ def test_failure_row_survives_caller_rollback_cross_connection(tmp_path, monkeyp
     from yuantus.meta_engine.bootstrap import import_all_models
 
     import_all_models()
-    eng = create_engine(f"sqlite:///{tmp_path / 'xconn.db'}", future=True)
+    # NullPool: every session checks out a BRAND-NEW physical connection (no pool reuse), so the
+    # "separate connection" the proof rests on is unconditional, not an artifact of the pool default.
+    eng = create_engine(f"sqlite:///{tmp_path / 'xconn.db'}", future=True, poolclass=NullPool)
 
     @event.listens_for(eng, "connect")
     def _wal(dbapi_con, _rec):  # WAL + busy_timeout on every pooled connection
@@ -419,7 +421,7 @@ def test_failure_row_survives_caller_rollback_cross_connection(tmp_path, monkeyp
     seed.close()
 
     # The audit helper opens a SEPARATE get_db_session() -> a session on a DIFFERENT physical
-    # connection to the SAME sqlite file (no StaticPool: each session checks out its own conn).
+    # connection to the SAME sqlite file (NullPool above: each session checks out its own conn).
     @contextlib.contextmanager
     def _audit_session():
         a = SessionLocal()
