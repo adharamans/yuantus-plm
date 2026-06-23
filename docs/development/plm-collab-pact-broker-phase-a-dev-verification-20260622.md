@@ -74,8 +74,11 @@ Nothing works until ops provisions:
 1. **Consumer publish first** — merge/activate MetaSheet2#3065 only after ops has provisioned
    `PACT_BROKER_BASE_URL` + `PACT_BROKER_TOKEN`. The pull-request run can validate the workflow shape,
    but it publishes the PR ref (`GITHUB_REF_NAME`), not `main`; it therefore cannot satisfy a Yuantus
-   `mainBranch` selector. The real verification is the post-merge `push: main` run: the "Publish
-   consumer pact" step should run (not skip) and the pact should appear in PactFlow as
+   `mainBranch` selector. GitHub only exposes `workflow_dispatch` after the
+   workflow-dispatch-enabled workflow exists on the default branch, so pre-merge activation should use a
+   `pull_request` rerun or a small branch push after secrets are set, not a manual dispatch expectation.
+   The real verification is the post-merge `push: main` run: the "Publish consumer pact" step should run
+   (not skip) and the pact should appear in PactFlow as
    `Metasheet2@<sha>` on branch `main`. *If it errors:* confirm the `pact-broker publish` flags +
    auth against the PactFlow CLI docs.
 2. **Provider verify+publish second** — only after step 1 has produced the consumer `mainBranch` pact,
