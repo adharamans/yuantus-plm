@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+import types
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -16,6 +20,17 @@ def _find_repo_root(start: Path) -> Path:
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _load_broker_script():
+    repo_root = _find_repo_root(Path(__file__))
+    script = repo_root / "scripts" / "ci" / "pact_broker_provider_verify.py"
+    spec = importlib.util.spec_from_file_location("pact_broker_provider_verify_under_test", script)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_ci_contracts_job_wires_pact_provider_verifier() -> None:
@@ -76,3 +91,75 @@ def test_pact_broker_provider_name_matches_committed_pact() -> None:
     assert "PACT_BROKER_TOKEN is empty" in script_text
     assert '"provider":' in pact_text
     assert '"name": "YuantusPLM"' in pact_text
+
+
+def test_pact_broker_provider_script_skips_without_broker_url(monkeypatch, capsys) -> None:
+    script = _load_broker_script()
+    monkeypatch.delenv("PACT_BROKER_BASE_URL", raising=False)
+    monkeypatch.delenv("PACT_BROKER_TOKEN", raising=False)
+
+    assert script.main() == 0
+
+    captured = capsys.readouterr()
+    assert "PACT_BROKER_BASE_URL not set" in captured.out
+
+
+def test_pact_broker_provider_script_fails_when_url_set_without_token(monkeypatch, capsys) -> None:
+    script = _load_broker_script()
+    monkeypatch.setenv("PACT_BROKER_BASE_URL", "https://example.pactflow.io")
+    monkeypatch.delenv("PACT_BROKER_TOKEN", raising=False)
+
+    assert script.main() == 1
+
+    captured = capsys.readouterr()
+    assert "Pact broker token missing" in captured.out
+
+
+def test_pact_broker_provider_script_redacts_token_and_uses_main_branch_selector(
+    monkeypatch, capsys
+) -> None:
+    script = _load_broker_script()
+    token = "secret-token-123"
+    captured_cmd: list[str] = []
+
+    @contextmanager
+    def isolated_database():
+        yield
+
+    @contextmanager
+    def running_provider():
+        yield "http://127.0.0.1:43210"
+
+    fake_provider_module = types.ModuleType("yuantus.api.tests.test_pact_provider_yuantus_plm")
+    fake_provider_module._isolated_test_database = isolated_database
+    fake_provider_module._running_provider = running_provider
+    monkeypatch.setitem(
+        sys.modules,
+        "yuantus.api.tests.test_pact_provider_yuantus_plm",
+        fake_provider_module,
+    )
+
+    def fake_run(cmd, check=False):
+        assert check is False
+        captured_cmd.extend(cmd)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+    monkeypatch.setenv("PACT_BROKER_BASE_URL", "https://example.pactflow.io")
+    monkeypatch.setenv("PACT_BROKER_TOKEN", token)
+    monkeypatch.setenv("GITHUB_SHA", "abc123")
+    monkeypatch.setenv("GITHUB_REF_NAME", "feature/pr-branch")
+
+    assert script.main() == 0
+
+    captured = capsys.readouterr()
+    assert token not in captured.out
+    assert "--broker-token ***" in captured.out
+    assert "--provider" in captured_cmd
+    assert "YuantusPLM" in captured_cmd
+    assert "--consumer-version-selector" in captured_cmd
+    assert '{"mainBranch": true}' in captured_cmd
+    assert "--provider-app-version" in captured_cmd
+    assert "abc123" in captured_cmd
+    assert "--provider-version-branch" in captured_cmd
+    assert "feature/pr-branch" in captured_cmd
