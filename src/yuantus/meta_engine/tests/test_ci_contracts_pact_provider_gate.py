@@ -46,6 +46,7 @@ def test_ci_contracts_job_wires_pact_provider_verifier() -> None:
     assert "src/yuantus/api/tests/test_pact_provider_yuantus_plm.py" in text
     assert "scripts/ci/pact_broker_provider_verify.py" in text
     assert "Pact broker token missing" in text
+    assert 'PACT_BROKER_ERROR_ON_UNKNOWN_OPTION: "true"' in text
     assert "https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh" in text
     assert 'export PATH="$PWD/pact/bin:$PATH"' in text
     assert "pact-broker can-i-deploy --pacticipant YuantusPLM" in text
@@ -142,9 +143,13 @@ def test_pact_broker_provider_script_redacts_token_and_uses_main_branch_selector
         fake_provider_module,
     )
 
-    def fake_run(cmd, check=False):
+    captured_env: dict[str, str] = {}
+
+    def fake_run(cmd, check=False, env=None):
         assert check is False
         captured_cmd.extend(cmd)
+        assert env is not None
+        captured_env.update(env)
         return types.SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(script.subprocess, "run", fake_run)
@@ -166,3 +171,4 @@ def test_pact_broker_provider_script_redacts_token_and_uses_main_branch_selector
     assert "abc123" in captured_cmd
     assert "--provider-version-branch" in captured_cmd
     assert "feature/pr-branch" in captured_cmd
+    assert captured_env["PACT_BROKER_ERROR_ON_UNKNOWN_OPTION"] == "true"

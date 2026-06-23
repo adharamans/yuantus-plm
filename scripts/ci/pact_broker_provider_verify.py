@@ -67,7 +67,9 @@ def main() -> int:
                 cmd += ["--broker-token", token]
             redacted = " ".join("***" if (token and part == token) else part for part in cmd)
             print(f"[pact-broker] $ {redacted}")
-            proc = subprocess.run(cmd, check=False)
+            env = os.environ.copy()
+            env.setdefault("PACT_BROKER_ERROR_ON_UNKNOWN_OPTION", "true")
+            proc = subprocess.run(cmd, check=False, env=env)
             print(f"[pact-broker] pact-provider-verifier exit={proc.returncode} (advisory)")
             return proc.returncode
 
