@@ -8,12 +8,15 @@ transaction never commits → a same-session row would vanish). ``outcome`` is l
 ``properties.reason_code``; never a raw exception. The item-scoped read stays success-only; failures
 surface only on the forensic route.
 
-NOTE on rollback-survival fidelity: these tests run on in-memory sqlite + ``StaticPool`` (a SINGLE
-shared connection), so they **cannot** prove TRUE cross-connection rollback-survival — that is
-Postgres-only / integration-verified. What they prove faithfully here: each failure path writes the
-right ``outcome`` / ``reason_code``; the attempt row is written via ``get_db_session()`` (redirected
-to the test DB) and **not** added to ``self.session`` (structural); the write is best-effort (a
-raising audit never changes the ``PromoteResult``); and the item-scoped read excludes non-success.
+NOTE on rollback-survival fidelity: most tests here run on in-memory sqlite + ``StaticPool`` (a
+SINGLE shared connection), proving each failure path's ``outcome`` / ``reason_code``, the structural
+guarantee (the attempt rides a SEPARATE ``get_db_session()``, never ``self.session``), best-effort
+(a raising audit never changes the ``PromoteResult``), and the success-only item read.
+``test_failure_row_survives_caller_rollback_cross_connection`` then proves the load-bearing property
+StaticPool cannot — on **file-backed sqlite + WAL** (genuine separate physical connections): the
+failure row is committed on a DIFFERENT connection and SURVIVES the caller rolling back its failed
+transaction. Still Postgres-only: the held-write-lock case (a caller holding a WRITE lock *during*
+the audit commit) — sqlite's coarse locking diverges from Postgres MVCC there.
 """
 from __future__ import annotations
 
@@ -294,3 +297,153 @@ def test_permission_denied_records_denied(env):
     rows = _attempts(SessionLocal, item.id)
     assert len(rows) == 1
     assert rows[0].outcome == "denied" and rows[0].properties["reason_code"] == "permission_denied"
+
+
+# -- the 3 setup-heavier write-points: condition / assembly-block / workflow-start ---------------
+def test_condition_failed_records_aborted(env):
+    # A transition with a JSON-DSL condition that evaluates FALSE -> aborted / condition_failed
+    # (pre-mutation: the condition gates before any state change).
+    import json
+
+    s, SessionLocal = env
+    s.get(LifecycleTransition, "t").condition = json.dumps(
+        {"type": "field", "field": "state", "operator": "eq", "value": "Released"}
+    )  # the item is Draft, so "Draft" == "Released" is False -> condition not met
+    s.commit()
+    item = _draft_item(s)
+    res = LifecycleService(s).promote(item, "Released", user_id=7)
+    assert res.success is False
+    rows = _attempts(SessionLocal, item.id)
+    assert len(rows) == 1
+    assert rows[0].outcome == "aborted" and rows[0].properties["reason_code"] == "condition_failed"
+
+
+def test_assembly_release_blocked_records_blocked(env):
+    # The only `blocked` site: a parent entering Released with an UNRELEASED direct ASSEMBLY child
+    # (B2 hard gate). Mirrors test_item_release_gate.py's ASSEMBLY-edge setup.
+    from yuantus.meta_engine.relationship.service import RelationshipService
+
+    s, SessionLocal = env
+    s.add(
+        ItemType(
+            id="ASSEMBLY", label="Assembly", is_relationship=True, is_versionable=False,
+            source_item_type_id=_ITEM_TYPE, related_item_type_id=_ITEM_TYPE,
+        )
+    )
+    s.commit()
+    parent = _draft_item(s, "p1")
+    _draft_item(s, "c1")  # a Draft child = NOT released -> blocks the parent's release
+    RelationshipService(s).create_relationship("p1", "c1", "ASSEMBLY")
+    s.commit()
+    res = LifecycleService(s).promote(parent, "Released", user_id=7)
+    assert res.success is False
+    rows = _attempts(SessionLocal, "p1")
+    assert len(rows) == 1
+    assert rows[0].outcome == "blocked"
+    assert rows[0].properties["reason_code"] == "assembly_release_blocked"
+
+
+def test_workflow_start_failed_records_failed_and_rolled_back(env, monkeypatch):
+    # target Released has a linked workflow whose start RAISES -> post-mutation rollback +
+    # failed / workflow_start_failed; the raw exception must NOT leak (generic public_message only).
+    import json
+
+    from yuantus.meta_engine.workflow import service as _wfsvc
+    from yuantus.meta_engine.workflow.models import WorkflowMap
+
+    s, SessionLocal = env
+    s.add(WorkflowMap(id="wf1", name="WF One"))
+    s.get(LifecycleState, "s_rel").workflow_map_id = "wf1"
+    s.commit()
+    monkeypatch.setattr(
+        _wfsvc.WorkflowService,
+        "start_workflow",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("SECRET-WF-INTERNAL-detail")),
+    )
+    item = _draft_item(s)  # AA-Part is non-versionable, so the workflow path fires before version
+    res = LifecycleService(s).promote(item, "Released", user_id=7)
+    assert res.success is False
+    rows = _attempts(SessionLocal, item.id)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r.outcome == "failed" and r.properties["reason_code"] == "workflow_start_failed"
+    assert r.properties.get("rolled_back") is True
+    assert r.properties.get("public_message") == "workflow start failed"
+    assert "SECRET-WF" not in json.dumps(r.properties)  # raw exception never leaks
+
+
+# -- the load-bearing guarantee on GENUINE separate connections (file-backed sqlite + WAL) -------
+def test_failure_row_survives_caller_rollback_cross_connection(tmp_path, monkeypatch):
+    """StaticPool (one shared connection) cannot prove this; file-backed sqlite + WAL can: the
+    failure audit row is committed on a SEPARATE physical connection and SURVIVES the caller
+    session rolling back its failed transaction.
+
+    WAL is required AND faithful: the caller holds a read snapshot open across promote(), so in
+    default rollback-journal mode the audit connection's COMMIT would deadlock on SQLITE_BUSY (the
+    caller's SHARED lock blocks the writer's EXCLUSIVE, and the caller does not release until after
+    promote() returns). WAL lets the writer commit alongside the reader — exactly the Postgres MVCC
+    reader/writer-don't-block semantics this property depends on in production.
+    """
+    from sqlalchemy import event
+
+    from yuantus.meta_engine.bootstrap import import_all_models
+
+    import_all_models()
+    eng = create_engine(f"sqlite:///{tmp_path / 'xconn.db'}", future=True)
+
+    @event.listens_for(eng, "connect")
+    def _wal(dbapi_con, _rec):  # WAL + busy_timeout on every pooled connection
+        cur = dbapi_con.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.close()
+
+    Base.metadata.create_all(eng)
+    SessionLocal = sessionmaker(bind=eng, expire_on_commit=False)
+
+    seed = SessionLocal()
+    seed.add(LifecycleMap(id="m", name="L"))
+    seed.add(LifecycleState(id="s_draft", name="Draft", lifecycle_map_id="m", is_start_state=True))
+    seed.add(LifecycleState(id="s_rel", name="Released", lifecycle_map_id="m", is_released=True))
+    seed.add(
+        LifecycleTransition(id="t", lifecycle_map_id="m", from_state_id="s_draft", to_state_id="s_rel")
+    )
+    seed.add(ItemType(id=_ITEM_TYPE, label="AA Part", is_versionable=False, lifecycle_map_id="m"))
+    seed.add(
+        Item(
+            id="i1", config_id="i1", item_type_id=_ITEM_TYPE, state="Draft", current_state="s_draft",
+            permission_id="perm_draft", is_versionable=False, is_current=True, properties={},
+        )
+    )
+    seed.commit()
+    seed.close()
+
+    # The audit helper opens a SEPARATE get_db_session() -> a session on a DIFFERENT physical
+    # connection to the SAME sqlite file (no StaticPool: each session checks out its own conn).
+    @contextlib.contextmanager
+    def _audit_session():
+        a = SessionLocal()
+        try:
+            yield a
+        finally:
+            a.close()
+
+    monkeypatch.setattr(ydb, "get_db_session", _audit_session)
+
+    caller = SessionLocal()
+    item = caller.get(Item, "i1")
+    res = LifecycleService(caller).promote(item, "NoSuchState", user_id=7)  # pre-mutation: denied
+    assert res.success is False
+    # structural: the attempt never rode the caller session (it went via the audit connection)...
+    assert [o for o in caller.new if isinstance(o, LifecycleTransitionHistory)] == []
+    caller.rollback()  # ...the caller rolls back its failed transaction...
+    caller.close()
+
+    verify = SessionLocal()  # ...and a THIRD fresh connection still sees the committed audit row.
+    try:
+        rows = verify.query(LifecycleTransitionHistory).filter_by(item_id="i1").all()
+    finally:
+        verify.close()
+    assert len(rows) == 1
+    assert rows[0].outcome == "denied"
+    assert rows[0].properties["reason_code"] == "target_state_not_found"
