@@ -605,16 +605,20 @@ jobs:
         run: |
           pytest -q src/yuantus/api/tests/test_pact_provider_yuantus_plm.py
       - name: Pact broker verify + publish + can-i-deploy (advisory, Phase A)
-        # Auto-gate Phase A: runs ONLY when ops has provisioned the broker secret, and is
-        # non-blocking (continue-on-error). The committed-pact verifier above stays the live gate.
-        # UNVERIFIED until a live PactFlow instance exists — see the dev & verification MD runbook.
-        if: ${{ secrets.PACT_BROKER_BASE_URL != '' }}
+        # Auto-gate Phase A: a SHELL guard (below) skips this until ops provisions the broker secret —
+        # NOT a step `if:`, because the `secrets` context is unavailable to `steps.if` (it would
+        # evaluate empty and skip even after the secret is set). Non-blocking (continue-on-error); the
+        # committed-pact verifier above stays the live gate. UNVERIFIED until a live PactFlow instance.
         continue-on-error: true
         env:
           PACT_BROKER_BASE_URL: ${{ secrets.PACT_BROKER_BASE_URL }}
           PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
         run: |
           set +e
+          if [ -z "${PACT_BROKER_BASE_URL:-}" ]; then
+            echo "[pact-broker] PACT_BROKER_BASE_URL not set — skipping advisory broker step."
+            exit 0
+          fi
           curl -fsSL https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh | bash
           export PATH="$PWD/pact/bin:$PATH"
           python scripts/ci/pact_broker_provider_verify.py; rc1=$?
