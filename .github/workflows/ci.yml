@@ -614,7 +614,7 @@ jobs:
           PACT_BROKER_BASE_URL: ${{ secrets.PACT_BROKER_BASE_URL }}
           PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
           PACT_BROKER_ERROR_ON_UNKNOWN_OPTION: "true"
-          PACT_CLI_VERSION: "v1.92.0"
+          PACT_CLI_VERSION: "v2.6.2"
         run: |
           set +e
           if [ -z "${PACT_BROKER_BASE_URL:-}" ]; then
