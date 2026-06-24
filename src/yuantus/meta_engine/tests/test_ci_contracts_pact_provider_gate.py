@@ -92,6 +92,8 @@ def test_pact_broker_provider_name_matches_committed_pact() -> None:
     script_text = _read(script)
     pact_text = _read(pact)
     assert 'PROVIDER = "YuantusPLM"' in script_text
+    assert 'SRC_ROOT = REPO_ROOT / "src"' in script_text
+    assert "sys.path.insert(0, str(SRC_ROOT))" in script_text
     assert "PACT_BROKER_TOKEN is empty" in script_text
     assert '"provider":' in pact_text
     assert '"name": "YuantusPLM"' in pact_text
