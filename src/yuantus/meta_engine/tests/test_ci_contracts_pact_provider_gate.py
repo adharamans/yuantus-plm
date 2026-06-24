@@ -47,6 +47,7 @@ def test_ci_contracts_job_wires_pact_provider_verifier() -> None:
     assert "scripts/ci/pact_broker_provider_verify.py" in text
     assert "Pact broker token missing" in text
     assert 'PACT_BROKER_ERROR_ON_UNKNOWN_OPTION: "true"' in text
+    assert 'PACT_CLI_VERSION: "v1.92.0"' in text
     assert "https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh" in text
     assert 'export PATH="$PWD/pact/bin:$PATH"' in text
     assert "pact-broker can-i-deploy --pacticipant YuantusPLM" in text
