@@ -165,13 +165,20 @@ def test_pact_broker_provider_script_redacts_token_and_uses_main_branch_selector
 
     captured = capsys.readouterr()
     assert token not in captured.out
-    assert "--broker-token ***" in captured.out
-    assert "--provider" in captured_cmd
+    assert "--token ***" in captured.out
+    assert "pact_verifier_cli" in captured_cmd
+    assert "--provider-name" in captured_cmd
     assert "YuantusPLM" in captured_cmd
-    assert "--consumer-version-selector" in captured_cmd
+    assert "--hostname" in captured_cmd
+    assert "--port" in captured_cmd
+    assert "--transport" in captured_cmd
+    assert "--state-change-url" in captured_cmd
+    assert "--broker-url" in captured_cmd
+    assert "--consumer-version-selectors" in captured_cmd
     assert '{"mainBranch": true}' in captured_cmd
-    assert "--provider-app-version" in captured_cmd
+    assert "--publish" in captured_cmd
+    assert "--provider-version" in captured_cmd
     assert "abc123" in captured_cmd
-    assert "--provider-version-branch" in captured_cmd
+    assert "--provider-branch" in captured_cmd
     assert "feature/pr-branch" in captured_cmd
     assert captured_env["PACT_BROKER_ERROR_ON_UNKNOWN_OPTION"] == "true"
