@@ -82,7 +82,8 @@ def _drift_breaking_proxy(upstream_base_url: str):
             content = response.content
             if self.path.startswith("/api/v1/integrations/capabilities"):
                 payload = response.json()
-                payload["features"]["bom_multitable"]["entitled"] = False
+                payload["features"]["bom_multitable"]["supported"] = "drifted"
+                payload["features"]["bom_multitable"]["entitled"] = "drifted"
                 content = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
             self.send_response(response.status_code)
