@@ -13,9 +13,9 @@ ops provisions it. Read §2 first: a green CI here does **not** mean the integra
 
 | Piece | PR | State |
 |---|---|---|
-| Design decision doc (§8 ratified: PactFlow; GitHub repo secrets, least-privilege scoped-write; advisory→blocking) | #843 | open (ratified) |
-| Yuantus **provider** — advisory broker verify+publish+can-i-deploy CI step + `scripts/ci/pact_broker_provider_verify.py` | #854 | **DRAFT** |
-| MetaSheet2 **consumer** — advisory `pact-broker publish` step after `test:contract` | zensgit/metasheet2#3065 | **DRAFT** |
+| Design decision doc (§8 ratified: PactFlow; GitHub repo secrets, least-privilege scoped-write; advisory→blocking) | #843 | **MERGED** (`1d1031c4`) |
+| Yuantus **provider** — advisory broker verify+publish+can-i-deploy CI step + `scripts/ci/pact_broker_provider_verify.py` | #854 | **DRAFT**, CI-green at `56866eee`; held for PactFlow/secrets + one real broker run |
+| MetaSheet2 **consumer** — advisory `pact-broker publish` step after `test:contract` | zensgit/metasheet2#3065 | **DRAFT**, CI-green at `6d5de54`; held for PactFlow/secrets + one real broker run |
 
 Both build PRs are **strictly additive**: the committed-pact verifier (`test_pact_provider_yuantus_plm`)
 and the consumer `test:contract` remain the **live** gates, unchanged. `scripts/sync_metasheet2_pact.sh`
@@ -34,18 +34,40 @@ PactFlow account or secrets yet:
 - the only real verification today is the **local** gates (committed pact + `test:contract`), which are
   untouched and live.
 
-So Phase A is **reviewable wiring that activates on provisioning**, not a verified gate. Both build PRs
-are **DRAFT** and must not merge until provisioned **and** one real run is green (§5).
+So Phase A is **reviewable wiring that activates on provisioning**, not a verified gate. The two build
+PRs do not have the same activation shape: the MetaSheet2 consumer publish can only prove its
+`mainBranch` broker path after it merges and the `push: main` workflow runs; the Yuantus provider PR can
+be verified pre-merge only after that consumer main-branch publish exists (§5).
 
-## 3. What IS verified (locally, this session)
+## 3. What IS verified before broker provisioning
 
 - `.github/workflows/ci.yml` and `yuantus-pact-consumer.yml` are valid YAML.
-- `test_ci_contracts_pact_provider_gate` — **2 passed**: the new provider step does not trip the gate.
-- the local committed-pact verifier still **skips cleanly** (pact-python absent in the dev venv) — the
-  additive step did not break it.
+- Yuantus #854 current head `56866eee` is CI-green after the latest hardening commit. Its
+  `contracts` job executes
+  `test_ci_contracts_pact_provider_gate` (**6 passed** locally), pinning:
+  - `workflow_dispatch` remains present for manual provider activation/reruns once secrets exist;
+  - shell-guard skip when `PACT_BROKER_BASE_URL` is absent;
+  - configured-but-missing-token failure;
+  - token redaction;
+  - provider `YuantusPLM`;
+  - broker consumer selector `{"mainBranch": true}`;
+  - `PACT_BROKER_ERROR_ON_UNKNOWN_OPTION=true`, so misspelled broker CLI flags fail at
+    activation instead of becoming a vacuous advisory green;
+  - `pact-ruby-standalone` install plus `pact/bin` PATH wiring for the
+    `pact-provider-verifier` / `pact-broker` CLIs.
+- MetaSheet2#3065 current head `6d5de54` is CI-green after the latest hardening commit. Its
+  `yuantus-pact-consumer` workflow
+  now executes `scripts/ops/yuantus-pact-consumer-broker-workflow-contract.test.mjs`, pinning
+  local `test:contract` before publish, env+shell guards instead of `steps.if`, SHA + broker
+  `--branch` semantics, no legacy `--tag`, `PACT_BROKER_ERROR_ON_UNKNOWN_OPTION=true`, and
+  the documented `workflow_dispatch` default-branch activation caveat.
+- the local committed-pact verifier remains the live provider gate in Yuantus CI; the additive
+  broker step has not replaced it.
 - the wiring matches the ratified design: provider uses a scoped-**write** token to *publish verification
   results* (not read-only); consumer a scoped-**write** token to *publish the pact*; both use the broker's
   first-class `--branch` (not legacy tags); `can-i-deploy` is informational in Phase A.
+  Because Phase A deliberately does not choose a `--to-environment` / deployment model, this command
+  is a broker-population smoke (matrix answer exists), not a release/deployment approval gate.
 
 ## 4. Ops prerequisite (the gating item — yours, not mine)
 
@@ -57,15 +79,26 @@ Nothing works until ops provisions:
 
 ## 5. Activation + verification runbook (run AFTER provisioning — this is the verification)
 
-1. **Consumer publish** — re-run MetaSheet2 `yuantus-pact-consumer.yml`; the "Publish consumer pact"
-   step should now run (not skip) and the pact should appear in PactFlow as `metasheet2@<sha>` on branch
-   `main`. *If it errors:* confirm the `pact-broker publish` flags + auth against the PactFlow CLI docs.
-2. **Provider verify+publish** — re-run Yuantus `contracts`; the "Pact broker verify…" step should run,
-   `pact-provider-verifier` should verify the broker pact against the seeded provider and publish results
-   as `yuantus-plm@<sha>` branch `main`. *If it errors:* confirm the `pact-provider-verifier` flags +
+1. **Consumer publish first** — merge/activate MetaSheet2#3065 only after ops has provisioned
+   `PACT_BROKER_BASE_URL` + `PACT_BROKER_TOKEN`. The pull-request run can validate the workflow shape,
+   but it publishes the PR ref (`GITHUB_REF_NAME`), not `main`; it therefore cannot satisfy a Yuantus
+   `mainBranch` selector. GitHub only exposes `workflow_dispatch` after the
+   workflow-dispatch-enabled workflow exists on the default branch, so pre-merge activation should use a
+   `pull_request` rerun or a small branch push after secrets are set, not a manual dispatch expectation.
+   The real verification is the post-merge `push: main` run: the "Publish consumer pact" step should run
+   (not skip) and the pact should appear in PactFlow as
+   `Metasheet2@<sha>` on branch `main`. *If it errors:* confirm the `pact-broker publish` flags +
+   auth against the PactFlow CLI docs.
+2. **Provider verify+publish second** — only after step 1 has produced the consumer `mainBranch` pact,
+   re-run Yuantus#854 / the `contracts` workflow. The "Pact broker verify…" step should run,
+   `pact-provider-verifier` should verify the broker pact against the seeded provider and publish
+   results as `YuantusPLM@<sha>`. On the PR run its provider branch is the PR ref; after merge, the
+   `push: main` run records branch `main`. *If it errors:* confirm the `pact-provider-verifier` flags +
    broker auth — the script's CLI invocation is **best-effort and must be confirmed here**.
-3. **can-i-deploy** — `can-i-deploy --pacticipant yuantus-plm --version <sha>` should return a matrix
-   answer (not an auth/empty error), proving the published results populate the matrix.
+3. **can-i-deploy** — `can-i-deploy --pacticipant YuantusPLM --version <sha>` should return a matrix
+   answer (not an auth/empty error), proving the published `Metasheet2` pact and `YuantusPLM`
+   verification results populate the matrix. This is not a deployment approval: Phase A intentionally
+   has no `--to-environment` / deployment record. Choose that model at the Phase B blocking flip.
 4. **Drift catch** — deliberately break a pinned field on one side; confirm the broker verification goes
    **red** (advisory) — proving the gate would catch the drift that the §3 boundary doc flagged.
 5. **Phase B flip** — only after a stable window of green advisory runs **and** owner sign-off: remove
@@ -73,8 +106,10 @@ Nothing works until ops provisions:
 
 ## 6. Known best-effort / confirm-at-activation
 
-- The exact `pact-provider-verifier` + `pact-broker publish` flags, the `pact-ruby-standalone` install,
-  and the PactFlow auth model are written from documented patterns but **not run against a live broker**.
+- The exact `pact-provider-verifier` + `pact-broker publish` flags and the PactFlow auth model are
+  written from documented patterns but **not run against a live broker**. The CLI install/PATH wiring is
+  pinned by tests, but still only becomes runtime evidence when the guarded broker steps execute with
+  real secrets.
   §5.1–5.2 are where they get confirmed/fixed.
 - pact-python 3.2.1's native broker API was **deliberately avoided** (the CLI is used instead) to reduce
   version-specific risk on the provider side.
@@ -87,6 +122,8 @@ Nothing works until ops provisions:
 
 ---
 
-*PRs: #843 (design, ratified), #854 (Yuantus provider, draft), zensgit/metasheet2#3065 (consumer, draft).
-Local fallback retained: `scripts/sync_metasheet2_pact.sh`. The two build PRs are draft + held until ops
-provisioning and one real verification run (§5).*
+*PRs: #843 (design, merged `1d1031c4`), #854 (Yuantus provider, draft),
+zensgit/metasheet2#3065 (consumer, draft).
+Local fallback retained: `scripts/sync_metasheet2_pact.sh`. Activation order is asymmetric: consumer
+publish lands first and proves the `main` pact on the post-merge push; provider verify follows once that
+main-branch pact exists (§5).*
