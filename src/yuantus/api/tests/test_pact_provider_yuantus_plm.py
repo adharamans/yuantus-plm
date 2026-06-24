@@ -16,6 +16,7 @@ from typing import Any, Optional
 import pytest
 import requests
 import uvicorn
+from fastapi import Request
 from sqlalchemy.orm import sessionmaker
 
 PACT_DOCS_URL = "https://docs.pact.io/implementation_guides/python/docs/provider"
@@ -1156,7 +1157,7 @@ def _running_provider(base_host: str = DEFAULT_HOST):
     _override_current_user(app)
 
     @app.post("/_pact/provider_states")
-    async def _pact_provider_states(request: Any):
+    async def _pact_provider_states(request: Request):
         payload = await request.json()
         state = str(payload.get("state") or "")
         action = str(payload.get("action") or "setup")
@@ -1268,3 +1269,22 @@ def test_yuantus_provider_verifies_local_pacts():
             verifier = verifier.state_handler(_provider_state_handler, teardown=True)
             verifier = verifier.add_transport(url=base_url)
             verifier.verify()
+
+
+def test_pact_provider_states_endpoint_accepts_pact_ruby_payload():
+    """Pin the pact-ruby verifier's provider-state setup POST shape."""
+
+    with _isolated_test_database():
+        with _running_provider() as base_url:
+            response = requests.post(
+                f"{base_url}/_pact/provider_states",
+                json={
+                    "state": "tenant-1 holds an active plm.bom_multitable license",
+                    "action": "setup",
+                    "params": {"tenant_id": PACT_TENANT_ID},
+                },
+                timeout=5,
+            )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
