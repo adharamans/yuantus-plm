@@ -653,6 +653,28 @@ jobs:
       - name: PLM collaboration base-green (ENABLE_METASHEET flag OFF/ON) contract
         run: |
           pytest -q src/yuantus/api/tests/test_metasheet_bridge_flag_contracts.py
+      - name: Notify on contracts gate failure (advisory; inert until ALERT_WEBHOOK_URL)
+        # Fires only when an earlier contracts step failed (if: failure()). Under Phase B the most
+        # likely blocking failure is the pact-broker gate. A SHELL guard skips when ALERT_WEBHOOK_URL is
+        # unset — NOT a step `if: secrets`, which is unavailable to steps.if. continue-on-error so a
+        # notification failure never adds to the build failure. No webhook value ever lives in the repo.
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          set +e
+          if [ -z "${ALERT_WEBHOOK_URL:-}" ]; then
+            echo "[alert] ALERT_WEBHOOK_URL not set — skipping contracts-gate failure notification."
+            exit 0
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          payload="$(printf '{"text":"Yuantus contracts gate FAILED on branch %s (sha %s) — %s"}' "${GITHUB_REF_NAME}" "${GITHUB_SHA}" "${run_url}")"
+          if curl -fsS -X POST -H 'Content-Type: application/json' -d "${payload}" "${ALERT_WEBHOOK_URL}" >/dev/null; then
+            echo "[alert] contracts-gate failure notification sent."
+          else
+            echo "[alert] notification POST failed (non-blocking)."
+          fi
 
   plugin-tests:
     name: plugin-tests

@@ -1233,6 +1233,8 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/aml-metadata-session-handoff-20260411.md: `docs/development/aml-metadata-session-handoff-20260411.md`
 - docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md: `docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md`
 - docs/development/lifecycle-transition-history-taskbook-20260619.md: `docs/development/lifecycle-transition-history-taskbook-20260619.md`
+- docs/development/plm-collab-line-dev-verification-20260625.md: `docs/development/plm-collab-line-dev-verification-20260625.md`
+- docs/development/plm-collab-line-remaining-development-plan-20260625.md: `docs/development/plm-collab-line-remaining-development-plan-20260625.md`
 - docs/development/plm-collab-pact-broker-autogate-design-20260621.md: `docs/development/plm-collab-pact-broker-autogate-design-20260621.md`
 - docs/development/plm-collab-pact-broker-phase-a-dev-verification-20260622.md: `docs/development/plm-collab-pact-broker-phase-a-dev-verification-20260622.md`
 - docs/development/plm-collab-pact-broker-phase-b-blocking-flip-20260624.md: `docs/development/plm-collab-pact-broker-phase-b-blocking-flip-20260624.md`

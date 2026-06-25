@@ -96,6 +96,32 @@ def test_pact_broker_step_is_blocking_phase_b() -> None:
     assert "PACT_BROKER_BASE_URL not set" in broker_block
 
 
+def test_contracts_gate_failure_alert_is_inert_and_guarded() -> None:
+    """The contracts-gate failure alert: fires only on failure, never wedges CI, and is inert
+    until ALERT_WEBHOOK_URL is set — via a SHELL guard, not a steps.if secrets check."""
+    repo_root = _find_repo_root(Path(__file__))
+    ci_yml = repo_root / ".github" / "workflows" / "ci.yml"
+    text = _read(ci_yml)
+
+    marker = "- name: Notify on contracts gate failure (advisory; inert until ALERT_WEBHOOK_URL)"
+    assert marker in text, "contracts-gate failure alert step is missing"
+    start = text.index(marker)
+    tail = text[start + len(marker):]
+    candidates = [x for x in (tail.find("\n      - name:"), tail.find("\n  plugin-tests:")) if x != -1]
+    alert_block = tail[: min(candidates)] if candidates else tail
+
+    # Fires only on a prior-step failure, and never adds to the build failure.
+    assert "if: ${{ failure() }}" in alert_block
+    assert any(ln.strip() == "continue-on-error: true" for ln in alert_block.splitlines())
+    # Inert until provisioned: a SHELL guard on the unset webhook, NOT a steps.if secrets check
+    # (the secrets context is unavailable to steps.if — it would skip even after provisioning).
+    assert "if: ${{ secrets" not in alert_block
+    assert 'if [ -z "${ALERT_WEBHOOK_URL:-}" ]' in alert_block
+    assert "ALERT_WEBHOOK_URL not set" in alert_block
+    # The webhook value never lives in the repo — only the env reference to the secret.
+    assert "ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}" in alert_block
+
+
 def test_ci_change_scope_covers_pact_provider_and_cad_diff_surface() -> None:
     repo_root = _find_repo_root(Path(__file__))
     ci_yml = repo_root / ".github" / "workflows" / "ci.yml"
