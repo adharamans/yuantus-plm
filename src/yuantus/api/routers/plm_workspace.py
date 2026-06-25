@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 
 from yuantus.config import get_settings
+from yuantus.meta_engine.services.bom_multitable_embed_token_service import (
+    is_origin_allowed,
+)
 
 router = APIRouter(prefix="/plm-workspace", tags=["PLM Workspace"])
 
@@ -20,7 +24,41 @@ _SETTING_REPLACEMENTS = {
 
 
 def _escape_js(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace("<", "\\x3c")
+        .replace(">", "\\x3e")
+        .replace("&", "\\x26")
+    )
+
+
+def _derive_origin(url: str) -> str:
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _metasheet_embed_config() -> dict[str, object]:
+    settings = get_settings()
+    embed_url = (settings.METASHEET_EMBED_URL or "").strip()
+    embed_origin = _derive_origin(embed_url)
+    configured = bool(
+        embed_url
+        and embed_origin
+        and settings.EMBED_TOKEN_SIGNING_KEY
+        and settings.EMBED_TOKEN_KEY_ID
+        and settings.EMBED_TOKEN_AUDIENCE
+        and is_origin_allowed(embed_origin, settings.EMBED_ALLOWED_ORIGINS)
+    )
+    return {
+        "url": embed_url,
+        "origin": embed_origin,
+        "configured": configured,
+    }
 
 
 def _load_workspace_html() -> str:
@@ -36,6 +74,19 @@ def _load_workspace_html() -> str:
     for token, setting_name in _SETTING_REPLACEMENTS.items():
         value = getattr(settings, setting_name, "")
         html = html.replace(token, _escape_js(str(value or "")))
+    embed_config = _metasheet_embed_config()
+    html = html.replace(
+        "__YUANTUS_METASHEET_EMBED_URL__",
+        _escape_js(str(embed_config["url"] or "")),
+    )
+    html = html.replace(
+        "__YUANTUS_METASHEET_EMBED_ORIGIN__",
+        _escape_js(str(embed_config["origin"] or "")),
+    )
+    html = html.replace(
+        "__YUANTUS_METASHEET_EMBED_CONFIGURED__",
+        "true" if embed_config["configured"] else "false",
+    )
     return html
 
 

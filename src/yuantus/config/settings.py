@@ -387,6 +387,10 @@ class Settings(BaseSettings):
         default="",
         description="Comma-separated allowlist of embed origins (matched against the token's embed_origin claim; the JWT aud is the service audience, see EMBED_TOKEN_AUDIENCE). Empty = none allowed (fail-closed). Production must NOT use '*'.",
     )
+    METASHEET_EMBED_URL: str = Field(
+        default="",
+        description="Absolute MetaSheet2 BOM-review iframe URL (for example /plm-embed/bom-review on the MetaSheet host). Env: YUANTUS_METASHEET_EMBED_URL. Empty = parent embed affordance disabled.",
+    )
 
     LOG_FORMAT: str = Field(
         default="text",

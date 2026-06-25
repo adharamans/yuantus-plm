@@ -4,12 +4,17 @@ from fastapi.testclient import TestClient
 from yuantus.api.app import create_app
 from yuantus.api.middleware.auth_enforce import _is_public_path
 from yuantus.api.routers.plm_workspace import router as plm_workspace_router
+from yuantus.config import get_settings
+
+
+def _client() -> TestClient:
+    app = FastAPI()
+    app.include_router(plm_workspace_router, prefix="/api/v1")
+    return TestClient(app)
 
 
 def test_plm_workspace_page_renders_html():
-    app = FastAPI()
-    app.include_router(plm_workspace_router, prefix="/api/v1")
-    client = TestClient(app)
+    client = _client()
 
     response = client.get("/api/v1/plm-workspace")
 
@@ -80,6 +85,89 @@ def test_plm_workspace_page_renders_html():
     assert "Open Change Workspace" in response.text
     assert "Viewing related document object." in response.text
     assert "Phase 0.5 Demo Track" in response.text
+    assert "BOM Review (MetaSheet)" in response.text
+    assert "Open BOM Review" in response.text
+    assert "Re-authorize" in response.text
+    assert 'fetchJson("/integrations/capabilities"' in response.text
+    assert '/bom/multitable/${encodeURIComponent(partId)}/embed-token' in response.text
+    assert 'body: { origin }' in response.text
+    assert 'postMessage({ type: "plm-embed:token", token }, origin)' in response.text
+    assert "payload.embed_token" in response.text
+    assert "localStorage.setItem(storageKeys.workspaceBearerToken" in response.text
+    assert "localStorage.setItem(storageKeys.metasheet" not in response.text
+
+
+def test_metasheet_embed_url_uses_yuantus_env_prefix(monkeypatch):
+    monkeypatch.setenv("YUANTUS_METASHEET_EMBED_URL", "https://metasheet.example/plm-embed/bom-review")
+    monkeypatch.setenv("METASHEET_EMBED_URL", "https://wrong.example/plm-embed/bom-review")
+    get_settings.cache_clear()
+    try:
+        assert get_settings().METASHEET_EMBED_URL == "https://metasheet.example/plm-embed/bom-review"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_plm_workspace_injects_configured_metasheet_embed(monkeypatch):
+    monkeypatch.setenv("YUANTUS_METASHEET_EMBED_URL", "https://metasheet.example/plm-embed/bom-review")
+    monkeypatch.setenv("YUANTUS_EMBED_ALLOWED_ORIGINS", "https://metasheet.example")
+    monkeypatch.setenv("YUANTUS_EMBED_TOKEN_SIGNING_KEY", "non-empty-test-key")
+    get_settings.cache_clear()
+    try:
+        response = _client().get("/api/v1/plm-workspace")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    assert 'metasheetEmbedUrl: "https://metasheet.example/plm-embed/bom-review"' in response.text
+    assert 'metasheetEmbedOrigin: "https://metasheet.example"' in response.text
+    assert 'metasheetEmbedConfigured: "true" === "true"' in response.text
+
+
+def test_plm_workspace_disables_metasheet_embed_when_url_missing(monkeypatch):
+    monkeypatch.delenv("YUANTUS_METASHEET_EMBED_URL", raising=False)
+    monkeypatch.setenv("YUANTUS_EMBED_ALLOWED_ORIGINS", "https://metasheet.example")
+    monkeypatch.setenv("YUANTUS_EMBED_TOKEN_SIGNING_KEY", "non-empty-test-key")
+    get_settings.cache_clear()
+    try:
+        response = _client().get("/api/v1/plm-workspace")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    assert 'metasheetEmbedUrl: ""' in response.text
+    assert 'metasheetEmbedOrigin: ""' in response.text
+    assert 'metasheetEmbedConfigured: "false" === "true"' in response.text
+
+
+def test_plm_workspace_disables_metasheet_embed_when_url_invalid(monkeypatch):
+    monkeypatch.setenv("YUANTUS_METASHEET_EMBED_URL", "not-a-url")
+    monkeypatch.setenv("YUANTUS_EMBED_ALLOWED_ORIGINS", "https://metasheet.example")
+    monkeypatch.setenv("YUANTUS_EMBED_TOKEN_SIGNING_KEY", "non-empty-test-key")
+    get_settings.cache_clear()
+    try:
+        response = _client().get("/api/v1/plm-workspace")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    assert 'metasheetEmbedUrl: "not-a-url"' in response.text
+    assert 'metasheetEmbedOrigin: ""' in response.text
+    assert 'metasheetEmbedConfigured: "false" === "true"' in response.text
+
+
+def test_plm_workspace_disables_metasheet_embed_when_origin_not_allowlisted(monkeypatch):
+    monkeypatch.setenv("YUANTUS_METASHEET_EMBED_URL", "https://metasheet.example/plm-embed/bom-review")
+    monkeypatch.setenv("YUANTUS_EMBED_ALLOWED_ORIGINS", "https://other.example")
+    monkeypatch.setenv("YUANTUS_EMBED_TOKEN_SIGNING_KEY", "non-empty-test-key")
+    get_settings.cache_clear()
+    try:
+        response = _client().get("/api/v1/plm-workspace")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    assert 'metasheetEmbedOrigin: "https://metasheet.example"' in response.text
+    assert 'metasheetEmbedConfigured: "false" === "true"' in response.text
 
 
 def test_plm_workspace_route_registered_in_create_app():
