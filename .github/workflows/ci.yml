@@ -250,6 +250,7 @@ jobs:
       - name: Contract checks (perf workflows + delivery doc index)
         run: |
           pytest -q \
+            src/yuantus/api/tests/test_plm_workspace_router.py \
             src/yuantus/meta_engine/tests/test_a3_workstation_checkout_context.py \
             src/yuantus/meta_engine/tests/test_access_guard_taxonomy_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_admin_auth_guard_contracts.py \

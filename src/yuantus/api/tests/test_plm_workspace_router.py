@@ -1,3 +1,8 @@
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -20,6 +25,37 @@ def _route_paths(app: FastAPI) -> set[str]:
         if route_contexts:
             paths.update(context.path for context in route_contexts())
     return paths
+
+
+def test_web_html_assets_are_packaged_in_wheel(tmp_path):
+    repo_root = Path(__file__).resolve().parents[4]
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--wheel-dir",
+            str(tmp_path),
+            str(repo_root),
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    wheel = next(tmp_path.glob("yuantus_plm-*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        names = set(archive.namelist())
+
+    assert "yuantus/web/cad_preview.html" in names
+    assert "yuantus/web/cad_review.html" in names
+    assert "yuantus/web/plm_workspace.html" in names
+    assert "yuantus/web/workbench.html" in names
 
 
 def test_plm_workspace_page_renders_html():
