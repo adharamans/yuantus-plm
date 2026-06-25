@@ -196,6 +196,7 @@ user authorization and must not commit `.claude/` or `local-dev-env/`.
 - `docs/P2_SHARED_DEV_142_RERUN_CHECKLIST.md` (142 shared-dev 常规 rerun checklist)
 - `docs/P2_SHARED_DEV_FIRST_RUN_CHECKLIST.md` (P2 shared-dev first-run checklist)
 - `docs/P2_SHARED_DEV_OBSERVATION_HANDOFF.md` (P2 shared-dev observation handoff)
+- `docs/PACT_BROKER_GATE_OPS_RUNBOOK_20260625.md` (Pact-broker blocking gate: triage / revert / re-enable)
 - `docs/RUNBOOK_BACKUP_RESTORE.md` (Backup/restore)
 - `docs/RUNBOOK_CAD_LEGACY_CONVERSION_QUEUE_AUDIT.md` (Legacy CAD conversion queue audit)
 - `docs/RUNBOOK_CI_CHANGE_SCOPE.md` (CI/regression skip rules + force full runs)
