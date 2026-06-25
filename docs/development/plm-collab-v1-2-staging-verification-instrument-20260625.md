@@ -37,6 +37,12 @@ a real env, with everything code-settleable verified up front.
 - **Two genuinely different deployed origins** (not `localhost:A` vs `localhost:B`): the PLM host
   (e.g. `https://plm-staging.example`) and the MetaSheet2 embed host
   (e.g. `https://metasheet-staging.example`).
+  - **Owned-HTTPS migration (vs the sslip.io/HTTP run, see the public-staging evidence):** both origins
+    become `https://…`. Switch `YUANTUS_METASHEET_EMBED_URL`, `YUANTUS_EMBED_ALLOWED_ORIGINS`, and the
+    MetaSheet2 `/api/plm-embed/config` parent-origin allowlist to the `https://` origins. **No code
+    change** — the server derives the origin *including the scheme* (`_derive_origin` → `{scheme}://{netloc}`),
+    so `https://ms.…` and `http://ms.…` are **distinct** origins: a stale `http://` allowlist entry will
+    (correctly) 403 after migration. The exact-origin model is otherwise unchanged.
 - **Ed25519 keypair split:** Yuantus holds `YUANTUS_EMBED_TOKEN_SIGNING_KEY` (private) +
   `YUANTUS_EMBED_TOKEN_KEY_ID`; MetaSheet2 holds the matching **public** key only.
 - Yuantus: `YUANTUS_METASHEET_EMBED_URL=https://metasheet-staging.example/plm-embed/bom-review`,
@@ -61,7 +67,7 @@ a real env, with everything code-settleable verified up front.
 | 5 | Token not in storage | DevTools → Application → Local/Session Storage, **both** origins. | no embed-token value stored (a session bearer under a workspace key is expected; the embed JWT is not) |
 | 6 | Token not in logs / request URLs | DevTools → Console + Network. | no embed-token value in console; token only in the mint POST response body, never a URL |
 | 7 | **Token not in screenshot (manual)** | Take the screenshot a pilot would; inspect it. | no token value anywhere on screen — *not assertable by code; manual devtools/inspection step* |
-| 8 | Expiry / replay → re-authorize | Wait past the TTL (≤600s) or force a replay → the iframe degrades internally (listen-only, no ack to parent). Click **Re-authorize**. | a fresh token mints + posts; review re-renders. Parent does **not** auto-detect expiry — re-authorize is user-initiated, by design |
+| 8 | Expiry/replay → **degrade** → re-authorize **recover** (full cycle — capture BOTH legs) | (a) note the token `exp` (≤600s TTL); (b) let it expire (wait > TTL) **or** force a replay (re-post the now-expired token); (c) observe **degrade**; (d) click **Re-authorize**; (e) observe **recover**. | **degrade:** the consumer's `/api/plm-embed/bom-review/context` call with the expired/replayed token returns **401** and the iframe shows the unavailable state — it is listen-only, so it does **not** signal the parent (re-authorize is user-initiated, by design). **recover:** fresh mint **200** + context **200** + review re-renders. The sslip.io run evidenced only *recover* (re-mint ×2); the **degrade leg (401 + unavailable on the expired token) must be captured here.** |
 | 9 | 403 degradation | Request a non-allowlisted origin (or misconfigure the allowlist) → mint 403. | parent shows "origin is not allowed"; no iframe, no crash |
 | 10 | 503 degradation | Break/remove the signing key → mint 503. | parent shows the unavailable message; no iframe, no crash |
 
