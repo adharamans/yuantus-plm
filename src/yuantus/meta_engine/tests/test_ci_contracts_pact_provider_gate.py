@@ -85,6 +85,8 @@ def test_pact_broker_step_is_blocking_phase_b() -> None:
     )
     # The verify + can-i-deploy verdict is the step's exit code.
     assert "[ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]" in broker_block
+    # The pact CLI install is a curl|bash pipeline; pipefail keeps curl failures retryable/visible.
+    assert "set -o pipefail" in broker_block
     # The secret-guard skip (legit resilience for unconfigured/fork CI) stays.
     assert "PACT_BROKER_BASE_URL not set" in broker_block
 

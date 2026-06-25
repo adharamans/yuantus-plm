@@ -620,8 +620,9 @@ jobs:
           PACT_CLI_VERSION: "v2.5.12"
         run: |
           set +e
+          set -o pipefail
           if [ -z "${PACT_BROKER_BASE_URL:-}" ]; then
-            echo "[pact-broker] PACT_BROKER_BASE_URL not set — skipping advisory broker step."
+            echo "[pact-broker] PACT_BROKER_BASE_URL not set — skipping broker step."
             exit 0
           fi
           if [ -z "${PACT_BROKER_TOKEN:-}" ]; then
