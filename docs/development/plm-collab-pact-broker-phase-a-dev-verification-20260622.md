@@ -147,7 +147,8 @@ must not be pasted into staging evidence.
 
 ## 8. Scope / non-goals (unchanged)
 
-- The broker covers the existing 32 interactions + future ones (incl. V1.2's embed-token pact).
+- The broker launched with the existing 32 interactions and carries later additions (including
+  V1.2's embed-token pact) as they land in the committed artifact.
 - **Not** here: Phase B blocking, broker webhooks, SSO / write-back / approval-automation, T2 — separate
   owner-gated lines.
 

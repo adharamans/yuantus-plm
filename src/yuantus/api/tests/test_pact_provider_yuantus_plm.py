@@ -98,6 +98,11 @@ def _isolated_test_database():
             "YUANTUS_ENVIRONMENT",
             "YUANTUS_SCHEMA_MODE",
             "YUANTUS_AUTH_MODE",
+            "YUANTUS_EMBED_TOKEN_SIGNING_KEY",
+            "YUANTUS_EMBED_TOKEN_KEY_ID",
+            "YUANTUS_EMBED_TOKEN_AUDIENCE",
+            "YUANTUS_EMBED_TOKEN_TTL_SECONDS",
+            "YUANTUS_EMBED_ALLOWED_ORIGINS",
         )
     }
     os.environ["YUANTUS_DATABASE_URL"] = f"sqlite:///{db_path}"
@@ -106,6 +111,11 @@ def _isolated_test_database():
     os.environ["YUANTUS_ENVIRONMENT"] = "dev"
     os.environ["YUANTUS_SCHEMA_MODE"] = "create_all"
     os.environ["YUANTUS_AUTH_MODE"] = "optional"
+    os.environ["YUANTUS_EMBED_TOKEN_SIGNING_KEY"] = PACT_EMBED_TOKEN_SIGNING_KEY
+    os.environ["YUANTUS_EMBED_TOKEN_KEY_ID"] = PACT_EMBED_TOKEN_KEY_ID
+    os.environ["YUANTUS_EMBED_TOKEN_AUDIENCE"] = PACT_EMBED_TOKEN_AUDIENCE
+    os.environ["YUANTUS_EMBED_TOKEN_TTL_SECONDS"] = PACT_EMBED_TOKEN_TTL_SECONDS
+    os.environ["YUANTUS_EMBED_ALLOWED_ORIGINS"] = PACT_EMBED_ORIGIN
 
     # Clear cached settings so the new env vars take effect.
     from yuantus.config import get_settings
@@ -275,6 +285,11 @@ PACT_ECO_ID_REJECT = "01H000000000000000000000E3"
 PACT_APPROVAL_ID_HISTORY = "01H000000000000000000000H1"
 PACT_CAD_DOCUMENT_PATH_VIEW_PATCH = "pact/cad/view-patch-document.json"
 PACT_CAD_METADATA_PATH_MESH = "pact/cad/mesh-stats-metadata.json"
+PACT_EMBED_ORIGIN = "https://metasheet.example"
+PACT_EMBED_TOKEN_KEY_ID = "pact-embed-1"
+PACT_EMBED_TOKEN_AUDIENCE = "metasheet2.embed"
+PACT_EMBED_TOKEN_TTL_SECONDS = "120"
+PACT_EMBED_TOKEN_SIGNING_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
 WAVE5_CAD_DOWNLOAD_PAYLOADS: dict[str, dict[str, Any]] = {}
 
@@ -1288,3 +1303,34 @@ def test_pact_provider_states_endpoint_accepts_pact_ruby_payload():
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_committed_pact_contains_v12_embed_token_interaction():
+    """Pin the V1.2 parent-host mint contract even when pact-python is unavailable."""
+
+    pact_path = DEFAULT_PACT_DIR / "metasheet2-yuantus-plm.json"
+    pact = json.loads(pact_path.read_text(encoding="utf-8"))
+    embed_path = f"/api/v1/bom/multitable/{PACT_ITEM_ID_PRIMARY}/embed-token"
+    interactions = [
+        interaction
+        for interaction in pact["interactions"]
+        if interaction["request"]["method"] == "POST"
+        and interaction["request"]["path"] == embed_path
+    ]
+
+    assert len(interactions) == 1
+    interaction = interactions[0]
+    assert interaction["request"]["body"] == {"origin": PACT_EMBED_ORIGIN}
+
+    body = interaction["response"]["body"]
+    assert body["feature_key"] == "bom_multitable"
+    assert body["entitled"] is True
+    assert body["token_type"] == "embed"
+    assert body["aud"] == PACT_EMBED_TOKEN_AUDIENCE
+    assert body["embed_origin"] == PACT_EMBED_ORIGIN
+    assert isinstance(body["embed_token"], str) and body["embed_token"].count(".") == 2
+
+    body_rules = interaction["response"]["matchingRules"]["body"]
+    assert "$.embed_token" in body_rules
+    assert "$.jti" in body_rules
+    assert "$.expires_in" in body_rules

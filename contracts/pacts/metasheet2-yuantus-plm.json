@@ -3801,6 +3801,136 @@
           }
         }
       }
+    },
+    {
+      "description": "mint a MetaSheet BOM review embed token for the Yuantus parent host",
+      "providerStates": [
+        {
+          "name": "tenant-1 holds an active plm.bom_multitable license and part 01H000000000000000000000P1 can mint a MetaSheet embed token"
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/bom/multitable/01H000000000000000000000P1/embed-token",
+        "headers": {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.example",
+          "x-tenant-id": "tenant-1"
+        },
+        "body": {
+          "origin": "https://metasheet.example"
+        },
+        "matchingRules": {
+          "header": {
+            "$.Authorization": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^Bearer .+"
+                }
+              ]
+            }
+          },
+          "body": {
+            "$.origin": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^https://[^/]+$"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "feature_key": "bom_multitable",
+          "entitled": true,
+          "upgrade": {
+            "available": false
+          },
+          "embed_token": "eyJhbGciOiJFZERTQSIsImtpZCI6InBhY3QtZW1iZWQtMSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidGVuYW50X2lkIjoidGVuYW50LTEiLCJvcmdfaWQiOiJvcmctMSIsInBhcnRfaWQiOiIwMUgwMDAwMDAwMDAwMDAwMDAwMDAwMDBQMSIsImZlYXR1cmVfa2V5IjoiYm9tX211bHRpdGFibGUiLCJhdWQiOiJtZXRhc2hlZXQyLmVtYmVkIiwiZW1iZWRfb3JpZ2luIjoiaHR0cHM6Ly9tZXRhc2hlZXQuZXhhbXBsZSIsImp0aSI6IjEyMzQ1Njc4LTEyMzQtNDIzNC04MjM0LTEyMzQ1Njc4OWFiYyIsInR5cCI6ImVtYmVkIiwiZXhwIjoxODAwMDAwMTIwLCJpYXQiOjE4MDAwMDAwMDB9.Kx9P9RjF0z0kKkZj1DEMOuV5iPHlM9dummysignature-0123456789abcd",
+          "token_type": "embed",
+          "expires_in": 120,
+          "jti": "12345678-1234-4234-8234-123456789abc",
+          "aud": "metasheet2.embed",
+          "embed_origin": "https://metasheet.example"
+        },
+        "matchingRules": {
+          "body": {
+            "$.feature_key": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.entitled": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.upgrade.available": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.embed_token": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+                }
+              ]
+            },
+            "$.token_type": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.expires_in": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.jti": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                }
+              ]
+            },
+            "$.aud": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.embed_origin": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^https://[^/]+$"
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ]
 }
