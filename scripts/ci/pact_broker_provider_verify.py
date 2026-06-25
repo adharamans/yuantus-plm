@@ -1,4 +1,4 @@
-"""Advisory pact-broker provider verification (Phase A of the auto-gate).
+"""Blocking pact-broker provider verification (Phase B of the auto-gate).
 
 Spins up the SAME seeded Yuantus provider used by the committed-pact verifier
 (``test_pact_provider_yuantus_plm.py`` — reusing ``_isolated_test_database`` +
@@ -9,13 +9,14 @@ verification results back to the broker (provider version = commit SHA, branch =
 Design notes (see docs/development/plm-collab-pact-broker-autogate-design-20260621.md):
 - **Guarded:** no-ops (exit 0) unless ``PACT_BROKER_BASE_URL`` is set, so it stays inert until
   ops provisions the PactFlow account + the two GitHub secrets.
-- **Advisory:** invoked from a ``continue-on-error`` CI step; the committed-pact verifier remains
-  the live gate. This is strictly additive.
+- **Blocking (Phase B):** invoked from a BLOCKING CI step (the Phase B flip removed
+  ``continue-on-error``) — a non-zero exit now fails the build. The committed-pact verifier
+  remains a redundant local gate; the guard above still skips unconfigured / fork CI.
 - **CLI, not pact-python's broker API:** the verifier CLI sources pacts from the broker +
   publishes results via documented flags, avoiding pact-python version-specific broker calls.
 
-UNVERIFIED until a live broker exists: the exact ``pact_verifier_cli`` flags + auth must be
-confirmed against a real PactFlow instance at activation — see the dev & verification MD runbook.
+Verified against live PactFlow at activation (#861 ``a352baa9``): provider-verify rc=0, the
+deliberate drift-catch rc=1, can-i-deploy rc=0. The flags + auth below are that confirmed set.
 """
 from __future__ import annotations
 
@@ -36,7 +37,7 @@ if str(SRC_ROOT) not in sys.path:
 def main() -> int:
     broker_url = os.environ.get("PACT_BROKER_BASE_URL", "").strip()
     if not broker_url:
-        print("[pact-broker] PACT_BROKER_BASE_URL not set — skipping advisory broker verification.")
+        print("[pact-broker] PACT_BROKER_BASE_URL not set — skipping broker verification (unconfigured / fork CI).")
         return 0
 
     token = os.environ.get("PACT_BROKER_TOKEN", "").strip()
@@ -81,7 +82,7 @@ def main() -> int:
             env = os.environ.copy()
             env.setdefault("PACT_BROKER_ERROR_ON_UNKNOWN_OPTION", "true")
             proc = subprocess.run(cmd, check=False, env=env)
-            print(f"[pact-broker] pact_verifier_cli exit={proc.returncode} (advisory)")
+            print(f"[pact-broker] pact_verifier_cli exit={proc.returncode}")
             return proc.returncode
 
 
