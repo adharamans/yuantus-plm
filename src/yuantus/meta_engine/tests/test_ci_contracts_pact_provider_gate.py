@@ -53,6 +53,44 @@ def test_ci_contracts_job_wires_pact_provider_verifier() -> None:
     assert "pact-broker can-i-deploy --pacticipant YuantusPLM" in text
 
 
+def test_pact_broker_step_is_blocking_phase_b() -> None:
+    """Phase B: the broker verify/can-i-deploy step must be BLOCKING.
+
+    Scoped to the broker step block only — other CI steps may use continue-on-error
+    legitimately, so a global ``"continue-on-error" not in text`` would be wrong.
+    """
+    repo_root = _find_repo_root(Path(__file__))
+    ci_yml = repo_root / ".github" / "workflows" / "ci.yml"
+    text = _read(ci_yml)
+
+    # Positive Phase-B markers: the step name and the blocking log line.
+    assert "Pact broker verify + publish + can-i-deploy (blocking, Phase B)" in text
+    assert "(Phase B: BLOCKING)" in text
+
+    # Isolate the broker step block (from its `- name:` to the next step's `- name:`).
+    marker = "- name: Pact broker verify + publish + can-i-deploy (blocking, Phase B)"
+    start = text.index(marker)
+    tail = text[start + len(marker):]
+    end_rel = tail.find("\n      - name:")
+    broker_block = tail if end_rel == -1 else tail[:end_rel]
+
+    # The gate must not be defanged by a `continue-on-error:` step key (scoped to this step).
+    # Match the actual YAML directive, not the word inside the revert-note comment.
+    directive_lines = [
+        ln for ln in broker_block.splitlines()
+        if ln.strip().startswith("continue-on-error:")
+    ]
+    assert not directive_lines, (
+        f"Phase B: broker step must be blocking (no continue-on-error directive); found {directive_lines}"
+    )
+    # The verify + can-i-deploy verdict is the step's exit code.
+    assert "[ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]" in broker_block
+    # The pact CLI install is a curl|bash pipeline; pipefail keeps curl failures retryable/visible.
+    assert "set -o pipefail" in broker_block
+    # The secret-guard skip (legit resilience for unconfigured/fork CI) stays.
+    assert "PACT_BROKER_BASE_URL not set" in broker_block
+
+
 def test_ci_change_scope_covers_pact_provider_and_cad_diff_surface() -> None:
     repo_root = _find_repo_root(Path(__file__))
     ci_yml = repo_root / ".github" / "workflows" / "ci.yml"

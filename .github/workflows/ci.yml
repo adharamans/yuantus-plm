@@ -605,12 +605,14 @@ jobs:
       - name: Pact provider verifier (Metasheet2 -> Yuantus)
         run: |
           pytest -q src/yuantus/api/tests/test_pact_provider_yuantus_plm.py
-      - name: Pact broker verify + publish + can-i-deploy (advisory, Phase A)
-        # Auto-gate Phase A: a SHELL guard (below) skips this until ops provisions the broker secret —
-        # NOT a step `if:`, because the `secrets` context is unavailable to `steps.if` (it would
-        # evaluate empty and skip even after the secret is set). Non-blocking (continue-on-error); the
-        # committed-pact verifier above stays the live gate. UNVERIFIED until a live PactFlow instance.
-        continue-on-error: true
+      - name: Pact broker verify + publish + can-i-deploy (blocking, Phase B)
+        # Auto-gate Phase B (BLOCKING): activated + verified against live PactFlow (see #861 —
+        # provider-verify rc=0, drift-catch rc=1, can-i-deploy rc=0). The SHELL guard below still skips
+        # when PACT_BROKER_BASE_URL is unset (unconfigured / fork CI) — NOT a step `if:`, since the
+        # `secrets` context is unavailable to `steps.if`. NO continue-on-error: a broken or unverified
+        # contract now FAILS the build; the committed-pact verifier above remains a redundant local gate.
+        # Outage note: a sustained broker outage will wedge this job — the one-line revert is to restore
+        # `continue-on-error: true` here (see the Phase B dev & verification MD).
         env:
           PACT_BROKER_BASE_URL: ${{ secrets.PACT_BROKER_BASE_URL }}
           PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
@@ -618,20 +620,31 @@ jobs:
           PACT_CLI_VERSION: "v2.5.12"
         run: |
           set +e
+          set -o pipefail
           if [ -z "${PACT_BROKER_BASE_URL:-}" ]; then
-            echo "[pact-broker] PACT_BROKER_BASE_URL not set — skipping advisory broker step."
+            echo "[pact-broker] PACT_BROKER_BASE_URL not set — skipping broker step."
             exit 0
           fi
           if [ -z "${PACT_BROKER_TOKEN:-}" ]; then
             echo "::error title=Pact broker token missing::PACT_BROKER_BASE_URL is set but PACT_BROKER_TOKEN is empty; broker step is configured but invalid."
             exit 1
           fi
-          curl -fsSL https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh | bash
+          # Install the pact CLI (the main transient CI fragility under a blocking gate — retry flakes;
+          # a persistent failure still blocks, since the verify / can-i-deploy below then cannot run).
+          install_ok=0
+          for attempt in 1 2 3; do
+            if curl -fsSL https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh | bash; then
+              install_ok=1; break
+            fi
+            echo "[pact-broker] pact CLI install attempt ${attempt} failed; retrying in 5s..." >&2
+            sleep 5
+          done
+          [ "$install_ok" = "1" ] || { echo "::error title=Pact CLI install failed::could not install pact-ruby-standalone after 3 attempts."; exit 1; }
           export PATH="$PWD/pact/bin:$PATH"
           python scripts/ci/pact_broker_provider_verify.py; rc1=$?
           pact-broker can-i-deploy --pacticipant YuantusPLM --version "${GITHUB_SHA}" \
             --broker-base-url "$PACT_BROKER_BASE_URL" --broker-token "$PACT_BROKER_TOKEN"; rc2=$?
-          echo "[pact-broker] provider-verify rc=$rc1 can-i-deploy rc=$rc2 (advisory)"
+          echo "[pact-broker] provider-verify rc=$rc1 can-i-deploy rc=$rc2 (Phase B: BLOCKING)"
           [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]
       - name: PLM collaboration base-green (ENABLE_METASHEET flag OFF/ON) contract
         run: |

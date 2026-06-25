@@ -67,6 +67,12 @@ Do **not** make the gate blocking on day one — a broker outage would wedge bot
 - **Phase B — blocking:** after a stability window (e.g. ~2 weeks / N consecutive green runs) **and owner
   sign-off**, flip `can-i-deploy` to **blocking** so a broken / unverified contract fails the build.
 
+> **Executed 2026-06-24** — owner sign-off given (the stability window was short-circuited by explicit
+> decision). The broker step is now **blocking** (`continue-on-error` removed) on
+> `claude/plm-collab-pact-broker-phase-b`. The secret-guard skip + committed-pact verifier are retained;
+> `--to-environment` and the consumer-side `can-i-deploy` stay deferred. Details + verification in
+> plm-collab-pact-broker-phase-b-blocking-flip-20260624.md.
+
 ## 5. Manual-sync fallback  *(decision)*
 
 Keep `scripts/sync_metasheet2_pact.sh --check --verify-provider` as the **local + backstop** path. The
