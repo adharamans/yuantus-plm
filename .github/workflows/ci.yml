@@ -642,7 +642,10 @@ jobs:
           [ "$install_ok" = "1" ] || { echo "::error title=Pact CLI install failed::could not install pact-ruby-standalone after 3 attempts."; exit 1; }
           export PATH="$PWD/pact/bin:$PATH"
           python scripts/ci/pact_broker_provider_verify.py; rc1=$?
-          pact-broker can-i-deploy --pacticipant YuantusPLM --version "${GITHUB_SHA}" \
+          pact-broker can-i-deploy \
+            --pacticipant YuantusPLM --version "${GITHUB_SHA}" \
+            --pacticipant Metasheet2 --main-branch \
+            --retry-while-unknown 5 --retry-interval 10 \
             --broker-base-url "$PACT_BROKER_BASE_URL" --broker-token "$PACT_BROKER_TOKEN"; rc2=$?
           echo "[pact-broker] provider-verify rc=$rc1 can-i-deploy rc=$rc2 (Phase B: BLOCKING)"
           [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]
