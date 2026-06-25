@@ -1237,6 +1237,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/plm-collab-pact-broker-phase-a-dev-verification-20260622.md: `docs/development/plm-collab-pact-broker-phase-a-dev-verification-20260622.md`
 - docs/development/plm-collab-pact-broker-phase-b-blocking-flip-20260624.md: `docs/development/plm-collab-pact-broker-phase-b-blocking-flip-20260624.md`
 - docs/development/plm-collab-v1-2-parent-host-taskbook-20260623.md: `docs/development/plm-collab-v1-2-parent-host-taskbook-20260623.md`
+- docs/development/plm-collab-v1-2-staging-verification-instrument-20260625.md: `docs/development/plm-collab-v1-2-staging-verification-instrument-20260625.md`
 - docs/development/plm-collab-v1-pact-boundary-and-staging-checklist-20260621.md: `docs/development/plm-collab-v1-pact-boundary-and-staging-checklist-20260621.md`
 - docs/development/plm-collab-v1-v2-staging-evidence-template-20260623.md: `docs/development/plm-collab-v1-v2-staging-evidence-template-20260623.md`
 - docs/development/plm-collab-v1-v2-status-closeout-20260622.md: `docs/development/plm-collab-v1-v2-status-closeout-20260622.md`
