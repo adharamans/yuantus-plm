@@ -13,6 +13,15 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _route_paths(app: FastAPI) -> set[str]:
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    for route in app.routes:
+        route_contexts = getattr(route, "effective_route_contexts", None)
+        if route_contexts:
+            paths.update(context.path for context in route_contexts())
+    return paths
+
+
 def test_plm_workspace_page_renders_html():
     client = _client()
 
@@ -172,7 +181,7 @@ def test_plm_workspace_disables_metasheet_embed_when_origin_not_allowlisted(monk
 
 def test_plm_workspace_route_registered_in_create_app():
     app = create_app()
-    paths = {route.path for route in app.routes}
+    paths = _route_paths(app)
 
     assert "/api/v1/plm-workspace" in paths
 

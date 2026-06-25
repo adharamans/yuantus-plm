@@ -56,6 +56,14 @@ URL = "/api/v1/bom/multitable/{part_id}/embed-token"
 _USER = type("_User", (), {"id": 7, "roles": ["engineer"], "is_superuser": False})()
 
 
+def _app_routes(app):
+    for route in app.routes:
+        yield route
+        route_contexts = getattr(route, "effective_route_contexts", None)
+        if route_contexts:
+            yield from route_contexts()
+
+
 @pytest.fixture
 def db_session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -322,7 +330,11 @@ def test_router_exposes_exactly_two_routes():
 
 def test_live_app_owns_the_embed_token_post_route():
     app = create_app()
-    matches = [r for r in app.routes if getattr(r, "path", None) == "/api/v1/bom/multitable/{part_id}/embed-token"]
+    matches = [
+        r
+        for r in _app_routes(app)
+        if getattr(r, "path", None) == "/api/v1/bom/multitable/{part_id}/embed-token"
+    ]
     assert len(matches) == 1
     route = matches[0]
     assert "POST" in route.methods
