@@ -1794,25 +1794,23 @@
         if (metasheetReviewPreview) {
           metasheetReviewPreview.textContent = seconds ? `authorized ${seconds}s` : "authorized";
         }
-        metasheetReviewOutput.innerHTML = `
-          <iframe
-            id="${frameId}"
-            class="metasheet-review-frame"
-            title="MetaSheet BOM Review"
-            src="${escapeHtml(embedUrl)}"
-            referrerpolicy="no-referrer"
-          ></iframe>
-          <div class="metasheet-review-status">
-            Authorization sent to ${escapeHtml(origin)}. Use Re-authorize after expiry or replay.
-          </div>
-        `;
-        const frame = document.getElementById(frameId);
+        metasheetReviewOutput.innerHTML = "";
+        const frame = document.createElement("iframe");
+        frame.id = frameId;
+        frame.className = "metasheet-review-frame";
+        frame.title = "MetaSheet BOM Review";
+        frame.referrerPolicy = "no-referrer";
+        const status = document.createElement("div");
+        status.className = "metasheet-review-status";
+        status.textContent = `Authorization sent to ${origin}. Use Re-authorize after expiry or replay.`;
         const postToken = () => {
           if (frame && frame.contentWindow) {
             frame.contentWindow.postMessage({ type: "plm-embed:token", token }, origin);
           }
         };
         frame.addEventListener("load", postToken, { once: true });
+        metasheetReviewOutput.append(frame, status);
+        frame.src = embedUrl;
       }
 
       function escapeHtml(value) {
