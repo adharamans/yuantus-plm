@@ -50,7 +50,8 @@ def test_ci_contracts_job_wires_pact_provider_verifier() -> None:
     assert 'PACT_CLI_VERSION: "v2.5.12"' in text
     assert "https://raw.githubusercontent.com/pact-foundation/pact-ruby-standalone/master/install.sh" in text
     assert 'export PATH="$PWD/pact/bin:$PATH"' in text
-    assert "pact-broker can-i-deploy --pacticipant YuantusPLM" in text
+    assert "pact-broker can-i-deploy" in text
+    assert '--pacticipant YuantusPLM --version "${GITHUB_SHA}"' in text
 
 
 def test_pact_broker_step_is_blocking_phase_b() -> None:
@@ -87,6 +88,10 @@ def test_pact_broker_step_is_blocking_phase_b() -> None:
     assert "[ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]" in broker_block
     # The pact CLI install is a curl|bash pipeline; pipefail keeps curl failures retryable/visible.
     assert "set -o pipefail" in broker_block
+    # can-i-deploy must check the same consumer main-branch slice that provider verification selected.
+    assert "--pacticipant Metasheet2 --main-branch" in broker_block
+    # The Pact CLI handles unknown verification-result polling without defanging the final gate.
+    assert "--retry-while-unknown 5 --retry-interval 10" in broker_block
     # The secret-guard skip (legit resilience for unconfigured/fork CI) stays.
     assert "PACT_BROKER_BASE_URL not set" in broker_block
 
