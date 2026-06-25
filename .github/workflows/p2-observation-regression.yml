@@ -176,6 +176,51 @@ jobs:
             cat "${OUTPUT_DIR}/OBSERVATION_EVAL.md" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Write workflow failure diagnostics
+        if: always()
+        env:
+          AUTH_READY: ${{ steps.validate_auth_config.outputs.auth_ready }}
+          RUN_OUTCOME: ${{ steps.run_p2_observation_regression.outcome }}
+          BASE_URL: ${{ github.event.inputs.base_url }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_ID_VALUE: ${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUTPUT_DIR}"
+          if [[ "${AUTH_READY}" == "true" && "${RUN_OUTCOME}" == "success" ]]; then
+            exit 0
+          fi
+          cat > "${OUTPUT_DIR}/WORKFLOW_FAILURE.md" <<EOF
+          # P2 Observation Regression Workflow Failure
+
+          - workflow: \`${WORKFLOW_NAME}\`
+          - run_id: \`${RUN_ID_VALUE}\`
+          - actor: \`${ACTOR}\`
+          - auth_ready: \`${AUTH_READY:-unknown}\`
+          - run_outcome: \`${RUN_OUTCOME:-unknown}\`
+          - base_url: \`${BASE_URL}\`
+          EOF
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ["OUTPUT_DIR"])
+          payload = {
+              "workflow": os.environ["WORKFLOW_NAME"],
+              "run_id": os.environ["RUN_ID_VALUE"],
+              "actor": os.environ["ACTOR"],
+              "auth_ready": os.environ.get("AUTH_READY", ""),
+              "run_outcome": os.environ.get("RUN_OUTCOME", ""),
+              "base_url": os.environ["BASE_URL"],
+          }
+          (output_dir / "workflow_failure.json").write_text(
+              json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
       - name: Upload P2 observation regression evidence
         if: always()
         uses: actions/upload-artifact@v4

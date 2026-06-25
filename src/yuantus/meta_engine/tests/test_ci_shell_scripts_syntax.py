@@ -373,6 +373,8 @@ def test_p2_shared_dev_142_workflow_readonly_check_script_has_help() -> None:
         "./tmp/p2-shared-dev-observation-20260421-stable",
         "shared-dev-142-readonly-20260421",
         "workflow-probe-current",
+        "--base-url",
+        "http://142.171.239.56:7910",
         "WORKFLOW_READONLY_DIFF.md",
         "WORKFLOW_READONLY_EVAL.md",
         "run_p2_shared_dev_142_readonly_rerun.sh",

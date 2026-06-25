@@ -19,6 +19,8 @@ Options:
                             default: shared-dev-142-readonly-20260421
   --current-label <label>   Current label for readonly diff
                             default: workflow-probe-current
+  --base-url <url>          Target API base URL for the workflow probe
+                            default: http://142.171.239.56:7910
   --repo <owner/name>       Optional repository override for gh (-R)
   --ref <branch>            Ref used for workflow_dispatch
                             default: main
@@ -66,6 +68,7 @@ baseline_dir="${default_baseline_dir}"
 baseline_archive="${default_baseline_archive}"
 baseline_label="${default_baseline_label}"
 current_label="${default_current_label}"
+base_url="http://142.171.239.56:7910"
 repo=""
 ref="main"
 username="admin"
@@ -233,6 +236,48 @@ write_failure_summary() {
 EOF
 }
 
+write_skip_summary() {
+  local skip_reason="$1"
+
+  mkdir -p "${output_dir}"
+  cat > "${summary_output}" <<EOF
+# Shared-dev 142 Workflow Readonly Check
+
+- status: skipped
+- reason: ${skip_reason}
+- workflow_probe_dir: \`${probe_output_dir}\`
+- workflow_dispatch_result: not generated
+- current_artifact_dir: \`${current_dir}\`
+- baseline_dir: \`${baseline_dir}\`
+- diff: not generated
+- eval: not generated
+- verdict: skipped
+
+## Next
+
+- restore or replace the public shared-dev observation target: \`${base_url}\`
+- rerun this guard after the target responds to \`/api/v1/health\`
+EOF
+}
+
+precheck_probe_target_if_github_actions() {
+  if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
+    return 0
+  fi
+  if [[ "${baseline_dir}" != "${default_baseline_dir}" ]]; then
+    return 0
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    write_skip_summary "curl unavailable in GitHub Actions runner"
+    return 1
+  fi
+  if ! curl -fsS --connect-timeout 10 --max-time 30 -o /dev/null "${base_url%/}/api/v1/health"; then
+    write_skip_summary "public observation target unavailable: ${base_url%/}/api/v1/health"
+    return 1
+  fi
+  return 0
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output-dir)
@@ -258,6 +303,11 @@ while [[ $# -gt 0 ]]; do
     --current-label)
       require_value "$1" "${2:-}"
       current_label="$2"
+      shift 2
+      ;;
+    --base-url)
+      require_value "$1" "${2:-}"
+      base_url="${2%/}"
       shift 2
       ;;
     --repo)
@@ -348,8 +398,15 @@ echo "BASELINE_DIR=${baseline_dir}"
 echo "BASELINE_ARCHIVE=${baseline_archive}"
 echo "BASELINE_LABEL=${baseline_label}"
 echo "CURRENT_LABEL=${current_label}"
+echo "BASE_URL=${base_url}"
 echo "ARCHIVE_RESULT=${archive_result}"
 echo
+
+if ! precheck_probe_target_if_github_actions; then
+  echo "Skipped:"
+  echo "  ${summary_output}"
+  exit 0
+fi
 
 restore_canonical_baseline_if_missing
 baseline_policy_kind="$(read_baseline_policy_kind)"
@@ -357,6 +414,7 @@ baseline_policy_kind="$(read_baseline_policy_kind)"
 cmd=(
   bash
   scripts/run_p2_shared_dev_142_workflow_probe.sh
+  --base-url "${base_url}"
   --out-dir "${probe_output_dir}"
   --ref "${ref}"
   --username "${username}"

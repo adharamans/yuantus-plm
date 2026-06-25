@@ -1800,6 +1800,55 @@ def test_p2_shared_dev_142_entrypoint_wrapper_rejects_invalid_mode(tmp_path: Pat
     assert "Unsupported --mode: bad-mode" in (cp.stderr or "")
 
 
+def test_p2_shared_dev_142_workflow_readonly_check_skips_unavailable_target_in_github_actions(tmp_path: Path) -> None:
+    repo_root = _find_repo_root(Path(__file__))
+    script = repo_root / "scripts" / "run_p2_shared_dev_142_workflow_readonly_check.sh"
+    assert script.is_file(), f"Missing script: {script}"
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        """#!/usr/bin/env sh
+echo "curl: (7) Failed to connect" >&2
+exit 7
+""",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+    out_dir = tmp_path / "out-unavailable"
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+    env["GITHUB_ACTIONS"] = "true"
+
+    cp = subprocess.run(  # noqa: S603
+        [
+            "bash",
+            str(script),
+            "--output-dir",
+            str(out_dir),
+            "--base-url",
+            "http://unavailable.example.invalid:7910",
+            "--no-archive",
+        ],
+        text=True,
+        capture_output=True,
+        env=env,
+        cwd=str(repo_root),
+    )
+
+    assert cp.returncode == 0, cp.stdout + "\n" + cp.stderr
+    assert "Skipped:" in cp.stdout
+    summary = out_dir / "WORKFLOW_READONLY_CHECK.md"
+    assert summary.is_file()
+    summary_text = summary.read_text(encoding="utf-8")
+    assert "status: skipped" in summary_text
+    assert "public observation target unavailable" in summary_text
+    assert "workflow_dispatch_result: not generated" in summary_text
+    assert not (out_dir / "workflow-probe" / "WORKFLOW_DISPATCH_RESULT.md").exists()
+
+
 def test_p2_shared_dev_142_workflow_readonly_check_wrapper_runs_probe_then_compare(tmp_path: Path) -> None:
     repo_root = _find_repo_root(Path(__file__))
     script = repo_root / "scripts" / "run_p2_shared_dev_142_workflow_readonly_check.sh"

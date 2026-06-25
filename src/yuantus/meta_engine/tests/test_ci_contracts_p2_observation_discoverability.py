@@ -459,6 +459,8 @@ def test_p2_shared_dev_142_workflow_readonly_check_wrapper_tracks_fixed_baseline
         "shared-dev-142-readonly-20260421",
         "workflow-probe-current",
         "workflow_stable_current_transform.json",
+        "http://142.171.239.56:7910",
+        "public observation target unavailable",
         "scripts/render_p2_shared_dev_142_stable_current.py",
         "WORKFLOW_READONLY_DIFF.md",
         "WORKFLOW_READONLY_EVAL.md",
