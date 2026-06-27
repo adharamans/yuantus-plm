@@ -432,6 +432,7 @@ class LifecycleService:
         limit: Optional[int] = None,
         success_only: bool = False,
         outcomes: Optional[Sequence[str]] = None,
+        reason_code: Optional[str] = None,
     ):
         """Return an item's lifecycle transition-history rows, most-recent first.
 
@@ -454,6 +455,17 @@ class LifecycleService:
             # for failed-attempt triage). AND-combines with success_only, though no route passes
             # both. SQL-level IN keeps it portable (sqlite/postgres) and respects limit ordering.
             query = query.filter(LifecycleTransitionHistory.outcome.in_(tuple(outcomes)))
+        if reason_code:
+            # forensic-route filter: match the bounded failure discriminator stored in
+            # properties.reason_code (JSON on sqlite / JSONB on postgres). `.as_string()` is the
+            # cross-DB-portable JSON extraction already used in web/graphql/schema.py, and applies
+            # at SQL level -- BEFORE order_by/limit -- so it composes with ?outcome and respects the
+            # limit cap (the limit-ordering correctness the JSON path otherwise risks). An unknown
+            # reason_code matches no rows; it is deliberately NOT validated against a router-side
+            # allowlist, which would drift as new failure paths add reason codes (silent-false-green).
+            query = query.filter(
+                LifecycleTransitionHistory.properties["reason_code"].as_string() == reason_code
+            )
         query = query.order_by(
             LifecycleTransitionHistory.created_at.desc(),
             LifecycleTransitionHistory.id.desc(),

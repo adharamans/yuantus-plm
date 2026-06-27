@@ -285,3 +285,53 @@ def test_forensic_outcome_filter_composes_with_limit(client, db):
     body = client.get(_FORENSIC.format("GONE") + "?outcome=denied&limit=2").json()
     assert body["count"] == 2
     assert all(r["outcome"] == "denied" for r in body["items"])
+
+
+# -- forensic ?reason_code filter (L2-1 follow-up; properties.reason_code JSON) ----
+def test_forensic_filters_by_reason_code(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied",
+          to_state_name="A", properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="denied",
+          to_state_name="B", properties={"reason_code": "actor_missing"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 3), outcome="success",
+          to_state_name="C", properties={})
+    body = client.get(_FORENSIC.format("GONE") + "?reason_code=permission_denied").json()
+    assert body["count"] == 1
+    assert [r["to_state_name"] for r in body["items"]] == ["A"]
+
+
+def test_forensic_reason_code_composes_with_outcome(client, db):
+    # same reason_code on two outcomes -> reason_code AND outcome both apply (intersection).
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied",
+          to_state_name="A", properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="blocked",
+          to_state_name="B", properties={"reason_code": "permission_denied"})
+    body = client.get(
+        _FORENSIC.format("GONE") + "?reason_code=permission_denied&outcome=denied"
+    ).json()
+    assert body["count"] == 1
+    assert [r["to_state_name"] for r in body["items"]] == ["A"]
+
+
+def test_forensic_unknown_reason_code_is_empty_200(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied",
+          properties={"reason_code": "permission_denied"})
+    r = client.get(_FORENSIC.format("GONE") + "?reason_code=never_a_real_code")
+    assert r.status_code == 200  # unknown code matches nothing; deliberately NOT a 400
+    assert r.json()["count"] == 0
+
+
+def test_forensic_reason_code_composes_with_limit(client, db):
+    # the filter must apply BEFORE limit: a NEWER non-matching row must not displace matches.
+    for d in (1, 2, 3):
+        _hist(db, item_id="GONE", created_at=datetime(2026, 6, d), outcome="denied",
+              to_state_name=f"R{d}", properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 4), outcome="denied",
+          to_state_name="OTHER", properties={"reason_code": "actor_missing"})
+    body = client.get(
+        _FORENSIC.format("GONE") + "?reason_code=permission_denied&limit=2"
+    ).json()
+    assert body["count"] == 2
+    # OTHER is newest but excluded by the reason_code filter; limit then takes the 2 most-recent
+    # permission_denied rows (R3, R2). If the JSON filter applied AFTER limit this would be 1 (R3).
+    assert [r["to_state_name"] for r in body["items"]] == ["R3", "R2"]

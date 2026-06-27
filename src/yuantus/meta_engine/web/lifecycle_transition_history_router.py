@@ -97,6 +97,14 @@ def get_forensic_transition_history(
             "Allowed: success|denied|blocked|aborted|failed. Omit for all outcomes."
         ),
     ),
+    reason_code: Optional[str] = Query(
+        None,
+        description=(
+            "Filter to a single failure reason_code (the bounded discriminator stored in "
+            "properties.reason_code), e.g. ?reason_code=permission_denied. AND-combines with "
+            "?outcome; an unknown code matches nothing. Omit for all reasons."
+        ),
+    ),
     _admin: Identity = Depends(require_superuser),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -126,6 +134,6 @@ def get_forensic_transition_history(
             )
         outcomes = outcome
     rows = LifecycleService(db).get_transition_history(
-        item_id, limit=limit, success_only=False, outcomes=outcomes
+        item_id, limit=limit, success_only=False, outcomes=outcomes, reason_code=reason_code
     )
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}
