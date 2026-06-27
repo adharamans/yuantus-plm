@@ -432,6 +432,7 @@ class LifecycleService:
         limit: Optional[int] = None,
         success_only: bool = False,
         outcomes: Optional[Sequence[str]] = None,
+        reason_codes: Optional[Sequence[str]] = None,
     ):
         """Return an item's lifecycle transition-history rows, most-recent first.
 
@@ -454,6 +455,18 @@ class LifecycleService:
             # for failed-attempt triage). AND-combines with success_only, though no route passes
             # both. SQL-level IN keeps it portable (sqlite/postgres) and respects limit ordering.
             query = query.filter(LifecycleTransitionHistory.outcome.in_(tuple(outcomes)))
+        if reason_codes:
+            # forensic-route filter: restrict to rows whose properties JSON ``reason_code`` is in
+            # the requested set (e.g. ?reason_code=permission_denied for cause-of-denial triage).
+            # ANY string is accepted — unknown codes simply match nothing (no whitelist, no 400),
+            # so the surface stays robust as the reason-code vocabulary grows. ``.as_string()`` maps
+            # to a portable JSON text-extract (JSON_EXTRACT on sqlite, ->> on postgres); a WHERE
+            # clause so it composes with order_by + limit below.
+            query = query.filter(
+                LifecycleTransitionHistory.properties["reason_code"].as_string().in_(
+                    tuple(reason_codes)
+                )
+            )
         query = query.order_by(
             LifecycleTransitionHistory.created_at.desc(),
             LifecycleTransitionHistory.id.desc(),

@@ -285,3 +285,67 @@ def test_forensic_outcome_filter_composes_with_limit(client, db):
     body = client.get(_FORENSIC.format("GONE") + "?outcome=denied&limit=2").json()
     assert body["count"] == 2
     assert all(r["outcome"] == "denied" for r in body["items"])
+
+
+# -- forensic ?reason_code filter ---------------------------------------------
+# reason_code lives in LifecycleTransitionHistory.properties JSON. Design (owner B): accept ANY
+# string; unknown -> empty (no whitelist, no 400) so the surface is robust to vocabulary growth.
+def test_forensic_filters_by_single_reason_code(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied",
+          properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="aborted",
+          properties={"reason_code": "condition_failed"})
+    body = client.get(_FORENSIC.format("GONE") + "?reason_code=permission_denied").json()
+    assert body["count"] == 1
+    assert [r["properties"]["reason_code"] for r in body["items"]] == ["permission_denied"]
+
+
+def test_forensic_filters_by_multiple_reason_codes(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied",
+          properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="aborted",
+          properties={"reason_code": "condition_failed"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 3), outcome="blocked",
+          properties={"reason_code": "assembly_release_blocked"})
+    # repeatable query param: ?reason_code=A&reason_code=B -> the union.
+    body = client.get(
+        _FORENSIC.format("GONE")
+        + "?reason_code=permission_denied&reason_code=condition_failed"
+    ).json()
+    assert body["count"] == 2
+    assert {r["properties"]["reason_code"] for r in body["items"]} == {
+        "permission_denied", "condition_failed"
+    }
+
+
+def test_forensic_no_reason_code_filter_returns_all(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied",
+          properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="success")
+    body = client.get(_FORENSIC.format("GONE")).json()
+    assert body["count"] == 2  # unfiltered forensic read still returns every row
+
+
+def test_forensic_reason_code_filter_composes_with_limit(client, db):
+    for d in (1, 2, 3):
+        _hist(db, item_id="GONE", created_at=datetime(2026, 6, d), outcome="denied",
+              properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 4), outcome="success",
+          properties={"reason_code": "other"})
+    # filter (permission_denied) AND limit (2) compose; most-recent-2 matching rows returned.
+    body = client.get(
+        _FORENSIC.format("GONE") + "?reason_code=permission_denied&limit=2"
+    ).json()
+    assert body["count"] == 2
+    assert all(r["properties"]["reason_code"] == "permission_denied" for r in body["items"])
+    assert [r["created_at"] for r in body["items"]] == [
+        datetime(2026, 6, 3).isoformat(), datetime(2026, 6, 2).isoformat()
+    ]
+
+
+def test_forensic_unknown_reason_code_is_empty_not_400(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied",
+          properties={"reason_code": "permission_denied"})
+    r = client.get(_FORENSIC.format("GONE") + "?reason_code=never_minted_code")
+    assert r.status_code == 200  # ANY string accepted; unknown -> empty (no whitelist, no 400)
+    assert r.json()["count"] == 0
