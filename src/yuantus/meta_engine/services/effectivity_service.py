@@ -237,12 +237,22 @@ class EffectivityService:
         return query.all()
 
     def delete_effectivity(self, effectivity_id: str) -> bool:
-        """Delete an effectivity record."""
+        """Delete an effectivity record.
+
+        Create-time protection is preserved on delete (mirrors create/update): the
+        item/version target must be latest-released and not suspended — otherwise
+        ``NotLatestReleasedError`` / ``SuspendedStateError`` is raised. Returns False
+        if the effectivity does not exist (caller maps that to 404).
+        """
         effectivity = self.get_effectivity(effectivity_id)
-        if effectivity:
-            self.session.delete(effectivity)
-            return True
-        return False
+        if not effectivity:
+            return False
+        for target_id in (effectivity.item_id, effectivity.version_id):
+            if target_id:
+                assert_latest_released(self.session, target_id, context="effectivity")
+                assert_not_suspended(self.session, target_id, context="effectivity")
+        self.session.delete(effectivity)
+        return True
 
     # ========== Effectivity Checking ==========
 

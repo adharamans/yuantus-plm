@@ -213,3 +213,51 @@ def test_patch_target_suspended_is_409(client, db, monkeypatch):
         json={"end_date": (datetime.utcnow() + timedelta(days=20)).isoformat()},
     )
     assert r.status_code == 409
+
+
+# --- DELETE guards (create-time protection mirrored onto delete) -------------
+
+
+def test_delete_happy_path_is_ok(client, db):
+    # guards are no-op'd by the autouse fixture -> delete succeeds.
+    e = _eff(db, start_date=datetime.utcnow(), end_date=datetime.utcnow() + timedelta(days=10))
+    r = client.delete(_URL.format(e.id))
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    # gone afterwards -> a second delete is 404
+    assert client.delete(_URL.format(e.id)).status_code == 404
+
+
+def test_delete_unknown_effectivity_is_404(client):
+    assert client.delete(_URL.format("does-not-exist")).status_code == 404
+
+
+def test_delete_target_not_latest_released_is_409(client, db, monkeypatch):
+    # create-time protection is mirrored on delete: a non-latest-released target -> 409.
+    from yuantus.meta_engine.services.latest_released_guard import NotLatestReleasedError
+
+    def _raise(*a, **k):
+        raise NotLatestReleasedError(reason="not latest-released", target_id="it-1")
+
+    monkeypatch.setattr(
+        "yuantus.meta_engine.services.effectivity_service.assert_latest_released", _raise
+    )
+    e = _eff(db, start_date=datetime.utcnow(), end_date=datetime.utcnow() + timedelta(days=10))
+    r = client.delete(_URL.format(e.id))
+    assert r.status_code == 409
+    assert r.json()["detail"]["target_id"] == "it-1"
+
+
+def test_delete_target_suspended_is_409(client, db, monkeypatch):
+    # create-time protection is mirrored on delete: a suspended target -> 409.
+    from yuantus.meta_engine.services.suspended_guard import SuspendedStateError
+
+    def _raise(*a, **k):
+        raise SuspendedStateError(reason="suspended", target_id="it-1")
+
+    monkeypatch.setattr(
+        "yuantus.meta_engine.services.effectivity_service.assert_not_suspended", _raise
+    )
+    e = _eff(db, start_date=datetime.utcnow(), end_date=datetime.utcnow() + timedelta(days=10))
+    r = client.delete(_URL.format(e.id))
+    assert r.status_code == 409

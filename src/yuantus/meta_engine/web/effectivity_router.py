@@ -207,7 +207,14 @@ def update_effectivity_dates(
 @effectivity_router.delete("/{effectivity_id}", response_model=Dict[str, Any])
 def delete_effectivity(effectivity_id: str, db: Session = Depends(get_db)):
     service = EffectivityService(db)
-    ok = service.delete_effectivity(effectivity_id)
+    try:
+        ok = service.delete_effectivity(effectivity_id)
+    except NotLatestReleasedError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
+    except SuspendedStateError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     if not ok:
         raise HTTPException(status_code=404, detail="Effectivity not found")
     db.commit()
