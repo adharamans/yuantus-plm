@@ -18,7 +18,7 @@
 **Forks / gaps:** (A) query/filter/export — no `?outcome`/`?reason_code`/`?actor`/`?date-range` filter, only `?limit` (no offset/cursor), no export, no aggregates. (B) all-attempts ops surface — no cross-item search, no dashboard (top reasons / most-failed items/actors), no drill-down.
 
 **Recommended first task — L2-1 (Fork A seed):** add `?outcome` + `?reason_code` + `?limit` filters to the **forensic** route (service `get_transition_history` already gates `success_only`; generalise to a filter set; keep superuser gate). Additive, low-risk, unblocks ops investigation without a new surface. Verify: extend `test_lifecycle_transition_history_router.py` (already in CI).
-> ✅ **MERGED — #879 (`b529b568`).** Shipped the **`?outcome`** filter only (repeatable, SQL-level `outcome.in_()`, invalid→400, composes with `limit`); **no new route** (untouched app-route-count contract), no app.py change. `?reason_code` deferred (it lives in `properties` JSON → cross-DB filter + limit-ordering complexity; do as a follow-up). Local: router test **19 passed** (14 existing + 5 new) + service test 7 passed.
+> ✅ **MERGED — #879.** Shipped the **`?outcome`** filter only (repeatable, SQL-level `outcome.in_()`, invalid→400, composes with `limit`); **no new route** (untouched app-route-count contract), no app.py change. `?reason_code` deferred (it lives in `properties` JSON → cross-DB filter + limit-ordering complexity; do as a follow-up). Local: router test **19 passed** (14 existing + 5 new) + service test 7 passed.
 **Audit relation (don't conflate):** `AuditLog` (HTTP request trace) and `ApprovalRequestEvent` (approval domain) are orthogonal to transition history — three distinct trails; do not merge.
 
 ---
