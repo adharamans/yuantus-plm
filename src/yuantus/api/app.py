@@ -29,6 +29,7 @@ from yuantus.meta_engine.web.approval_automation_capabilities_router import appr
 from yuantus.meta_engine.web.approval_automation_eco_router import approval_automation_eco_router
 from yuantus.meta_engine.web.approval_automation_router import approval_automation_router
 from yuantus.meta_engine.web.feature_router import feature_router
+from yuantus.meta_engine.web.license_status_router import license_status_router
 from yuantus.meta_engine.web.bom_multitable_router import bom_multitable_router
 from yuantus.meta_engine.web.bom_tree_router import bom_tree_router
 from yuantus.meta_engine.web.bom_children_router import bom_children_router
@@ -446,6 +447,7 @@ def create_app() -> FastAPI:
     # Unconditional -- base PLM also surfaces the upgrade affordance; entitlement
     # itself is decided only by EntitlementService.is_entitled.
     app.include_router(feature_router, prefix="/api/v1")
+    app.include_router(license_status_router, prefix="/api/v1")
 
     # PLM-COLLAB-P2-B: approval-automation product entry (template catalog + draft
     # provisioning). Unconditional -- the GET is the upgrade-affordance surface; the

@@ -51,7 +51,9 @@ from yuantus.api.app import create_app
 #   GET /api/v1/items/{item_id}/transition-history) -- per-item ACL since #831 (was authenticated read).
 # 721 = 720 + 1 lifecycle transition-history forensic admin route
 #   (GET /api/v1/transition-history/forensic/{item_id}) -- superuser-gated, no item-existence gate.
-EXPECTED_TOTAL_ROUTES = 721
+# 722 = 721 + 1 L4-1 admin license-status read route
+#   (GET /api/v1/admin/license-status) -- superuser-gated CLI->HTTP status surface.
+EXPECTED_TOTAL_ROUTES = 722
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

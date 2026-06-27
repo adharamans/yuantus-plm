@@ -242,8 +242,8 @@ def test_phase4_route_count_pin_still_lives_at_706():
     # -> 709 (L1 visual-diff) -> 712 (ECM-P1C publication-outbox ops routes)
     # -> 713 (Consumption-R2 MES ingestion route).
     text = _PHASE4_TEST.read_text()
-    assert "len(app.routes) == 721" in text, (
-        "phase-4 route-count pin (721) must still exist as the "
+    assert "len(app.routes) == 722" in text, (
+        "phase-4 route-count pin (722) must still exist as the "
         "authoritative assertion."
     )
 
