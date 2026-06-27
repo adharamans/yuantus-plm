@@ -1231,6 +1231,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/aml-metadata-federation-design-verification-20260411.md: `docs/development/aml-metadata-federation-design-verification-20260411.md`
 - docs/development/aml-metadata-pact-design-and-verification-20260411.md: `docs/development/aml-metadata-pact-design-and-verification-20260411.md`
 - docs/development/aml-metadata-session-handoff-20260411.md: `docs/development/aml-metadata-session-handoff-20260411.md`
+- docs/development/backlog-lines-2-3-4-scoping-taskbook-20260627.md: `docs/development/backlog-lines-2-3-4-scoping-taskbook-20260627.md`
 - docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md: `docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md`
 - docs/development/lifecycle-transition-history-taskbook-20260619.md: `docs/development/lifecycle-transition-history-taskbook-20260619.md`
 - docs/development/plm-collab-line-dev-verification-20260625.md: `docs/development/plm-collab-line-dev-verification-20260625.md`
