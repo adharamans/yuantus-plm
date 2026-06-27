@@ -348,7 +348,7 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
     from yuantus.api.app import create_app
 
     app = create_app()
-    assert len(app.routes) == 724
+    assert len(app.routes) == 725
 
 
 # ==========================================================================

@@ -57,7 +57,9 @@ from yuantus.api.app import create_app
 #   (PATCH /api/v1/effectivities/{id}) -- Date-window edit with elapsed-window guard.
 # 724 = 723 + 1 L4 Fork B seat-cap change-history audit read
 #   (GET /api/v1/admin/license-cap-history) -- superuser-gated, no existence leak.
-EXPECTED_TOTAL_ROUTES = 724
+# 725 = 724 + 1 L4 Fork C license revoke
+#   (POST /api/v1/admin/licenses/{license_key}/revoke) -- append-only, no cap clear.
+EXPECTED_TOTAL_ROUTES = 725
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
