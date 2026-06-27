@@ -445,6 +445,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_eco_router_decomposition_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_router_exception_chaining_closeout.py \
             src/yuantus/meta_engine/tests/test_eco_stage_router_contracts.py \
+            src/yuantus/meta_engine/tests/test_effectivity.py \
             src/yuantus/meta_engine/tests/test_entitlement_service.py \
             src/yuantus/meta_engine/tests/test_erp_http_adapter.py \
             src/yuantus/meta_engine/tests/test_erp_publication_outbox_service.py \

@@ -62,6 +62,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_date_effectivity_obsolete_service.py",
     "src/yuantus/meta_engine/tests/test_date_obsolete_wiring.py",
     "src/yuantus/meta_engine/tests/test_date_obsolete_worker_cli.py",
+    "src/yuantus/meta_engine/tests/test_effectivity.py",
     "src/yuantus/meta_engine/tests/test_find_effective_version.py",
     "src/yuantus/meta_engine/tests/test_parallel_tasks_services.py",
     "src/yuantus/meta_engine/tests/test_pdm_relationship_traversal.py",
