@@ -14,7 +14,7 @@ Read-only: does not write history and does not touch all-attempts.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -29,6 +29,10 @@ from yuantus.meta_engine.schemas.aml import AMLAction
 from yuantus.meta_engine.services.meta_permission_service import MetaPermissionService
 
 lifecycle_transition_history_router = APIRouter(tags=["Lifecycle"])
+
+# The full LifecycleTransitionHistory.outcome vocabulary (see lifecycle/models.py): one success
+# value + the four failed-attempt discriminators. Used to validate the forensic ?outcome filter.
+_VALID_OUTCOMES = ("success", "denied", "blocked", "aborted", "failed")
 
 
 def _serialize(row: LifecycleTransitionHistory) -> Dict[str, Any]:
@@ -85,6 +89,14 @@ def get_item_transition_history(
 def get_forensic_transition_history(
     item_id: str,
     limit: Optional[int] = Query(None, ge=1, le=500),
+    outcome: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter to one or more outcomes (repeatable), e.g. "
+            "?outcome=denied&outcome=blocked for failed-attempt triage. "
+            "Allowed: success|denied|blocked|aborted|failed. Omit for all outcomes."
+        ),
+    ),
     _admin: Identity = Depends(require_superuser),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -103,5 +115,17 @@ def get_forensic_transition_history(
     including failed/denied/blocked/aborted attempts — those are forensic-tier-only; the item-scoped
     route filters to ``success_only``.
     """
-    rows = LifecycleService(db).get_transition_history(item_id, limit=limit, success_only=False)
+    outcomes: Optional[List[str]] = None
+    if outcome:
+        invalid = sorted({o for o in outcome if o not in _VALID_OUTCOMES})
+        if invalid:
+            raise HTTPException(
+                status_code=400,
+                detail="invalid outcome(s): %s; allowed: %s"
+                % (", ".join(invalid), ", ".join(_VALID_OUTCOMES)),
+            )
+        outcomes = outcome
+    rows = LifecycleService(db).get_transition_history(
+        item_id, limit=limit, success_only=False, outcomes=outcomes
+    )
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}

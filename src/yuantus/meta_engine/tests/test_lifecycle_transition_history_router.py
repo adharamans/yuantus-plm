@@ -101,10 +101,10 @@ def _item(db, iid):
     db.commit()
 
 
-def _hist(db, *, item_id, created_at, to_state_name="Released", **kw):
+def _hist(db, *, item_id, created_at, to_state_name="Released", outcome="success", **kw):
     row = LifecycleTransitionHistory(
         id=str(uuid.uuid4()), item_id=item_id, created_at=created_at,
-        to_state_name=to_state_name, outcome="success", **kw,
+        to_state_name=to_state_name, outcome=outcome, **kw,
     )
     db.add(row)
     db.commit()
@@ -242,3 +242,46 @@ def test_forensic_route_is_admin_gated():
     deps = [d.call for d in _forensic_route().dependant.dependencies]
     assert require_superuser in deps
     assert get_current_user not in deps
+
+
+# -- forensic ?outcome filter (L2-1) ------------------------------------------
+def test_forensic_filters_by_single_outcome(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="success")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="denied")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 3), outcome="blocked")
+    body = client.get(_FORENSIC.format("GONE") + "?outcome=denied").json()
+    assert body["count"] == 1
+    assert [r["outcome"] for r in body["items"]] == ["denied"]
+
+
+def test_forensic_filters_by_multiple_outcomes(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="success")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="denied")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 3), outcome="blocked")
+    # repeatable query param: ?outcome=denied&outcome=blocked -> the union, success excluded.
+    body = client.get(_FORENSIC.format("GONE") + "?outcome=denied&outcome=blocked").json()
+    assert body["count"] == 2
+    assert {r["outcome"] for r in body["items"]} == {"denied", "blocked"}
+
+
+def test_forensic_no_outcome_filter_returns_all_outcomes(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="success")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="denied")
+    body = client.get(_FORENSIC.format("GONE")).json()
+    assert body["count"] == 2  # unfiltered forensic read still returns every outcome
+
+
+def test_forensic_invalid_outcome_is_400(client, db):
+    r = client.get(_FORENSIC.format("GONE") + "?outcome=bogus")
+    assert r.status_code == 400
+    assert "invalid outcome" in r.json()["detail"]
+
+
+def test_forensic_outcome_filter_composes_with_limit(client, db):
+    for d in (1, 2, 3):
+        _hist(db, item_id="GONE", created_at=datetime(2026, 6, d), outcome="denied")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 4), outcome="success")
+    # filter (denied) AND limit (2) compose; success row excluded, most-recent-2 denied returned.
+    body = client.get(_FORENSIC.format("GONE") + "?outcome=denied&limit=2").json()
+    assert body["count"] == 2
+    assert all(r["outcome"] == "denied" for r in body["items"])

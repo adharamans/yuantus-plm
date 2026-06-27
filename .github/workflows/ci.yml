@@ -156,6 +156,10 @@ jobs:
                 run_plugin_tests="true"
                 reason_plugin_tests="${reason_plugin_tests:-matched pack-and-go plugin source: ${f}}"
                 ;;
+              src/yuantus/meta_engine/lifecycle/service.py|src/yuantus/meta_engine/lifecycle/models.py|src/yuantus/meta_engine/web/lifecycle_transition_history_router.py)
+                run_contracts="true"
+                reason_contracts="${reason_contracts:-matched lifecycle transition-history surface: ${f}}"
+                ;;
               src/*)
                 # Ignore test-only changes for the heavier CI jobs.
                 if [[ "${f}" == *"/tests/"* ]]; then

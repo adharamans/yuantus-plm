@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Sequence
 from .models import (
     LifecycleMap,
     LifecycleState,
@@ -426,7 +426,12 @@ class LifecycleService:
         )
 
     def get_transition_history(
-        self, item_id: str, *, limit: Optional[int] = None, success_only: bool = False
+        self,
+        item_id: str,
+        *,
+        limit: Optional[int] = None,
+        success_only: bool = False,
+        outcomes: Optional[Sequence[str]] = None,
     ):
         """Return an item's lifecycle transition-history rows, most-recent first.
 
@@ -444,6 +449,11 @@ class LifecycleService:
         )
         if success_only:
             query = query.filter(LifecycleTransitionHistory.outcome == "success")
+        if outcomes:
+            # forensic-route filter: restrict to the requested outcome set (e.g. denied/blocked
+            # for failed-attempt triage). AND-combines with success_only, though no route passes
+            # both. SQL-level IN keeps it portable (sqlite/postgres) and respects limit ordering.
+            query = query.filter(LifecycleTransitionHistory.outcome.in_(tuple(outcomes)))
         query = query.order_by(
             LifecycleTransitionHistory.created_at.desc(),
             LifecycleTransitionHistory.id.desc(),
