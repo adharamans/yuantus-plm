@@ -14,9 +14,11 @@ same line:
 1. A write is a **separate, write-scoped authorization** — it is **never** the
    read-only embed token. The shipped embed token is `typ:"embed"` with a read
    `feature_key`; it bootstraps a read handshake and must not escalate to a write.
-   A write requires its **own** freshly-minted, **write-scoped, single-use,
-   audited** token. Reusing the read handshake for a write silently breaches the
-   invariant — this is the one place a blurred sentence becomes a real hole.
+   A write requires its **own** freshly-minted, **write-scoped, audited** token,
+   with **single-use enforced provider-side** — a *new* guard (see Fork 2); the
+   shipped single-use is consumer-side and read-only, so it does not cover writes.
+   Reusing the read handshake for a write silently breaches the invariant — the one
+   place a blurred sentence becomes a real hole.
 2. **"Write-back" in PLM means entering governed change control, not mutating a
    row.** The embedded surface stays the P3-A read-only projection by default; a
    write is an explicit, separately-gated, governed PLM operation.
@@ -35,7 +37,7 @@ control, not a free-form row edit.
 |---|---|---|---|---|---|
 | **ECO apply** (prod, primary) | `POST /api/v1/eco/{id}/apply` | `check_permission(execute/apply)` + ECO must be **APPROVED** + diagnostics pre-check + activity gate + version-lock + rebase-conflict | full commit/rollback | `EcoUpdatedEvent` + `AuditLogMiddleware` | **none** |
 | **Workflow actions** (prod) | `POST /api/v1/workflow-actions/execute` | auth; permission **deferred to rule `match_predicates`**; per-rule `fail_strategy` (block/warn) | full rollback | middleware + runs table | **none** |
-| **Helpdesk write-back** (prod; closest external-write precedent) | `POST /api/v1/breakages/{id}/helpdesk-sync/ticket-update` | auth + **lookup-as-boundary** (404 if missing); status allowlist | full rollback | **explicit `AuditLog` row + `event_id` idempotency** | **none** |
+| **Helpdesk write-back** (prod; a *partial* external-write precedent — webhook-specific) | `POST /api/v1/breakages/{id}/helpdesk-sync/ticket-update` | auth + **lookup-as-boundary** (404 if missing); status allowlist | full rollback | `AuditLog` row keyed by `event_id` (idempotency-capable *in its webhook context*, not a general write-back guarantee) | **none** |
 | Approval-automation ECO notify | `POST /api/v1/approvals/automation/eco/{id}/actions` | `require_admin_user` → `is_entitled` → allowlist | rollback (noop) | explicit `AuditLog` row | **none** |
 
 Two facts that constrain everything below:
@@ -48,11 +50,13 @@ Two facts that constrain everything below:
 
 **🚩 The bypass the design must forbid.** Direct BOM routes exist —
 `POST/PUT/DELETE /api/v1/bom/tree/{parent}/children[/{child}]` (gated by "Part BOM"
-`AMLAction.add/update/delete`) — but they have **no lifecycle/state guard**: a
-*Released* part's BOM line is editable through them, and they don't rollback cleanly
-on a permission error. **MetaSheet write-back MUST NOT use these.** The whole value
-of the chosen seam is that it **enforces the change-control / lifecycle guard the
-direct routes lack.**
+`AMLAction.add/update/delete`). They are permission-gated but are **not the governed
+change-control seam**; whether (and how strictly) they enforce a lifecycle/state
+guard — e.g. on a Released part's BOM — must be **confirmed before relying on it
+either way** (do not assume they do; do not assume they don't). **Regardless,
+MetaSheet write-back MUST NOT route through them** — the value of the chosen seam is
+that it **provably enforces** the change-control / lifecycle guard a governed write
+requires, rather than depending on whatever the direct routes happen to do.
 
 ## 3. Decision surface — forks and their *deciders*
 
@@ -63,9 +67,10 @@ direct routes lack.**
   version-lock, transactional apply, domain-event audit. Heavy, but every BOM change
   is a versioned, approved engineering change.
 - **(B) A narrower lifecycle-guarded governed edit endpoint.** A new, purpose-built
-  governed write that re-uses the permission + audit primitives and adds the
-  **lifecycle guard the direct routes lack** (reject edits to a Released part's BOM,
-  etc.), without the full ECO ceremony.
+  governed write that re-uses the permission + audit primitives and **explicitly
+  enforces a lifecycle/state guard in the seam itself** (e.g. reject edits to a
+  Released part's BOM), without the full ECO ceremony — the guard being explicit and
+  verified, not assumed from the direct routes.
 
 **Decider:** the **governance level BOM changes require** + the part's lifecycle
 state. If BOM changes must be versioned/approved engineering changes → A. If a
@@ -75,10 +80,15 @@ does). Do not pre-decide; this is the gate's call.
 
 ### Fork 2 — The write authorization (write ≠ read token)
 
-A write rides the **already-shipped single-use model** (metasheet2 #2370,
-`consumeEmbedJti`), but with a **write-scoped** token, not the read embed token. The
-chain: `auth → is_entitled(<write feature_key>) → check_permission("Part BOM",
-update) → lifecycle/state guard → governed apply (Fork 1) → audit + idempotency`.
+A write uses a **write-scoped** token, not the read embed token, and **reuses the
+single-use *pattern*** — but not a shipped *mechanism*. The shipped single-use
+(`consumeEmbedJti`, metasheet2 #2370) lives **consumer-side**, guarding the read
+`/context` call; a write goes to the **Yuantus provider**, which has **no
+consumed-jti / replay guard today**. So a **provider-side replay guard is a new
+build requirement** (slice work), not something inherited. The chain:
+`auth → is_entitled(<write feature_key>) → check_permission("Part BOM", update) →
+lifecycle/state guard → governed apply (Fork 1) → audit + **provider-side
+single-use/idempotency (to build)**`.
 The served-tenant cross-check (consumer `claims.tenant_id == adapter served tenant`)
 is **inherited** from the read path (#2356). **Decider:** the write `feature_key` and
 permission mapping (likely "Part BOM" `AMLAction.update`), confirmed by the owner.
@@ -104,23 +114,25 @@ No seam has a pact today; a cross-repo write demands a **consumer-first pact**
 | Read token cannot write | A write requires a distinct **write-scoped** token; a `typ:"embed"` read token presented to the write endpoint → rejected (no capability escalation). |
 | Unentitled → no write | `is_entitled(<write feature_key>)` gates before any mutation; unentitled → 403, nothing mutated. |
 | Unpermitted → no write | `check_permission("Part BOM", update)` before mutation. |
-| **Wrong lifecycle state → rejected** | The chosen seam enforces the change-control/lifecycle guard the direct BOM routes lack (e.g. Released part → rejected). |
+| **Wrong lifecycle state → rejected** | The chosen seam **explicitly enforces** a change-control/lifecycle guard (e.g. Released part → rejected) — verified in the seam, not assumed from the direct routes. |
 | Cross-tenant → rejected | served-tenant cross-check inherited from the read path (#2356); token tenant ≠ served tenant → 403, pre-mutation. |
-| Single-use / replay → unusable | write token consumed (`consumeEmbedJti`-style, #2370) before apply; replay rejected. |
-| Audited + idempotent | explicit `AuditLog` row + an `event_id`-style idempotency key (the helpdesk precedent) so a retried relay/re-mint does not double-apply. |
+| Single-use / replay → unusable | a **provider-side** consumed-jti/replay guard (**NEW** — `consumeEmbedJti` #2370 is consumer-side and read-only, so it does not cover writes) consumes the write token before apply; replay rejected. |
+| Audited + idempotent | an `AuditLog` row + an `event_id`-style idempotency key (the helpdesk *shape*, to be implemented provider-side) so a retried relay/re-mint does not double-apply. |
 | Failed write → full rollback | transactional apply (ECO apply / the new endpoint); a failed apply leaves **no partial state**. |
 | No direct-BOM bypass | the embed write path routes only through the Fork-1 governed seam; the direct `bom/tree` routes are never exposed to it. |
 | Read embed stays read-only by default | write is an explicit, separately-gated action; the default embed is unchanged. |
 
 ## 6. What this resolves for Phase 6 (the useful by-product)
 
-Because a write-back is a **per-action governed call** that rides the existing
-single-use model, **write-back does not by itself require a continuous session.** It
-is therefore **removed as a Phase 6 trigger** — leaving only *bridge activation* and
-*continuous-in-iframe UX* as the remaining triggers for the SSO/identity-session
-spine (#880). This is narrow and deliberate: it does **not** say Phase 6 is
-unnecessary; it says write-back no longer forces it, reusing what's already shipped
-instead of inventing session infra.
+Because a write-back is a **per-action governed call** — each write independently
+authorized (entitlement + permission + lifecycle guard + its own write-scoped token,
+with a provider-side single-use guard) — **write-back does not by itself require a
+continuous session.** It is therefore **removed as a Phase 6 trigger** — leaving only
+*bridge activation* and *continuous-in-iframe UX* as the remaining triggers for the
+SSO/identity-session spine (#880). This is narrow and deliberate: it does **not** say
+Phase 6 is unnecessary; it says write-back no longer forces it. (It reuses the
+single-use *pattern*, not a shipped write mechanism — the provider-side replay guard
+is itself new build, per Fork 2.)
 
 ## 7. Phasing (design → review gate → build; build NOT authorized here)
 
