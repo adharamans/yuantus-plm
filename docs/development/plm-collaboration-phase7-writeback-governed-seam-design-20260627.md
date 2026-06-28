@@ -37,7 +37,7 @@ control, not a free-form row edit.
 |---|---|---|---|---|---|
 | **ECO apply** (prod, primary) | `POST /api/v1/eco/{id}/apply` | `check_permission(execute/apply)` + ECO must be **APPROVED** + diagnostics pre-check + activity gate + version-lock + rebase-conflict | full commit/rollback | `EcoUpdatedEvent` + `AuditLogMiddleware` | **none** |
 | **Workflow actions** (prod) | `POST /api/v1/workflow-actions/execute` | auth; permission **deferred to rule `match_predicates`**; per-rule `fail_strategy` (block/warn) | full rollback | middleware + runs table | **none** |
-| **Helpdesk write-back** (prod; a *partial* external-write precedent — webhook-specific) | `POST /api/v1/breakages/{id}/helpdesk-sync/ticket-update` | auth + **lookup-as-boundary** (404 if missing); status allowlist | full rollback | `AuditLog` row keyed by `event_id` (idempotency-capable *in its webhook context*, not a general write-back guarantee) | **none** |
+| **Helpdesk write-back** (prod; a *partial* external-write precedent — webhook-specific) | `POST /api/v1/breakages/{id}/helpdesk-sync/ticket-update` | auth + **lookup-as-boundary** (404 if missing); status allowlist | full rollback | generic request `AuditLog` (middleware) + `event_id` idempotency **in the job payload** (`provider_event_ids`) — **not** an event_id-keyed domain audit | **none** |
 | Approval-automation ECO notify | `POST /api/v1/approvals/automation/eco/{id}/actions` | `require_admin_user` → `is_entitled` → allowlist | rollback (noop) | explicit `AuditLog` row | **none** |
 
 Two facts that constrain everything below:
@@ -117,7 +117,7 @@ No seam has a pact today; a cross-repo write demands a **consumer-first pact**
 | **Wrong lifecycle state → rejected** | The chosen seam **explicitly enforces** a change-control/lifecycle guard (e.g. Released part → rejected) — verified in the seam, not assumed from the direct routes. |
 | Cross-tenant → rejected | served-tenant cross-check inherited from the read path (#2356); token tenant ≠ served tenant → 403, pre-mutation. |
 | Single-use / replay → unusable | a **provider-side** consumed-jti/replay guard (**NEW** — `consumeEmbedJti` #2370 is consumer-side and read-only, so it does not cover writes) consumes the write token before apply; replay rejected. |
-| Audited + idempotent | an `AuditLog` row + an `event_id`-style idempotency key (the helpdesk *shape*, to be implemented provider-side) so a retried relay/re-mint does not double-apply. |
+| Audited + idempotent | a **write-back domain `AuditLog`** + an `event_id`-style idempotency key (job-payload-style, as helpdesk does — both **new provider-side build**; the generic middleware audit alone is not a domain write-back record) so a retried relay/re-mint does not double-apply. |
 | Failed write → full rollback | transactional apply (ECO apply / the new endpoint); a failed apply leaves **no partial state**. |
 | No direct-BOM bypass | the embed write path routes only through the Fork-1 governed seam; the direct `bom/tree` routes are never exposed to it. |
 | Read embed stays read-only by default | write is an explicit, separately-gated action; the default embed is unchanged. |
@@ -153,7 +153,7 @@ is itself new build, per Fork 2.)
 
 ## References (grounding)
 
-- **Governed seams (Yuantus `origin/main`):** ECO apply `eco_impact_apply_router.py` / `eco_service.py:action_apply`; workflow actions `parallel_tasks_workflow_actions_router.py`; helpdesk write-back `parallel_tasks_router.py` (+ `AuditLog` idempotency); audit `api/middleware/audit.py`; entitlement `entitlement_service.py`; write target `bom_multitable_projection_service.py` ("Part BOM" Items); direct-BOM bypass `bom_tree_router.py`
+- **Governed seams (Yuantus `origin/main`):** ECO apply `eco_impact_apply_router.py` / `eco_service.py:action_apply`; workflow actions `parallel_tasks_workflow_actions_router.py`; helpdesk write-back `parallel_tasks_router.py` (`event_id` idempotency in job payload `provider_event_ids` + generic middleware audit); audit `api/middleware/audit.py`; entitlement `entitlement_service.py`; write target `bom_multitable_projection_service.py` ("Part BOM" Items); direct-BOM bypass `bom_tree_router.py`
 - **Shipped read/handshake (do not redo):** offline verify + served-tenant + single-use — metasheet2 #2341/#2347/#2356/#2370; provider mint #733/#780
 - **Pact boundary:** `contracts/pacts/metasheet2-yuantus-plm.json`, `test_pact_provider_yuantus_plm.py`
 - **Companion:** Phase 6 SSO / identity-session spine design (#880); P3-D0 embed-spine scope (#730); backlog lines 2/3/4 roadmap (#882)
