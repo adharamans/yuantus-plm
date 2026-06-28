@@ -32,37 +32,33 @@ Every row below was checked against the live PR/branch before writing.
 |---|---|---|
 | **Phase 6 SSO build** | design baseline merged (#880); build not started | **Owner-gated** — needs the §7 fork decisions (continuous-session-needed? A vs B; IdP; lifetime). I cannot make these. |
 | **Phase 7 write-back build** | design open (#884); build not started | **Owner-gated** — needs Fork 1 (seam) + Fork 2 (write feature_key) + pact-first sequencing. My own design says slice-1 is the consumer pact. |
-| **L3-1 effectivity-date PATCH** | **MERGED #885** | done by the parallel `claude/effectivity-date-patch` session (roadmap scope-(b) elapsed-window guard) |
-| **L4 seats/licensing** (Fork B cap-audit UI / Fork C revoke) | L4-1 read endpoint merged (#881) | **Off-limits** — owner instruction "继续不碰 L4 license/admin，除非明确授权"; also `zensgit`'s line. |
-| **L2 `?reason_code` filter** | deferred follow-up (L2-1 #879 shipped `?outcome` only) | **Available, not grabbed** — no open PR, but it is on the L2 line and this session was not opted in (per-phase opt-in). Yours to assign if you want it here. |
+| **L2 lifecycle filters** | **DONE (parallel)** — #879 (`?outcome`) + #887 (`?reason_code`) | the parallel L2 session shipped `?reason_code`; this session built a duplicate (#890), **closed in favor of #887**. Nothing remaining. |
+| **L3 effectivity ops** | **DONE (parallel)** — #878 (CI) + #885 (date PATCH) + #888 (DELETE guards) | completed by the parallel `claude/*` sessions; nothing remaining from me. |
+| **L4 seats/licensing** | **DONE (parallel)** — #881 (status read) + #889 (Fork B cap-change history) + #892 (Fork C revoke) | completed by the parallel `claude/*` sessions; was owner-off-limits for this session. |
 | **VemCAD desktop/router, G11** | taskbook/diagnosis in-flight | **Parallel-owned** — VemCAD #124 / #123. |
 | Forward roadmap (lines 2/3/4 next slices) | authoritative | **#882** — owned; referenced, not duplicated. |
 
 ## 3. Why "完成所有的开发" is at its honest terminal state
 
-**"可并行开发" is already happening — across the owner's sessions, not within this
-one.** The L-lines are being completed *systematically* by parallel `claude/*`
-sessions (L2-1 #879, L3-0 #878, L3-1 #885 just merged, L4-1 #881, roadmap #882);
-this session's lane was the PLM×MetaSheet **design** line (Phase 6 #880 + Phase 7
-#884), which is delivered. So every remaining item is either **being completed by a
-parallel session** (the L-lines; VemCAD #123/#124), **owner-gated** (Phase 6/7
-builds need your fork decisions — the review gates teed up), or **explicitly
-off-limits** (L4). Even L2 `?reason_code` is the parallel session's *own planned
-next L2 step* (per #882), so taking it here would cut in front of their systematic
-completion and collide. Building any remaining item would therefore collide with a
-live session, pre-empt an owner decision, or break the L4 instruction — so the
-honest completion for this session is this verified record, not manufactured work
-that conflicts with the other sessions.
+**"可并行开发" happened — across the owner's sessions, not within this one.** The
+L-lines were completed *systematically* by parallel `claude/*` sessions and are now
+**merged**: L2 (#879 + #887), L3 (#878 + #885 + #888), L4 (#881 + #889 + #892), per
+the #882 roadmap. This session's lane was the PLM×MetaSheet **design** line (Phase 6
+#880 + Phase 7 #884), delivered + corrected. The one L-item this session attempted —
+L2 `?reason_code` (#890) — **collided** with the parallel session's #887 and was
+**closed in its favor**, confirming those lines were theirs. So the **only** remaining
+work is the **Phase 6/7 builds**, which are **owner-gated** on your fork decisions —
+not something this session can complete by building, since doing so would pre-empt
+the decision (the review gate) or duplicate another session's work.
 
 ## 4. What unblocks each remaining item
 
-- **Phase 6 build** → your §7 fork calls on #880 (start with "continuous session
-  needed now, or defer until bridge/write-back?").
+- **Phase 6 build** → your §7 fork calls on #880 ("continuous session needed now, or
+  defer until bridge/write-back?").
 - **Phase 7 build** → your Fork 1/2 calls on #884; then slice-1 = the consumer-first
   write pact.
-- **L3-1** → done by the parallel session (#885 merged); nothing from me.
-- **L2 `?reason_code`** → an explicit opt-in to assign it to this session.
-- **L4** → an explicit authorization to take the line.
+- **L-lines (2/3/4)** → **DONE** by the parallel sessions (#879/#887 · #878/#885/#888 ·
+  #881/#889/#892); nothing remaining.
 
 ## References
 
