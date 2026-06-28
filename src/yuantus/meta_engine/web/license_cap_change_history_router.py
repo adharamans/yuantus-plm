@@ -15,14 +15,11 @@ from sqlalchemy.orm import Session
 
 from yuantus.api.dependencies.admin_auth import require_superuser
 from yuantus.database import get_db
-from yuantus.models.audit import AuditLog
+from yuantus.meta_engine.app_framework.license_cap_history import collect_seat_cap_history
 
 license_cap_change_history_router = APIRouter(
     prefix="/admin/license-cap-history", tags=["License Cap History"]
 )
-
-# record_seat_cap_audit (license_import_service.py) writes this exact shape.
-_SEAT_CAP_PATH_LIKE = "cli:license/seat-cap%"
 
 
 @license_cap_change_history_router.get("")
@@ -43,31 +40,7 @@ def get_license_cap_history(
     ``Cache-Control: no-store`` — license state must not be cached.
     """
     response.headers["Cache-Control"] = "no-store"
-    tid = (tenant_id or "").strip()
-    if not tid:
-        raise HTTPException(status_code=400, detail="tenant_id is required (got blank/whitespace)")
-    query = (
-        db.query(AuditLog)
-        .filter(AuditLog.method == "LICENSE")
-        .filter(AuditLog.tenant_id == tid)
-        .filter(AuditLog.path.like(_SEAT_CAP_PATH_LIKE))
-        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-    )
-    if limit is not None:
-        query = query.limit(limit)
-    changes = []
-    for row in query.all():
-        raw = row.path.split("max_users=", 1)[1] if "max_users=" in row.path else ""
-        cleared = raw == "cleared"
-        try:
-            max_users = None if (cleared or not raw) else int(raw)
-        except ValueError:
-            max_users = None
-        changes.append(
-            {
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-                "max_users": max_users,
-                "cleared": cleared,
-            }
-        )
-    return {"tenant_id": tid, "changes": changes, "count": len(changes)}
+    try:
+        return collect_seat_cap_history(db, tenant_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -142,6 +142,130 @@ def license_status(
         )
 
 
+@license_app.command("cap-history")
+def license_cap_history(
+    tenant_id: str = typer.Option(
+        ..., "--tenant-id", help="tenant whose seat-cap change history to print"
+    ),
+    limit: Optional[int] = typer.Option(
+        None, "--limit", min=1, help="cap the number of (newest-first) changes shown (>=1)"
+    ),
+) -> None:
+    """Print a tenant's seat-cap change history, newest first (read-only).
+
+    Derived from the LICENSE audit trail (``record_seat_cap_audit``); each line is a
+    cap change -- an explicit integer cap, or a clear (cap removed -> unlimited). An
+    unknown tenant prints an empty history (no existence leak). Safe for a support
+    bundle: no private keys, no raw license_data.
+    """
+    from yuantus.database import get_db_session
+    from yuantus.meta_engine.app_framework.license_cap_history import collect_seat_cap_history
+
+    cleaned = str(tenant_id or "").strip()
+    if not cleaned:
+        typer.echo("license cap-history failed: --tenant-id must be a non-empty tenant id", err=True)
+        raise typer.Exit(code=1)
+    token = tenant_id_var.set(cleaned)
+    try:
+        with get_db_session() as session:
+            result = collect_seat_cap_history(session, cleaned, limit=limit)
+    finally:
+        tenant_id_var.reset(token)
+
+    changes = result["changes"]
+    typer.echo(
+        f"seat-cap change history for tenant: {result['tenant_id']} "
+        f"({result['count']} change(s), newest first)"
+    )
+    if not changes:
+        typer.echo("  (no seat-cap changes recorded)")
+    for change in changes:
+        when = change["created_at"] or "?"
+        if change["cleared"]:
+            typer.echo(f"  {when}  cap cleared -> unlimited")
+        else:
+            typer.echo(f"  {when}  max_users={change['max_users']}")
+
+
+@license_app.command("revoke")
+def license_revoke(
+    license_key: str = typer.Option(
+        ..., "--license-key", help="the license key to revoke (status -> Revoked)"
+    ),
+    reason: str = typer.Option(
+        ..., "--reason", help="why it is being revoked (recorded in the audit trail)"
+    ),
+    revoked_by: Optional[int] = typer.Option(
+        None, "--revoked-by", help="operator user id to record as the revoker (optional)"
+    ),
+    tenant_id: Optional[str] = typer.Option(
+        None,
+        "--tenant-id",
+        help="tenant whose database holds the license (required in multi-tenant modes)",
+    ),
+    org: Optional[str] = typer.Option(
+        None, "--org", help="org id (required in TENANCY_MODE=db-per-tenant-org)"
+    ),
+) -> None:
+    """Revoke a license: status -> Revoked + an append-only audit row.
+
+    Append-only by design -- this flips ``is_entitled`` off (it requires
+    status='Active') but does NOT clear the seat cap (``TenantQuota.max_users``); cap
+    rollback is a separate explicit operation. Re-importing the signed license
+    re-activates it. A key matching no license exits non-zero (so a typo is visible).
+
+    Tenancy: in ``single`` mode the globally-unique key is enough. In a multi-tenant
+    mode the license lives in the tenant's database, which the key cannot select, so
+    ``--tenant-id`` (and ``--org`` for db-per-tenant-org) is required -- otherwise
+    ``get_db_session()`` would fail at session resolution with an opaque RuntimeError;
+    we guard up-front with a clear message + exit 2 instead.
+    """
+    from yuantus.database import get_db_session
+    from yuantus.meta_engine.app_framework.license_revocation_service import (
+        LicenseRevocationService,
+    )
+
+    cleaned = str(license_key or "").strip()
+    if not cleaned:
+        typer.echo("license revoke failed: --license-key must be a non-empty key", err=True)
+        raise typer.Exit(code=1)
+    # Operability guard: a multi-tenant deployment requires tenant (and, in
+    # db-per-tenant-org, org) context before get_db_session() can resolve the DB.
+    mode = getattr(get_settings(), "TENANCY_MODE", "single")
+    clean_tenant = (tenant_id or "").strip() or None
+    clean_org = (org or "").strip() or None
+    if mode != "single" and clean_tenant is None:
+        typer.echo(
+            f"license revoke in TENANCY_MODE={mode!r} requires --tenant-id: the license "
+            "lives in the tenant's database and the globally-unique key cannot select it.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if mode == "db-per-tenant-org" and clean_org is None:
+        typer.echo(
+            f"license revoke in TENANCY_MODE={mode!r} also requires --org (the session is "
+            "scoped by tenant AND org).",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if clean_tenant is not None:
+        tenant_id_var.set(clean_tenant)
+    if clean_org is not None:
+        org_id_var.set(clean_org)
+    with get_db_session() as session:
+        rows = LicenseRevocationService(session).revoke_license(
+            cleaned, reason=reason, revoked_by=revoked_by
+        )
+        # Materialize display fields inside the session (objects detach on commit/close).
+        revoked = None if not rows else [(r.app_name, r.status, r.tenant_id) for r in rows]
+    if revoked is None:
+        typer.echo(f"license revoke failed: no license found for key {cleaned}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"revoked {len(revoked)} license row(s) for key {cleaned}:")
+    for app_name, status, tenant in revoked:
+        typer.echo(f"  app={app_name:<24} status={status:<8} tenant={tenant}")
+
+
 @app.callback()
 def _root() -> None:
     invoked_as = Path(sys.argv[0]).name
