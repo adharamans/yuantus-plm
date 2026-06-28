@@ -14,6 +14,7 @@ Read-only: does not write history and does not touch all-attempts.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -106,6 +107,31 @@ def get_forensic_transition_history(
             "matches nothing (no whitelist, no 400). Omit for all reason codes."
         ),
     ),
+    actor: Optional[List[int]] = Query(
+        None,
+        description=(
+            "Filter to one or more recorded actor user ids (repeatable), e.g. "
+            "?actor=42&actor=7 for 'what did these users attempt'. actor_user_id is "
+            "FK-free (a system/automated promote may use an id with no current row); "
+            "an unknown id matches nothing. Omit for all actors."
+        ),
+    ),
+    created_after: Optional[str] = Query(
+        None,
+        description=(
+            "Inclusive lower time bound on created_at (ISO-8601, e.g. 2026-06-01 or "
+            "2026-06-01T08:00:00). Invalid format → 400. Omit for no lower bound."
+        ),
+    ),
+    created_before: Optional[str] = Query(
+        None,
+        description=(
+            "Inclusive upper time bound on created_at (ISO-8601). A date-only value "
+            "(e.g. 2026-06-05) includes the WHOLE day; pass a datetime "
+            "(2026-06-05T12:00:00) for an exact instant. Invalid format → 400. "
+            "Omit for no upper bound."
+        ),
+    ),
     _admin: Identity = Depends(require_superuser),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -134,11 +160,35 @@ def get_forensic_transition_history(
                 % (", ".join(invalid), ", ".join(_VALID_OUTCOMES)),
             )
         outcomes = outcome
+
+    def _parse_dt(value: Optional[str], field: str, *, end_of_day: bool = False) -> Optional[datetime]:
+        if value is None:
+            return None
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="invalid %s: %r is not an ISO-8601 date/datetime" % (field, value),
+            )
+        # A date-only UPPER bound (no time component) must include the whole day, else
+        # `?created_before=2026-06-05` (parsed as 00:00) would exclude every daytime row on
+        # the 5th. Lower bound is fine at 00:00 (it includes the day). A datetime with an
+        # explicit time is used exactly as given.
+        if end_of_day and "T" not in value and ":" not in value:
+            dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return dt
+
+    after_dt = _parse_dt(created_after, "created_after")
+    before_dt = _parse_dt(created_before, "created_before", end_of_day=True)
     rows = LifecycleService(db).get_transition_history(
         item_id,
         limit=limit,
         success_only=False,
         outcomes=outcomes,
         reason_codes=reason_code or None,
+        actor_user_ids=actor or None,
+        created_after=after_dt,
+        created_before=before_dt,
     )
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}

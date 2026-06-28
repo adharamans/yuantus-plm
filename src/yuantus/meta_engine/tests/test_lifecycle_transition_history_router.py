@@ -349,3 +349,106 @@ def test_forensic_unknown_reason_code_is_empty_not_400(client, db):
     r = client.get(_FORENSIC.format("GONE") + "?reason_code=never_minted_code")
     assert r.status_code == 200  # ANY string accepted; unknown -> empty (no whitelist, no 400)
     assert r.json()["count"] == 0
+
+
+# -- forensic ?actor filter (L2 Fork-A cont.) ---------------------------------
+def test_forensic_filters_by_single_actor(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied", actor_user_id=7)
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), outcome="denied", actor_user_id=42)
+    body = client.get(_FORENSIC.format("GONE") + "?actor=42").json()
+    assert body["count"] == 1
+    assert [r["actor_user_id"] for r in body["items"]] == [42]
+
+
+def test_forensic_filters_by_multiple_actors(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), actor_user_id=7)
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 2), actor_user_id=42)
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 3), actor_user_id=99)
+    body = client.get(_FORENSIC.format("GONE") + "?actor=7&actor=99").json()
+    assert body["count"] == 2
+    assert {r["actor_user_id"] for r in body["items"]} == {7, 99}
+
+
+def test_forensic_unknown_actor_is_empty_not_error(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), actor_user_id=7)
+    r = client.get(_FORENSIC.format("GONE") + "?actor=123456")
+    assert r.status_code == 200  # FK-free id; unknown actor simply matches nothing
+    assert r.json()["count"] == 0
+
+
+def test_forensic_actor_composes_with_outcome_and_limit(client, db):
+    for d in (1, 2, 3):
+        _hist(db, item_id="GONE", created_at=datetime(2026, 6, d), outcome="denied", actor_user_id=7)
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 4), outcome="success", actor_user_id=7)
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5), outcome="denied", actor_user_id=42)
+    body = client.get(_FORENSIC.format("GONE") + "?actor=7&outcome=denied&limit=2").json()
+    assert body["count"] == 2
+    assert all(r["actor_user_id"] == 7 and r["outcome"] == "denied" for r in body["items"])
+
+
+# -- forensic ?created-after / ?created-before (date-range) --------------------
+def test_forensic_filters_by_created_after(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), to_state_name="A")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5), to_state_name="B")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 9), to_state_name="C")
+    body = client.get(_FORENSIC.format("GONE") + "?created_after=2026-06-05").json()
+    assert body["count"] == 2  # inclusive: 06-05 and 06-09
+    assert [r["to_state_name"] for r in body["items"]] == ["C", "B"]  # created_at desc
+
+
+def test_forensic_filters_by_created_before(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), to_state_name="A")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5), to_state_name="B")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 9), to_state_name="C")
+    body = client.get(_FORENSIC.format("GONE") + "?created_before=2026-06-05").json()
+    assert body["count"] == 2  # inclusive: 06-01 and 06-05
+
+
+def test_forensic_filters_by_created_range_and_other_filters(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 1), outcome="denied", actor_user_id=7)
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5), outcome="denied", actor_user_id=7)
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 9), outcome="denied", actor_user_id=7)
+    body = client.get(
+        _FORENSIC.format("GONE")
+        + "?created_after=2026-06-02&created_before=2026-06-06&outcome=denied&actor=7"
+    ).json()
+    assert body["count"] == 1  # only 06-05 in [06-02, 06-06]
+
+
+def test_forensic_created_with_datetime_component(client, db):
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5, 8, 0, 0))
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5, 18, 0, 0))
+    body = client.get(_FORENSIC.format("GONE") + "?created_after=2026-06-05T12:00:00").json()
+    assert body["count"] == 1  # only the 18:00 row is >= noon
+
+
+def test_forensic_invalid_created_after_is_400(client, db):
+    r = client.get(_FORENSIC.format("GONE") + "?created_after=not-a-date")
+    assert r.status_code == 400
+    assert "invalid created_after" in r.json()["detail"]
+
+
+def test_forensic_invalid_created_before_is_400(client, db):
+    r = client.get(_FORENSIC.format("GONE") + "?created_before=2026-13-99")
+    assert r.status_code == 400
+    assert "invalid created_before" in r.json()["detail"]
+
+
+def test_forensic_created_before_date_only_includes_whole_day(client, db):
+    # date-only upper bound must include daytime rows on that day (end-of-day semantics),
+    # not just the 00:00 instant — the footgun a midnight-only fixture would hide.
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5, 0, 0, 0), to_state_name="mid")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5, 14, 0, 0), to_state_name="day")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 6, 0, 0, 0), to_state_name="next")
+    body = client.get(_FORENSIC.format("GONE") + "?created_before=2026-06-05").json()
+    assert body["count"] == 2  # both 06-05 rows (00:00 AND 14:00); 06-06 excluded
+    assert {r["to_state_name"] for r in body["items"]} == {"mid", "day"}
+
+
+def test_forensic_created_before_datetime_is_exact_instant(client, db):
+    # a datetime upper bound (explicit time) is used exactly, NOT widened to end-of-day
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5, 8, 0, 0), to_state_name="am")
+    _hist(db, item_id="GONE", created_at=datetime(2026, 6, 5, 18, 0, 0), to_state_name="pm")
+    body = client.get(_FORENSIC.format("GONE") + "?created_before=2026-06-05T12:00:00").json()
+    assert body["count"] == 1  # only the 08:00 row is <= noon
+    assert [r["to_state_name"] for r in body["items"]] == ["am"]

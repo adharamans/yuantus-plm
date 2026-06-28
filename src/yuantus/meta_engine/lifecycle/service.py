@@ -1,4 +1,5 @@
 from typing import Optional, Sequence
+from datetime import datetime
 from .models import (
     LifecycleMap,
     LifecycleState,
@@ -433,6 +434,9 @@ class LifecycleService:
         success_only: bool = False,
         outcomes: Optional[Sequence[str]] = None,
         reason_codes: Optional[Sequence[str]] = None,
+        actor_user_ids: Optional[Sequence[int]] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
     ):
         """Return an item's lifecycle transition-history rows, most-recent first.
 
@@ -467,6 +471,20 @@ class LifecycleService:
                     tuple(reason_codes)
                 )
             )
+        if actor_user_ids:
+            # forensic-route filter: restrict to the recorded actor(s), e.g. ?actor=42 for
+            # "what did user 42 attempt". actor_user_id is FK-free (a system/automated promote
+            # may run with an id that no longer maps to a row); we filter on the raw recorded id.
+            query = query.filter(
+                LifecycleTransitionHistory.actor_user_id.in_(tuple(actor_user_ids))
+            )
+        if created_after is not None:
+            # forensic-route filter: inclusive lower time bound (created_at >= created_after);
+            # created_at is indexed, so this composes efficiently with the desc ordering below.
+            query = query.filter(LifecycleTransitionHistory.created_at >= created_after)
+        if created_before is not None:
+            # inclusive upper time bound (created_at <= created_before)
+            query = query.filter(LifecycleTransitionHistory.created_at <= created_before)
         query = query.order_by(
             LifecycleTransitionHistory.created_at.desc(),
             LifecycleTransitionHistory.id.desc(),
