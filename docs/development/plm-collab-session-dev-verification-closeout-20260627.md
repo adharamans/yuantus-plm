@@ -11,7 +11,7 @@ already authoritative). Additive to it, not overlapping.
 | Item | PR | State | Verification |
 |---|---|---|---|
 | **Phase 6 — SSO / identity-session spine (design-first)** | #880 | MERGED (`d173a6ce`), baseline | Corrected twice against live consumer (offline verify / single-use B1 / served-tenant all already shipped); reframed to the continuous-session layer; indexed |
-| **Phase 7 — governed write-back seam (design-first)** | #884 | OPEN, `contracts` pass; **review changes applied — not yet a verified baseline** | Design-first; grounded in a live read-across; invariant write≠read-token; pact-first. The provider-side single-use/replay guard is clarified as **new build, not shipped** (the shipped `consumeEmbedJti` is consumer-side/read-only); direct-BOM "no lifecycle guard" and the helpdesk idempotency precedent hedged per review. |
+| **Phase 7 — governed write-back seam (design-first)** | #884 | **MERGED (`cc6d06ad`), design baseline — build NOT authorized** | Design-first, review changes applied (single-use = new provider-side build; direct-BOM + helpdesk claims hedged); invariant write≠read-token; pact-first. Merged as a design record only; the build is gated on the owner's fork decisions. |
 | **Backlog roadmap index registration** | #883 | MERGED (`92ff758e`) | Registered #882's taskbook in `DELIVERY_DOC_INDEX.md` (was path-only) |
 
 Both designs are **design-only**: they resolve their fork surfaces for the owner's
@@ -31,7 +31,7 @@ Every row below was checked against the live PR/branch before writing.
 | Item | Status | Owner / gate |
 |---|---|---|
 | **Phase 6 SSO build** | design baseline merged (#880); build not started | **Owner-gated** — needs the §7 fork decisions (continuous-session-needed? A vs B; IdP; lifetime). I cannot make these. |
-| **Phase 7 write-back build** | design open (#884); build not started | **Owner-gated** — needs Fork 1 (seam) + Fork 2 (write feature_key) + pact-first sequencing. My own design says slice-1 is the consumer pact. |
+| **Phase 7 write-back build** | design **MERGED** (#884 `cc6d06ad`, baseline); build not started / not authorized | **Owner-gated** — needs Fork 1 (seam) + Fork 2 (write feature_key) + pact-first sequencing. Slice-1 = the consumer pact. |
 | **L2 lifecycle filters** | **DONE (parallel)** — #879 (`?outcome`) + #887 (`?reason_code`) | the parallel L2 session shipped `?reason_code`; this session built a duplicate (#890), **closed in favor of #887**. Nothing remaining. |
 | **L3 effectivity ops** | **DONE (parallel)** — #878 (CI) + #885 (date PATCH) + #888 (DELETE guards) | completed by the parallel `claude/*` sessions; nothing remaining from me. |
 | **L4 seats/licensing** | **DONE (parallel)** — #881 (status read) + #889 (Fork B cap-change history) + #892 (Fork C revoke) | completed by the parallel `claude/*` sessions; was owner-off-limits for this session. |
