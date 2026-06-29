@@ -13,6 +13,17 @@ the **MetaSheet embed spine only** — NOT the separate CAD Helper Bridge line.
 > handshake is **complete**; Phase 6's real decision is the **continuous session**
 > (ownership / renewal / admin-revocation), not whether the PLM token is verified.
 
+> **STATUS (2026-06-29) — DEFERRED by default.** Phase 7 shipped write-back through the
+> **governed seam**, removing it as a session trigger; **bridge activation** (still a
+> `metasheet_bridge` `/health` stub) is the ONLY remaining trigger and is not currently
+> scoped. Phase 6 therefore stays **deferred unless the owner sets bridge activation /
+> continuous in-iframe UX as the next line.** If/when taken up, the **owner-confirmed fork
+> defaults** (2026-06-29) are: **Fork 1 = (B)** Yuantus-issued renewable session, MetaSheet
+> offline-verified (unless near-real-time revocation is required); **Fork 2 = PLM-issued**
+> identity (unless a shared cross-repo IdP already exists); **Fork 3 = ~15-min** renewable,
+> renewal re-runs entitlement / served-tenant / revocation; **Fork 4 = renewal-time
+> denylist** (risk window bounded by the TTL).
+
 ## 0. The load-bearing invariant (read this first)
 
 **SSO here means identity *continuity*, never new *capability*.** The embedded
@@ -45,13 +56,18 @@ reopen them.
 
 The handshake is **one-shot**: one token = one data call (single-use jti), re-mint on
 refresh. That is sufficient for the read-only context load. A **continuous identity
-session** is needed only as the prerequisite for (a) bridge activation (the flag-gated
-`metasheet_bridge` router, `ENABLE_METASHEET`, today a `/health` stub) and (b) Phase 7
-write-back. Phase 6 delivers **identity continuity**, not those capabilities.
+session** is needed only as the prerequisite for **bridge activation** (the flag-gated
+`metasheet_bridge` router, `ENABLE_METASHEET`, today a `/health` stub). Phase 6 delivers
+**identity continuity**, not that capability.
 
-**First open question for the gate:** *is the session needed yet?* If bridge activation
-/ write-back are not the next thing the owner intends to build, the one-shot handshake
-is complete and Phase 6 can be **deferred** until that need is concrete (the same
+> **Update (2026-06-29):** Phase 7 write-back is **no longer a Phase 6 trigger** — it ships
+> through the governed seam (`PATCH /api/v1/bom/multitable/{part_id}/lines/{bom_line_id}` with
+> entitlement + Part-BOM/update + `Idempotency-Key` + lifecycle lock + writeback service/audit,
+> #905/#907), with no dependency on a continuous session.
+
+**First open question for the gate:** *is the session needed yet?* If **bridge activation**
+is not the next thing the owner intends to build, the one-shot handshake is complete and
+Phase 6 is **deferred — the default (owner, 2026-06-29)** — until that need is concrete (the same
 reassess discipline applied elsewhere). The forks below matter only once the answer is
 "yes, build the session now."
 
@@ -135,12 +151,14 @@ Design-first ⇒ each is reviewable now.
    / renew + B2 denylist), each with its own dev & verification doc and the §5 mapping as
    acceptance; then the consumer slice, which MUST carry the served-tenant cross-check
    into the session path.
-3. *(separately gated)* Bridge activation + Phase 7 write-back — out of scope here.
+3. *(separately gated)* Bridge activation — out of scope here (the sole remaining session
+   trigger). Phase 7 write-back is **DONE** via the governed seam (#905/#907), not the session.
 
 ## 7. Open questions for the owner
 
 1. **Is the continuous session needed now**, or is the complete one-shot handshake
-   sufficient until bridge/write-back is scoped? (§2)
+   sufficient until **bridge activation** is scoped? (§2) **Default = deferred** (owner,
+   2026-06-29; write-back now ships via the governed seam, not the session).
 2. **Admin/logout revocation SLA + consumer session infra** → Fork 1 (A vs B) and Fork 4.
 3. **Is a shared IdP (DingTalk) already the IdP across both repos?** → Fork 2.
 4. **Session lifetime / renewal window** (proposed ~15 min) → Fork 3.
