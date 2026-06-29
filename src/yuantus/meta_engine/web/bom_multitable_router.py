@@ -66,7 +66,8 @@ class BomLineWriteRequest(BaseModel):
 
     All four are OPTIONAL; only fields the consumer actually sets are applied
     (``exclude_unset``), so a partial PATCH never clobbers untouched cells. ``quantity`` is
-    typed ``Any`` so a numeric value passes through unchanged; the others are strings. Unknown
+    typed ``Any`` to accept a number or numeric string, but the handler rejects a non-scalar
+    quantity (object/array/bool) at the 400 gate; the others are strings. Unknown
     keys are dropped by the whitelist (defense-in-depth in the write service too); a body that
     whitelists to nothing is a malformed/empty write -> 400.
     """
@@ -248,10 +249,18 @@ def bom_multitable_write_line(
     ):
         raise HTTPException(status_code=403, detail="Permission denied")
 
-    # (4) fail-closed BEFORE any object lookup: a missing Idempotency-Key, or a body that
-    # whitelists to nothing, is a malformed/empty write.
-    if not (idempotency_key or "").strip():
+    # (4) fail-closed BEFORE any object lookup: a missing or over-long Idempotency-Key, a body
+    # that whitelists to nothing, or a non-scalar quantity is a malformed/empty write.
+    idem = (idempotency_key or "").strip()
+    if not idem:
         raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
+    if len(idem) > 64:
+        # the audit column is VARCHAR(64); reject over-long keys here so Postgres never raises a
+        # length error at insert (SQLite silently accepts it -> this 400 gate is the real guard).
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key header must be at most 64 characters",
+        )
     fields = {
         key: value
         for key, value in body.model_dump(exclude_unset=True).items()
@@ -259,6 +268,18 @@ def bom_multitable_write_line(
     }
     if not fields:
         raise HTTPException(status_code=400, detail="no editable cells to write")
+    # quantity must be a scalar (number | string | null): the whitelist filters by KEY not value
+    # type, so without this a write-permitted caller could persist an object/array (e.g.
+    # {"quantity": {"x": 1}}) into the BOM quantity cell. bool is rejected (int subclass in Python).
+    if "quantity" in fields:
+        quantity = fields["quantity"]
+        if quantity is not None and (
+            isinstance(quantity, bool) or not isinstance(quantity, (int, float, str))
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="quantity must be a number, string, or null",
+            )
 
     # (5) 404: part missing, then line ∈ part. The three failure shapes are indistinguishable.
     part = db.get(Item, part_id)
@@ -284,7 +305,7 @@ def bom_multitable_write_line(
         result = BOMMultitableWritebackService(db).write_line(
             part_id,
             bom_line_id,
-            idempotency_key.strip(),
+            idem,
             fields,
             user_id=user.id,
             tenant_id=tenant_id,

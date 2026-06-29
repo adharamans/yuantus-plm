@@ -30,7 +30,9 @@ class MetaBomWritebackAudit(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     # P2: explicit per-edit Idempotency-Key header. NOT NULL UNIQUE so a replay
     # collides on insert (begin_nested SAVEPOINT -> IntegrityError -> cached 200).
-    idempotency_key = Column(String(64), nullable=False, unique=True, index=True)
+    # unique=True (NOT a separate index=True) so create_all emits a UNIQUE CONSTRAINT
+    # matching the migrations' uq_ constraint -- no model<->migration autogenerate drift.
+    idempotency_key = Column(String(64), nullable=False, unique=True)
     tenant_id = Column(String(64), nullable=True, index=True)
     org_id = Column(String(64), nullable=True, index=True)
     user_id = Column(Integer, nullable=True, index=True)

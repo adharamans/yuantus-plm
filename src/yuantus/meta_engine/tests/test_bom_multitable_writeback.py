@@ -216,6 +216,53 @@ def test_empty_whitelist_body_is_400(db_session, monkeypatch):
     assert r.status_code == 400
 
 
+def test_malformed_quantity_is_400_no_audit_no_change(db_session, monkeypatch):
+    # quantity must be a scalar; an object/array/bool is rejected at the 400 gate BEFORE
+    # write_line -> no audit row, line unchanged. The KEY whitelist alone would let it through
+    # and persist a structured value into the BOM quantity cell.
+    _entitle(db_session)
+    _allow_permission(monkeypatch)
+    _seed_line(db_session, quantity=1)
+    for bad in ({"x": 1}, [1, 2], True):
+        r = _client(db_session).patch(
+            _PATH.format(p=PART_ID, l=LINE_ID),
+            json={"quantity": bad}, headers={"Idempotency-Key": "qk"},
+        )
+        assert r.status_code == 400, bad
+    db_session.expire_all()
+    assert db_session.get(Item, LINE_ID).properties["quantity"] == 1  # unchanged
+    assert db_session.query(MetaBomWritebackAudit).count() == 0       # nothing persisted
+
+
+def test_over_long_idempotency_key_is_400(db_session, monkeypatch):
+    # the audit column is VARCHAR(64); a >64-char key is rejected at the 400 gate so Postgres
+    # never raises a length error at insert (SQLite would silently accept it -> false green).
+    _entitle(db_session)
+    _allow_permission(monkeypatch)
+    _seed_line(db_session)
+    r = _client(db_session).patch(
+        _PATH.format(p=PART_ID, l=LINE_ID), json=_BODY, headers={"Idempotency-Key": "x" * 65}
+    )
+    assert r.status_code == 400
+    assert db_session.query(MetaBomWritebackAudit).count() == 0
+
+
+def test_bad_key_against_ghost_part_is_400_before_404(db_session, monkeypatch):
+    # locks guard order: the Idempotency-Key gate (missing OR over-long) fires BEFORE the part
+    # lookup, so a bad key against a NON-existent part is 400, not 404.
+    _entitle(db_session)
+    _allow_permission(monkeypatch)
+    # no part seeded
+    missing = _client(db_session).patch(
+        _PATH.format(p="GHOST", l="GHOST"), json=_BODY  # no Idempotency-Key
+    )
+    assert missing.status_code == 400
+    overlong = _client(db_session).patch(
+        _PATH.format(p="GHOST", l="GHOST"), json=_BODY, headers={"Idempotency-Key": "x" * 65}
+    )
+    assert overlong.status_code == 400
+
+
 def test_part_missing_is_404(db_session, monkeypatch):
     _entitle(db_session)
     _allow_permission(monkeypatch)
