@@ -51,12 +51,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("idempotency_key", name="uq_meta_bom_writeback_audit_idempotency_key"),
     )
-    op.create_index(
-        op.f("ix_meta_bom_writeback_audit_idempotency_key"),
-        _TABLE,
-        ["idempotency_key"],
-        unique=False,
-    )
+    # NOTE: no separate index on idempotency_key — the UniqueConstraint already
+    # backs it with a unique index (enforcement + lookup), mirroring mes_inbox_001.
     op.create_index(
         op.f("ix_meta_bom_writeback_audit_tenant_id"), _TABLE, ["tenant_id"], unique=False
     )
@@ -77,5 +73,4 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_meta_bom_writeback_audit_user_id"), table_name=_TABLE)
     op.drop_index(op.f("ix_meta_bom_writeback_audit_org_id"), table_name=_TABLE)
     op.drop_index(op.f("ix_meta_bom_writeback_audit_tenant_id"), table_name=_TABLE)
-    op.drop_index(op.f("ix_meta_bom_writeback_audit_idempotency_key"), table_name=_TABLE)
     op.drop_table(_TABLE)
