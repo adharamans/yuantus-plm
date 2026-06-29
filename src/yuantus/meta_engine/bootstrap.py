@@ -24,6 +24,9 @@ def import_all_models() -> None:
     from yuantus.meta_engine.models import numbering as _numbering  # noqa: F401
     from yuantus.meta_engine.models import plugin_config as _plugin_config  # noqa: F401
     from yuantus.meta_engine.models import parallel_tasks as _parallel_tasks  # noqa: F401
+    from yuantus.meta_engine.models import (  # noqa: F401
+        meta_bom_writeback_audit as _meta_bom_writeback_audit,
+    )
     from yuantus.meta_engine.dedup import models as _dedup  # noqa: F401
     from yuantus.meta_engine.erp_publication import models as _erp_publication  # noqa: F401
     from yuantus.meta_engine.ecm_publication import models as _ecm_publication  # noqa: F401

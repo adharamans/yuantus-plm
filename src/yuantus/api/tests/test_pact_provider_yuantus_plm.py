@@ -264,6 +264,14 @@ PACT_DOCUMENT_ID_PRIMARY = "01H000000000000000000000D1"
 PACT_DOCUMENT_REL_ID_PRIMARY = "01H000000000000000000000R2"
 PACT_SUBSTITUTE_REL_ID_LIST = "01H000000000000000000000R5"
 PACT_SUBSTITUTE_REL_ID_DELETE = "01H000000000000000000000R6"
+# Phase-7 Day-2 write-back: a DEDICATED, ISOLATED parent part + child + "Part BOM" line for the
+# governed PATCH interaction, so the write-back mutation never contaminates the other (read)
+# interactions that assert on P1's tree. The parent's lifecycle stays the inert bare string
+# (no lifecycle_map_id on the Part type) -> is_item_locked is False -> the 200 path holds in the
+# pact (the real 409 lifecycle lock is proven by the provider unit test, per design §5).
+PACT_WRITEBACK_PART_ID = "01H000000000000000000000W1"
+PACT_WRITEBACK_CHILD_ID = "01H000000000000000000000W2"
+PACT_WRITEBACK_BOM_LINE_ID = "01H000000000000000000000W3"
 PACT_FILE_ID_PRIMARY = "01H000000000000000000000F1"
 PACT_ITEM_FILE_ID_PRIMARY = "01H000000000000000000000A1"
 PACT_CAD_FILE_ID_PROPERTIES_GET = "01H000000000000000000000F2"
@@ -690,6 +698,61 @@ def _seed_meta_engine_data() -> None:
                     },
                 )
             )
+        # Phase-7 Day-2 write-back: dedicated isolated parent + child + "Part BOM" line.
+        if session.get(Item, PACT_WRITEBACK_PART_ID) is None:
+            session.add(
+                Item(
+                    id=PACT_WRITEBACK_PART_ID,
+                    item_type_id=PACT_ITEM_TYPE,  # "Part" -- inert lifecycle -> 200 (no 409)
+                    config_id=str(uuid.uuid4()),
+                    generation=1,
+                    is_current=True,
+                    state="Draft",  # bare string; Part type has no lifecycle_map_id -> not locked
+                    is_versionable=True,
+                    properties={
+                        "item_number": "WB-PART-1",
+                        "number": "WB-PART-1",
+                        "name": "Write-back Parent Assembly",
+                    },
+                )
+            )
+        if session.get(Item, PACT_WRITEBACK_CHILD_ID) is None:
+            session.add(
+                Item(
+                    id=PACT_WRITEBACK_CHILD_ID,
+                    item_type_id=PACT_ITEM_TYPE,
+                    config_id=str(uuid.uuid4()),
+                    generation=1,
+                    is_current=True,
+                    state="Released",
+                    is_versionable=True,
+                    properties={
+                        "item_number": "WB-CHILD-1",
+                        "number": "WB-CHILD-1",
+                        "name": "Write-back Child Part",
+                    },
+                )
+            )
+        if session.get(Item, PACT_WRITEBACK_BOM_LINE_ID) is None:
+            session.add(
+                Item(
+                    id=PACT_WRITEBACK_BOM_LINE_ID,
+                    item_type_id=PACT_BOM_RELATIONSHIP_TYPE,  # "Part BOM"
+                    config_id=str(uuid.uuid4()),
+                    generation=1,
+                    is_current=True,
+                    state="Draft",
+                    is_versionable=False,
+                    source_id=PACT_WRITEBACK_PART_ID,  # line ∈ part
+                    related_id=PACT_WRITEBACK_CHILD_ID,
+                    properties={
+                        "quantity": 1,
+                        "uom": "ea",
+                        "find_num": "10",
+                        "refdes": "WB1",
+                    },
+                )
+            )
         session.commit()
         sys.stderr.write("[seed] Items + relationships + substitutes committed\n")
 
@@ -1073,8 +1136,11 @@ def _seed_meta_engine_data() -> None:
     ).decode()
     _lic_payload = {
         "tenant_id": PACT_TENANT_ID,
-        "app_names": ["plm.bom_multitable"],
-        "features": ["bom_multitable"],
+        # Phase-7 Day-2: seed BOTH the read SKU and the DISTINCT write-back SKU so the governed
+        # PATCH interaction verifies entitled:true (the write key is checked first, separate
+        # from the read key -- a read-only license would otherwise 403 the write).
+        "app_names": ["plm.bom_multitable", "plm.bom_multitable_writeback"],
+        "features": ["bom_multitable", "bom_multitable_writeback"],
         "plan_type": "Pilot",
         "license_key": _uuid.uuid4().hex,
         "subject": "Pact",

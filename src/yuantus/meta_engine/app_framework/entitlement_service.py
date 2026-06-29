@@ -44,6 +44,10 @@ FEATURE_APP_NAMES: Mapping[str, FrozenSet[str]] = {
     # PLM-COLLAB-P3-B: BOM multi-table is its OWN independent SKU -- NOT bundled into
     # plm.collab, NOT reusing plm_collaboration_pro (same discipline as approval_automation).
     "bom_multitable": frozenset({"plm.bom_multitable"}),
+    # Phase-7 Day-2: BOM multi-table WRITE-BACK is a DISTINCT SKU from the read key
+    # (`bom_multitable`). A read license must NOT silently unlock the governed write path,
+    # so the PATCH endpoint gates on this separate `plm.bom_multitable_writeback` app_name.
+    "bom_multitable_writeback": frozenset({"plm.bom_multitable_writeback"}),
     # ECM-P1B: PLM->ECM publish is its OWN independent SKU (same discipline as
     # approval_automation / bom_multitable -- NOT bundled into plm.collab).
     "ecm_publish": frozenset({"plm.ecm_publish"}),

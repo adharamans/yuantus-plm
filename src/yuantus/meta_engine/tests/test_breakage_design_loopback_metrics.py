@@ -348,7 +348,8 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
     from yuantus.api.app import create_app
 
     app = create_app()
-    assert len(app.routes) == 727
+    # 728 after the Phase-7 Day-2 governed BOM multi-table write-back PATCH route.
+    assert len(app.routes) == 728
 
 
 # ==========================================================================

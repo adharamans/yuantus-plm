@@ -3931,6 +3931,107 @@
           }
         }
       }
+    },
+    {
+      "description": "write back a governed BOM multi-table line's editable cells in an editable (Draft) state",
+      "providerStates": [
+        {
+          "name": "tenant-1 holds an active plm.bom_multitable_writeback license and part 01H000000000000000000000W1 has an editable Part-BOM line 01H000000000000000000000W3"
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/bom/multitable/01H000000000000000000000W1/lines/01H000000000000000000000W3",
+        "headers": {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.example",
+          "x-tenant-id": "tenant-1",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "pact-writeback-key-0001"
+        },
+        "body": {
+          "quantity": 7,
+          "uom": "ea",
+          "find_num": "15",
+          "refdes": "WB1,WB2"
+        },
+        "matchingRules": {
+          "header": {
+            "$.Authorization": {
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^Bearer .+"
+                }
+              ]
+            },
+            "$.Idempotency-Key": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "body": {
+            "$.quantity": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.uom": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.find_num": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.refdes": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": true,
+          "bom_line_id": "01H000000000000000000000W3"
+        },
+        "matchingRules": {
+          "body": {
+            "$.ok": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.bom_line_id": {
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ]
 }

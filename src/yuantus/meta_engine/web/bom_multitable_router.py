@@ -17,9 +17,9 @@ its own SKU ``plm.bom_multitable``.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -28,7 +28,9 @@ from yuantus.config import get_settings
 from yuantus.database import get_db
 from yuantus.meta_engine.app_framework.entitlement_service import EntitlementService
 from yuantus.meta_engine.app_framework.license_scope import resolve_license_scope
+from yuantus.meta_engine.lifecycle.guard import is_item_locked
 from yuantus.meta_engine.models.item import Item
+from yuantus.meta_engine.models.meta_schema import ItemType
 from yuantus.meta_engine.schemas.aml import AMLAction
 from yuantus.meta_engine.services.bom_multitable_embed_token_service import (
     EmbedTokenNotConfigured,
@@ -40,6 +42,13 @@ from yuantus.meta_engine.services.bom_multitable_projection_service import (
     FEATURE_KEY,
     BOMMultitableProjectionService,
 )
+from yuantus.meta_engine.services.bom_multitable_writeback_service import (
+    WRITE_FEATURE_KEY,
+    WRITE_WHITELIST,
+    BomLineNotInPartError,
+    BomLineWritebackConflictError,
+    BOMMultitableWritebackService,
+)
 from yuantus.meta_engine.services.meta_permission_service import MetaPermissionService
 from yuantus.models.audit import AuditLog
 
@@ -50,6 +59,23 @@ class EmbedTokenRequest(BaseModel):
     """The PLM UI requests an embed token for a specific target origin (the iframe host)."""
 
     origin: str
+
+
+class BomLineWriteRequest(BaseModel):
+    """Whitelisted write-back of a single BOM multi-table line's editable cells.
+
+    All four are OPTIONAL; only fields the consumer actually sets are applied
+    (``exclude_unset``), so a partial PATCH never clobbers untouched cells. ``quantity`` is
+    typed ``Any`` to accept a number or numeric string, but the handler rejects a non-scalar
+    quantity (object/array/bool) at the 400 gate; the others are strings. Unknown
+    keys are dropped by the whitelist (defense-in-depth in the write service too); a body that
+    whitelists to nothing is a malformed/empty write -> 400.
+    """
+
+    quantity: Optional[Any] = None
+    uom: Optional[str] = None
+    find_num: Optional[str] = None
+    refdes: Optional[str] = None
 
 
 def _affordance(entitled: bool) -> Dict[str, Any]:
@@ -183,3 +209,115 @@ def bom_multitable_embed_token(
         "aud": minted["aud"],
         "embed_origin": origin,
     }
+
+
+@bom_multitable_router.patch("/multitable/{part_id}/lines/{bom_line_id}")
+def bom_multitable_write_line(
+    part_id: str,
+    bom_line_id: str,
+    body: BomLineWriteRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+) -> Dict[str, Any]:
+    """PLM-COLLAB Phase-7 write-back: PATCH the editable cells of one governed BOM line.
+
+    Honors the metasheet2 consumer pact (#3332): entitled + permitted -> 200
+    ``{"ok": true, "bom_line_id": "..."}`` (THIN -- NOT the GET/embed affordance envelope).
+    EXACT guard order (design-resolution 20260629 §1):
+
+    1. ``401`` unauthenticated (the ``get_current_user`` dependency).
+    2. ``403`` NOT ``is_entitled(WRITE_FEATURE_KEY)`` -- the DISTINCT write SKU, checked FIRST
+       so a write surface never leaks object existence to an unentitled caller (no affordance).
+    3. ``403`` NOT ``check_permission("Part BOM", AMLAction.update)``.
+    4. ``400`` malformed / empty whitelist OR MISSING ``Idempotency-Key`` header -- fail-fast,
+       fail-closed, BEFORE any object lookup.
+    5. ``404`` part missing OR line ∉ part (``item_type_id == "Part BOM"`` AND
+       ``source_id == part_id``) -- the three cases are indistinguishable.
+    6. ``409`` parent lifecycle-locked (``is_item_locked`` on the PARENT part; the
+       ``add_bom_child`` precedent) -- a Released/locked BOM is the deferred ECO route.
+    7. apply: single-use replay cache (P2) + audit (P3) + property mutation, atomic.
+    """
+    # (2) write entitlement FIRST -- no existence-leak on a write surface, no affordance body.
+    if not EntitlementService(db).is_entitled(WRITE_FEATURE_KEY):
+        raise HTTPException(status_code=403, detail="bom_multitable_writeback not entitled")
+
+    # (3) PLM "Part BOM" UPDATE permission.
+    perm = MetaPermissionService(db)
+    if not perm.check_permission(
+        BOM_LINE_TYPE, AMLAction.update, user_id=str(user.id), user_roles=user.roles
+    ):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # (4) fail-closed BEFORE any object lookup: a missing or over-long Idempotency-Key, a body
+    # that whitelists to nothing, or a non-scalar quantity is a malformed/empty write.
+    idem = (idempotency_key or "").strip()
+    if not idem:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
+    if len(idem) > 64:
+        # the audit column is VARCHAR(64); reject over-long keys here so Postgres never raises a
+        # length error at insert (SQLite silently accepts it -> this 400 gate is the real guard).
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key header must be at most 64 characters",
+        )
+    fields = {
+        key: value
+        for key, value in body.model_dump(exclude_unset=True).items()
+        if key in WRITE_WHITELIST
+    }
+    if not fields:
+        raise HTTPException(status_code=400, detail="no editable cells to write")
+    # quantity must be a scalar (number | string | null): the whitelist filters by KEY not value
+    # type, so without this a write-permitted caller could persist an object/array (e.g.
+    # {"quantity": {"x": 1}}) into the BOM quantity cell. bool is rejected (int subclass in Python).
+    if "quantity" in fields:
+        quantity = fields["quantity"]
+        if quantity is not None and (
+            isinstance(quantity, bool) or not isinstance(quantity, (int, float, str))
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="quantity must be a number, string, or null",
+            )
+
+    # (5) 404: part missing, then line ∈ part. The three failure shapes are indistinguishable.
+    part = db.get(Item, part_id)
+    if part is None:
+        raise HTTPException(status_code=404, detail="BOM line not found under part")
+    line = db.get(Item, bom_line_id)
+    if line is None or line.item_type_id != BOM_LINE_TYPE or line.source_id != part_id:
+        raise HTTPException(status_code=404, detail="BOM line not found under part")
+
+    # (6) 409: parent part lifecycle-locked (Released/Review/Suspended/Obsolete). Reuses the
+    # add_bom_child precedent; a locked BOM is editable only via the deferred ECO route.
+    part_type = db.get(ItemType, part.item_type_id)
+    locked, locked_state = is_item_locked(db, part, part_type)
+    if locked:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Item is locked in state '{locked_state or part.state}'",
+        )
+
+    # (7) governed atomic apply: replay cache + audit + property mutation.
+    tenant_id, org_id = resolve_license_scope()
+    try:
+        result = BOMMultitableWritebackService(db).write_line(
+            part_id,
+            bom_line_id,
+            idem,
+            fields,
+            user_id=user.id,
+            tenant_id=tenant_id,
+            org_id=org_id,
+        )
+    except BomLineNotInPartError as exc:
+        # defense-in-depth (the §5 gate already enforced line∈part) -> same 404.
+        raise HTTPException(status_code=404, detail="BOM line not found under part") from exc
+    except BomLineWritebackConflictError as exc:
+        # same Idempotency-Key reused for a different write -> conflict.
+        raise HTTPException(
+            status_code=409, detail="Idempotency-Key reused for a different write"
+        ) from exc
+
+    return {"ok": True, "bom_line_id": result["bom_line_id"]}

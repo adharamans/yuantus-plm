@@ -59,7 +59,10 @@ from yuantus.api.app import create_app
 #   (GET /api/v1/admin/license-cap-history) -- superuser-gated, no existence leak.
 # 725 = 724 + 1 L4 Fork C license revoke
 #   (POST /api/v1/admin/licenses/{license_key}/revoke) -- append-only, no cap clear.
-EXPECTED_TOTAL_ROUTES = 727
+# 728 = 727 + 1 Phase-7 Day-2 governed BOM multi-table write-back
+#   (PATCH /api/v1/bom/multitable/{part_id}/lines/{bom_line_id}) -- distinct write SKU,
+#   lifecycle-guarded + single-use replay + atomic write-back audit.
+EXPECTED_TOTAL_ROUTES = 728
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
