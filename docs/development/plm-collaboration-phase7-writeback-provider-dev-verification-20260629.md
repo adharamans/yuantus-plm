@@ -42,3 +42,19 @@ The provider landed first (so the broker gate is never consumer-ahead-of-provide
 - **metasheet2 #3332 functional amendment** — `PLMAdapter.updateBomMultitableLine` sends `Idempotency-Key`; providerState/fixture text `plm.bom_multitable` → `plm.bom_multitable_writeback`.
 - **Broker re-add** of the amended PATCH interaction (reverting #3337's depublish), so the Phase-B broker gate verifies the live interaction against the now-honoring provider.
 - **Fast-follows** (design §1/§2): `Idempotency-Key` end-to-end on the consumer; `If-Match`/412 optimistic concurrency; ECO-checkout-lock 409 depth.
+
+## 7. Follow-up (2026-06-29, proposed / in review) — per-tenant idempotency scope
+
+> Status: in code review on `claude/plm-phase7-idempotency-tenant-scope`; NOT yet merged. Flip "proposed / in review" → "landed" in the merge closeout.
+
+Review of the §2 single-use guard surfaced a cross-tenant correctness defect: `meta_bom_writeback_audit.idempotency_key` was a **single global** `UNIQUE`, and the service's replay re-query filtered by key only. So the SAME `Idempotency-Key` reused by a DIFFERENT tenant collided on tenant A's row and was wrongly resolved as a replay (cached 200, no apply) or a 409 — a cross-tenant leak of write outcomes. (Practically rare, since keys are write-token jtis, but a real isolation defect.)
+
+Fix (model + service + migration in lockstep), scope = **`(tenant_id, idempotency_key)`** — org is recorded-only provenance (entitlement itself is tenant-scoped: `is_entitled` filters `tenant_id` only), so org is not part of the uniqueness grain:
+
+- **Model** `MetaBomWritebackAudit`: the column-level `unique=True` on `idempotency_key` is replaced by a composite `UniqueConstraint("tenant_id", "idempotency_key", name="uq_meta_bom_writeback_audit_tenant_idem")` (emitted by `create_all`, matching the migration).
+- **Service** `BOMMultitableWritebackService.write_line`: the `IntegrityError` replay re-query now filters `tenant_id == tenant_id AND idempotency_key == idempotency_key` (never resolves a replay/conflict against another tenant's row).
+- **Migration** `bom_writeback_audit_002_tenant_scope_idempotency` (`down_revision = bom_writeback_audit_001`): drops `uq_..._idempotency_key`, adds `uq_..._tenant_idem` — native `ALTER` on PostgreSQL, batch rebuild on SQLite.
+
+The conflict semantic is **unchanged**: a same-`(tenant, key)` reuse with a different payload is still a **409** (kept over "replay-success-no-overwrite" — more diagnostic, better fits idempotency-key misuse). The keyless case does not arise — the router requires `Idempotency-Key` (400 if absent).
+
+Tests (service-level, added to `test_bom_multitable_writeback.py`): cross-tenant same key each applies (2 rows, 2 tenants); same `(tenant, key, payload)` cached (an out-of-band sentinel survives → no re-apply → 1 row); same `(tenant, key)` different payload → conflict. Full write-back suite **23 passed**; pact provider verifier **3 passed** (no happy-path regression) — both under CI-locked deps (`fastapi 0.124.4` / `pydantic 2.12.5` / `pact-python 3.2.1`).

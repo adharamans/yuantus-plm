@@ -448,3 +448,58 @@ def test_router_exposes_three_routes_incl_patch_writeback():
     assert (
         "/bom/multitable/{part_id}/lines/{bom_line_id}", ("PATCH",)
     ) in paths
+
+
+# --- P1 follow-up: per-tenant idempotency scope (cross-tenant isolation) -------
+
+def test_service_cross_tenant_same_key_each_applies(db_session):
+    # The tenant-scope fix: the SAME Idempotency-Key under DIFFERENT tenants must EACH apply --
+    # no cross-tenant replay/conflict. Pre-fix (global single-column unique + key-only re-query),
+    # tenant B collided on tenant A's key and was wrongly treated as a replay/409.
+    _seed_line(db_session, quantity=1)
+    svc = BOMMultitableWritebackService(db_session)
+
+    r_a = svc.write_line(PART_ID, LINE_ID, "shared-key", {"quantity": 3},
+                         user_id=7, tenant_id="tenantA", org_id=None)
+    r_b = svc.write_line(PART_ID, LINE_ID, "shared-key", {"quantity": 4},
+                         user_id=7, tenant_id="tenantB", org_id=None)
+
+    assert r_a == {"ok": True, "bom_line_id": LINE_ID}
+    assert r_b == {"ok": True, "bom_line_id": LINE_ID}
+    rows = db_session.query(MetaBomWritebackAudit).filter_by(idempotency_key="shared-key").all()
+    assert len(rows) == 2
+    assert {r.tenant_id for r in rows} == {"tenantA", "tenantB"}
+
+
+def test_service_same_tenant_same_key_same_payload_is_cached(db_session):
+    # The fix must NOT regress same-tenant replay: same (tenant, key, payload) -> cached, NO
+    # re-apply (the out-of-band sentinel survives) -> exactly one row for (tenant, key).
+    _seed_line(db_session, quantity=1)
+    svc = BOMMultitableWritebackService(db_session)
+
+    svc.write_line(PART_ID, LINE_ID, "rk", {"quantity": 7},
+                   user_id=7, tenant_id="tenantA", org_id=None)
+    line = db_session.get(Item, LINE_ID)
+    line.properties = {**line.properties, "quantity": 999}  # out-of-band sentinel
+    db_session.commit()
+
+    cached = svc.write_line(PART_ID, LINE_ID, "rk", {"quantity": 7},
+                            user_id=7, tenant_id="tenantA", org_id=None)
+    assert cached == {"ok": True, "bom_line_id": LINE_ID}
+    db_session.expire_all()
+    assert db_session.get(Item, LINE_ID).properties["quantity"] == 999  # NOT re-applied
+    assert db_session.query(MetaBomWritebackAudit).filter_by(
+        tenant_id="tenantA", idempotency_key="rk"
+    ).count() == 1
+
+
+def test_service_same_tenant_same_key_different_payload_conflicts(db_session):
+    # Same (tenant, key) with a DIFFERENT payload is still a conflict (router maps to 409) --
+    # the fix preserves main's diagnostic conflict semantics within a tenant.
+    _seed_line(db_session)
+    svc = BOMMultitableWritebackService(db_session)
+    svc.write_line(PART_ID, LINE_ID, "ck", {"quantity": 3},
+                   user_id=7, tenant_id="tenantA", org_id=None)
+    with pytest.raises(BomLineWritebackConflictError):
+        svc.write_line(PART_ID, LINE_ID, "ck", {"quantity": 9},
+                       user_id=7, tenant_id="tenantA", org_id=None)

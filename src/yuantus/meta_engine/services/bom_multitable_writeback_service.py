@@ -6,9 +6,11 @@ guard) with the design-ratified governed write path (design-resolution 20260629 
 - **WRITE_FEATURE_KEY** is a DISTINCT entitlement SKU from the read projection's
   ``bom_multitable`` -- a read license must never unlock the write surface.
 - **Single-use / replay (P2)** is a DB guard (Redis absent; verifier on SQLite) reusing the
-  proven MES-inbox pattern: ``begin_nested`` SAVEPOINT + insert + flush, ``IntegrityError`` ->
-  fetch the existing row -> same payload returns the cached ``{ok, bom_line_id}`` WITHOUT
-  re-applying; a different payload under the same key is a 409 conflict.
+  proven MES-inbox pattern, scoped PER TENANT: ``begin_nested`` SAVEPOINT + insert + flush on the
+  ``(tenant_id, idempotency_key)`` composite UNIQUE, ``IntegrityError`` -> fetch the existing
+  SAME-TENANT row -> same payload returns the cached ``{ok, bom_line_id}`` WITHOUT re-applying;
+  a different payload under the same (tenant, key) is a 409 conflict. The SAME key under a
+  DIFFERENT tenant does NOT collide (cross-tenant isolation).
 - **Write-back audit (P3)** rides the SAME ``meta_bom_writeback_audit`` insert: the touched
   cells' before/after snapshot is committed ATOMICALLY with the property mutation, so an
   audit-insert failure rolls back the mutation (a governed write must not succeed without its
@@ -124,9 +126,15 @@ class BOMMultitableWritebackService:
                 self.session.add(audit)
                 self.session.flush()
         except IntegrityError:
+            # Scope the replay lookup to the SAME tenant as the guard's composite UNIQUE
+            # (tenant_id, idempotency_key): a collision can only be a same-tenant reuse, and we
+            # must never resolve a replay/conflict against ANOTHER tenant's row.
             existing = (
                 self.session.query(MetaBomWritebackAudit)
-                .filter(MetaBomWritebackAudit.idempotency_key == idempotency_key)
+                .filter(
+                    MetaBomWritebackAudit.tenant_id == tenant_id,
+                    MetaBomWritebackAudit.idempotency_key == idempotency_key,
+                )
                 .one_or_none()
             )
             if existing is None:

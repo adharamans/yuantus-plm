@@ -99,7 +99,7 @@ def upgrade() -> None:
     sa.Column('status', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('idempotency_key')
+    sa.UniqueConstraint('tenant_id', 'idempotency_key', name='uq_meta_bom_writeback_audit_tenant_idem')
     )
     op.create_table('meta_breakage_incidents',
     sa.Column('id', sa.String(), nullable=False),
