@@ -375,6 +375,39 @@ def test_same_key_different_payload_is_409(db_session, monkeypatch):
     assert conflict.status_code == 409
 
 
+def test_same_key_same_payload_different_line_is_409(db_session, monkeypatch):
+    # Regression nail for the service-layer replay guard: a duplicate key is cacheable only for
+    # the SAME tenant + SAME line + SAME payload. Reusing a key for another line with identical
+    # cells must be a 409, not a cached response for the first line.
+    _entitle(db_session)
+    _allow_permission(monkeypatch)
+    _seed_line(db_session)
+    other_line_id = "WBR2"
+    db_session.add(
+        Item(
+            id=other_line_id,
+            item_type_id="Part BOM",
+            config_id=other_line_id,
+            generation=1,
+            is_current=True,
+            source_id=PART_ID,
+            related_id=CHILD_ID,
+            properties={"quantity": 1, "uom": "ea", "find_num": "20", "refdes": "WB2"},
+        )
+    )
+    db_session.commit()
+    client = _client(db_session)
+
+    first = client.patch(
+        _PATH.format(p=PART_ID, l=LINE_ID), json={"quantity": 10}, headers={"Idempotency-Key": "lk"}
+    )
+    assert first.status_code == 200
+    conflict = client.patch(
+        _PATH.format(p=PART_ID, l=other_line_id), json={"quantity": 10}, headers={"Idempotency-Key": "lk"}
+    )
+    assert conflict.status_code == 409
+
+
 # --- write-back audit (design §3): before->after captured + audit-failure rolls back ----------
 
 def test_audit_captures_before_and_after(db_session, monkeypatch):
