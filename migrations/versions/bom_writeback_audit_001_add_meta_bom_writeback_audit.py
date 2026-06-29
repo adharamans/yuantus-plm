@@ -34,7 +34,7 @@ def upgrade() -> None:
     if _TABLE in set(sa.inspect(bind).get_table_names()):
         return
     op.create_table(
-        _TABLE,
+        "meta_bom_writeback_audit",  # literal (NOT _TABLE) so the migration-coverage contract regex matches
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("idempotency_key", sa.String(length=64), nullable=False),
         sa.Column("tenant_id", sa.String(length=64), nullable=True),
