@@ -17,7 +17,7 @@ The governed `PATCH /api/v1/bom/multitable/{part_id}/lines/{bom_line_id}` provid
 
 - **Endpoint guard order** (`bom_multitable_router.py`): `401` → `403` write-entitlement (`plm.bom_multitable_writeback`) → `403` `Part BOM`/`update` → `400` (malformed / empty whitelist / missing-or-over-long `Idempotency-Key` / non-scalar quantity, all before any object lookup) → `404` part-missing / line∉part → `409` `is_item_locked(parent)` → apply. Thin `{ok, bom_line_id}` (not the read/embed affordance envelope).
 - **Write entitlement** = `plm.bom_multitable_writeback`, a distinct SKU registered in `FEATURE_APP_NAMES` (a read-only-licensed tenant gets 403 on write).
-- **`meta_bom_writeback_audit`** (`idempotency_key String(64) NOT NULL UNIQUE` + before/after JSONB + provenance): **one insert simultaneously serves** the single-use replay-cache *and* the atomic write-back audit — an audit-insert failure rolls back the mutation (a governed write never succeeds without its diff). Main-tree migration (append) + tenant-tree single baseline (regenerated via `scripts/generate_tenant_baseline.py`).
+- **`meta_bom_writeback_audit`** (`idempotency_key String(64) NOT NULL`, UNIQUE per-tenant on `(tenant_id, idempotency_key)` — originally a global UNIQUE; see §7 — + before/after JSONB + provenance): **one insert simultaneously serves** the single-use replay-cache *and* the atomic write-back audit — an audit-insert failure rolls back the mutation (a governed write never succeeds without its diff). Main-tree migration (append) + tenant-tree single baseline (regenerated via `scripts/generate_tenant_baseline.py`).
 
 ## 3. Verification
 
