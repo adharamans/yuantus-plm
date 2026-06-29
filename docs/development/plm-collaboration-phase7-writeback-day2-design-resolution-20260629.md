@@ -65,7 +65,7 @@ Provider unit/integration: write-entitlement 403; permission 403; malformed/empt
 
 This doc lands (docs) → governed endpoint PR on a fresh `origin/main` worktree (endpoint + governed `write_line` + `meta_bom_writeback_audit` model + migration ×2 + entitlement registration + fixture write-license seed + the §7 tests) → verifier green → land on `adharamans/yuantus-plm` after the `contracts` gate → metasheet2 #3332 follow-up (providerState text + `Idempotency-Key`) → broker re-add of the amended interaction.
 
-## 10. Build conformance gates (G1-G5) - owner-ratified 2026-06-28
+## 10. Build conformance gates (G1-G5) - owner-ratified 2026-06-29
 
 NOT new design - acceptance gates the governed-endpoint PR must pass item-by-item. Gap-checked against `origin/main` @ `73e94559`; the only delta from the §0 grounding `1934cafc` is this doc itself (via #901), so the code grounding is current.
 
