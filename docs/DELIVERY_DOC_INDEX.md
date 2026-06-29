@@ -1245,6 +1245,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md: `docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md`
 - docs/development/lifecycle-transition-history-taskbook-20260619.md: `docs/development/lifecycle-transition-history-taskbook-20260619.md`
 - docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md: `docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md`
+- docs/development/plm-collab-integration-development-plan-and-todo-20260629.md: `docs/development/plm-collab-integration-development-plan-and-todo-20260629.md`
 - docs/development/plm-collab-line-dev-verification-20260625.md: `docs/development/plm-collab-line-dev-verification-20260625.md`
 - docs/development/plm-collab-line-remaining-development-plan-20260625.md: `docs/development/plm-collab-line-remaining-development-plan-20260625.md`
 - docs/development/plm-collab-pact-broker-autogate-design-20260621.md: `docs/development/plm-collab-pact-broker-autogate-design-20260621.md`
