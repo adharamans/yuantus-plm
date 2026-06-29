@@ -11,6 +11,9 @@ Pins (the owner-ratified shape + invariants):
   action_status "stubbed").
 - bom_multitable (lit, P3-B): supported true, api_version v1, scenarios [bom_review], NO
   actions; unentitled -> entitled false; entitled ONLY by plm.bom_multitable (not plm.collab).
+- bom_multitable_writeback (lit, Phase-7): supported true, api_version v1,
+  scenarios [bom_review], actions [line_patch], action_status governed; entitled ONLY by
+  plm.bom_multitable_writeback (not the read SKU).
 - every feature carries cache_scope {supported:"global", entitled:"tenant"}.
 - ``supported`` is DERIVED from FEATURE_APP_NAMES lit-ness (not hardcoded).
 - descriptor keys are a subset of FEATURE_APP_NAMES (so is_entitled never sees an
@@ -108,6 +111,13 @@ def test_unentitled_supported_but_not_entitled(db_session):
     assert bm["scenarios"] == ["bom_review"]
     assert bm["entitled"] is False
     assert "actions" not in bm and "action_status" not in bm
+    wb = feats["bom_multitable_writeback"]
+    assert wb["supported"] is True
+    assert wb["api_version"] == "v1"
+    assert wb["scenarios"] == ["bom_review"]
+    assert wb["actions"] == ["line_patch"]
+    assert wb["action_status"] == "governed"
+    assert wb["entitled"] is False
 
 
 def test_entitled_emits_rich_descriptor(db_session):
@@ -132,6 +142,22 @@ def test_bom_multitable_entitled_by_its_own_sku_only(db_session):
     assert "actions" not in bm and "action_status" not in bm
     # independence: lighting/entitling bom_multitable did NOT entitle approval_automation
     assert feats["approval_automation"]["entitled"] is False
+    # independence: the read SKU does NOT unlock the Phase-7 governed write feature
+    assert feats["bom_multitable_writeback"]["entitled"] is False
+
+
+def test_bom_multitable_writeback_entitled_by_its_own_sku_only(db_session):
+    # Phase-7: the governed write feature is independent from the read projection.
+    _add_license(db_session, app_name="plm.bom_multitable_writeback")
+    feats = _client(db_session).get(CAPS).json()["features"]
+    wb = feats["bom_multitable_writeback"]
+    assert wb["supported"] is True and wb["entitled"] is True
+    assert wb["api_version"] == "v1"
+    assert wb["scenarios"] == ["bom_review"]
+    assert wb["actions"] == ["line_patch"]
+    assert wb["action_status"] == "governed"
+    assert feats["bom_multitable"]["entitled"] is False
+    assert feats["approval_automation"]["entitled"] is False
 
 
 def test_bom_multitable_not_entitled_by_collab_license(db_session):
@@ -140,6 +166,9 @@ def test_bom_multitable_not_entitled_by_collab_license(db_session):
     bm = _client(db_session).get(CAPS).json()["features"]["bom_multitable"]
     assert bm["supported"] is True  # supported = lit-ness (tenant-independent)
     assert bm["entitled"] is False  # but a different SKU's license does not entitle it
+    assert _client(db_session).get(CAPS).json()["features"]["bom_multitable_writeback"][
+        "entitled"
+    ] is False
 
 
 def test_every_feature_declares_cache_scope(db_session):
