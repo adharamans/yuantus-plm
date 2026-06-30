@@ -14,8 +14,9 @@ Read-only: does not write history and does not touch all-attempts.
 """
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -56,6 +57,43 @@ def _serialize(row: LifecycleTransitionHistory) -> Dict[str, Any]:
     }
 
 
+def _validate_outcomes(outcome: Optional[List[str]]) -> Optional[List[str]]:
+    if not outcome:
+        return None
+    invalid = sorted({o for o in outcome if o not in _VALID_OUTCOMES})
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid outcome(s): %s; allowed: %s"
+            % (", ".join(invalid), ", ".join(_VALID_OUTCOMES)),
+        )
+    return outcome
+
+
+def _parse_dt(value: Optional[str], field: str, *, end_of_day: bool = False) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid %s: %r is not an ISO-8601 date/datetime" % (field, value),
+        )
+    # A date-only UPPER bound (no time component) must include the whole day, else
+    # `?created_before=2026-06-05` (parsed as 00:00) would exclude every daytime row on
+    # the 5th. Lower bound is fine at 00:00 (it includes the day). A datetime with an
+    # explicit time is used exactly as given.
+    if end_of_day and "T" not in value and ":" not in value:
+        dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return dt
+
+
+def _counter_rows(counter: Counter[Any], key_name: str, limit: int) -> List[Dict[str, Any]]:
+    rows = sorted(counter.items(), key=lambda item: (-item[1], "" if item[0] is None else str(item[0])))
+    return [{key_name: key, "count": count} for key, count in rows[:limit]]
+
+
 @lifecycle_transition_history_router.get("/items/{item_id}/transition-history")
 def get_item_transition_history(
     item_id: str,
@@ -84,6 +122,90 @@ def get_item_transition_history(
     # returns every outcome.
     rows = LifecycleService(db).get_transition_history(item_id, limit=limit, success_only=True)
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}
+
+
+@lifecycle_transition_history_router.get("/transition-history/forensic/summary")
+def summarize_forensic_transition_history(
+    limit: int = Query(
+        1000,
+        ge=1,
+        le=5000,
+        description="Maximum audit rows to scan for this ops summary.",
+    ),
+    top_n: int = Query(10, ge=1, le=50),
+    outcome: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Optional repeatable outcome filter. Allowed: success|denied|blocked|aborted|failed."
+        ),
+    ),
+    reason_code: Optional[List[str]] = Query(
+        None,
+        description="Optional repeatable properties.reason_code filter.",
+    ),
+    actor: Optional[List[int]] = Query(
+        None,
+        description="Optional repeatable actor_user_id filter.",
+    ),
+    created_after: Optional[str] = Query(None),
+    created_before: Optional[str] = Query(None),
+    _admin: Identity = Depends(require_superuser),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Forensic ops aggregate over lifecycle transition attempts.
+
+    Cross-item, superuser-only, read-only: gives operators top outcomes / reasons / failed
+    items / failed actors without exposing failed attempts through the item-scoped route.
+    Declared before ``/transition-history/forensic/{item_id}`` so the literal "summary" is
+    not captured as an item id.
+    """
+    outcomes = _validate_outcomes(outcome)
+    after_dt = _parse_dt(created_after, "created_after")
+    before_dt = _parse_dt(created_before, "created_before", end_of_day=True)
+    query = db.query(LifecycleTransitionHistory)
+    if outcomes:
+        query = query.filter(LifecycleTransitionHistory.outcome.in_(tuple(outcomes)))
+    if reason_code:
+        query = query.filter(
+            LifecycleTransitionHistory.properties["reason_code"].as_string().in_(
+                tuple(reason_code)
+            )
+        )
+    if actor:
+        query = query.filter(LifecycleTransitionHistory.actor_user_id.in_(tuple(actor)))
+    if after_dt is not None:
+        query = query.filter(LifecycleTransitionHistory.created_at >= after_dt)
+    if before_dt is not None:
+        query = query.filter(LifecycleTransitionHistory.created_at <= before_dt)
+    rows: Sequence[LifecycleTransitionHistory] = (
+        query.order_by(
+            LifecycleTransitionHistory.created_at.desc(),
+            LifecycleTransitionHistory.id.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+    failed_rows = [row for row in rows if row.outcome != "success"]
+    reason_counter: Counter[Any] = Counter()
+    for row in failed_rows:
+        props = row.properties if isinstance(row.properties, dict) else {}
+        reason = props.get("reason_code")
+        if reason:
+            reason_counter[reason] += 1
+    return {
+        "total_rows": len(rows),
+        "failed_rows": len(failed_rows),
+        "scanned_limit": limit,
+        "top_n": top_n,
+        "top_outcomes": _counter_rows(Counter(row.outcome for row in rows), "outcome", top_n),
+        "top_reason_codes": _counter_rows(reason_counter, "reason_code", top_n),
+        "top_failed_item_ids": _counter_rows(
+            Counter(row.item_id for row in failed_rows), "item_id", top_n
+        ),
+        "top_failed_actor_user_ids": _counter_rows(
+            Counter(row.actor_user_id for row in failed_rows), "actor_user_id", top_n
+        ),
+    }
 
 
 @lifecycle_transition_history_router.get("/transition-history/forensic/{item_id}")
@@ -150,35 +272,7 @@ def get_forensic_transition_history(
     including failed/denied/blocked/aborted attempts — those are forensic-tier-only; the item-scoped
     route filters to ``success_only``.
     """
-    outcomes: Optional[List[str]] = None
-    if outcome:
-        invalid = sorted({o for o in outcome if o not in _VALID_OUTCOMES})
-        if invalid:
-            raise HTTPException(
-                status_code=400,
-                detail="invalid outcome(s): %s; allowed: %s"
-                % (", ".join(invalid), ", ".join(_VALID_OUTCOMES)),
-            )
-        outcomes = outcome
-
-    def _parse_dt(value: Optional[str], field: str, *, end_of_day: bool = False) -> Optional[datetime]:
-        if value is None:
-            return None
-        try:
-            dt = datetime.fromisoformat(value)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="invalid %s: %r is not an ISO-8601 date/datetime" % (field, value),
-            )
-        # A date-only UPPER bound (no time component) must include the whole day, else
-        # `?created_before=2026-06-05` (parsed as 00:00) would exclude every daytime row on
-        # the 5th. Lower bound is fine at 00:00 (it includes the day). A datetime with an
-        # explicit time is used exactly as given.
-        if end_of_day and "T" not in value and ":" not in value:
-            dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return dt
-
+    outcomes = _validate_outcomes(outcome)
     after_dt = _parse_dt(created_after, "created_after")
     before_dt = _parse_dt(created_before, "created_before", end_of_day=True)
     rows = LifecycleService(db).get_transition_history(

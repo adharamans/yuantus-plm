@@ -348,8 +348,8 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
     from yuantus.api.app import create_app
 
     app = create_app()
-    # 729 after the CAD-PDM C3 date-obsolete impact export route.
-    assert len(app.routes) == 729
+    # 730 after the lifecycle forensic summary route.
+    assert len(app.routes) == 730
 
 
 # ==========================================================================

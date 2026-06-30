@@ -452,3 +452,58 @@ def test_forensic_created_before_datetime_is_exact_instant(client, db):
     body = client.get(_FORENSIC.format("GONE") + "?created_before=2026-06-05T12:00:00").json()
     assert body["count"] == 1  # only the 08:00 row is <= noon
     assert [r["to_state_name"] for r in body["items"]] == ["am"]
+
+
+# -- forensic cross-item summary (L2 next-slice) ------------------------------
+def test_forensic_summary_aggregates_top_failures_and_reasons(client, db):
+    _hist(db, item_id="I-1", created_at=datetime(2026, 6, 1), outcome="denied",
+          actor_user_id=7, properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="I-1", created_at=datetime(2026, 6, 2), outcome="denied",
+          actor_user_id=7, properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="I-2", created_at=datetime(2026, 6, 3), outcome="blocked",
+          actor_user_id=42, properties={"reason_code": "condition_failed"})
+    _hist(db, item_id="I-3", created_at=datetime(2026, 6, 4), outcome="success",
+          actor_user_id=7)
+    r = client.get("/api/v1/transition-history/forensic/summary?top_n=2")
+    assert r.status_code == 200  # /summary is literal, not forensic/{item_id}
+    body = r.json()
+    assert body["total_rows"] == 4
+    assert body["failed_rows"] == 3
+    assert body["top_outcomes"] == [
+        {"outcome": "denied", "count": 2},
+        {"outcome": "blocked", "count": 1},
+    ]
+    assert body["top_reason_codes"] == [
+        {"reason_code": "permission_denied", "count": 2},
+        {"reason_code": "condition_failed", "count": 1},
+    ]
+    assert body["top_failed_item_ids"][0] == {"item_id": "I-1", "count": 2}
+    assert body["top_failed_actor_user_ids"][0] == {"actor_user_id": 7, "count": 2}
+
+
+def test_forensic_summary_reuses_filters(client, db):
+    _hist(db, item_id="I-1", created_at=datetime(2026, 6, 1), outcome="denied",
+          actor_user_id=7, properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="I-2", created_at=datetime(2026, 6, 2), outcome="blocked",
+          actor_user_id=42, properties={"reason_code": "condition_failed"})
+    _hist(db, item_id="I-3", created_at=datetime(2026, 6, 7), outcome="denied",
+          actor_user_id=42, properties={"reason_code": "permission_denied"})
+    body = client.get(
+        "/api/v1/transition-history/forensic/summary"
+        "?outcome=denied&actor=42&created_after=2026-06-05"
+    ).json()
+    assert body["total_rows"] == 1
+    assert body["failed_rows"] == 1
+    assert body["top_failed_item_ids"] == [{"item_id": "I-3", "count": 1}]
+    assert body["top_reason_codes"] == [{"reason_code": "permission_denied", "count": 1}]
+
+
+def test_forensic_summary_invalid_outcome_is_400(client, db):
+    r = client.get("/api/v1/transition-history/forensic/summary?outcome=bogus")
+    assert r.status_code == 400
+    assert "invalid outcome" in r.json()["detail"]
+
+
+def test_forensic_summary_requires_superuser(client, db):
+    client.app.dependency_overrides[get_current_identity] = lambda: SimpleNamespace(is_superuser=False)
+    assert client.get("/api/v1/transition-history/forensic/summary").status_code == 403

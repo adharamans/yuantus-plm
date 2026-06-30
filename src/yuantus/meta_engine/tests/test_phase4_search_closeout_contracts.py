@@ -198,7 +198,9 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   (PATCH /api/v1/bom/multitable/{part_id}/lines/{bom_line_id}).
     # - 728 -> 729: + 1 CAD-PDM C3 date-obsolete impact export
     #   (GET /api/v1/cadpdm/date-obsolete-impacts/export).
-    assert len(app.routes) == 729
+    # - 729 -> 730: + 1 lifecycle forensic summary
+    #   (GET /api/v1/transition-history/forensic/summary).
+    assert len(app.routes) == 730
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:
