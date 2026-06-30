@@ -1,10 +1,19 @@
 from __future__ import annotations
 
-import csv
-from yuantus.meta_engine.web.csv_export_safety import safe_writer
 import io
 import json
 from typing import Any, Dict, Iterable, List, Optional
+
+from yuantus.meta_engine.web.csv_export_safety import (
+    neutralize_csv_formula,
+    safe_writer,
+)
+
+
+def _spreadsheet_safe_cell(value: Any) -> Any:
+    """Return a cell value safe for spreadsheet exports."""
+
+    return neutralize_csv_formula(value)
 
 
 class ImpactExportSection:
@@ -172,9 +181,9 @@ class EcoImpactExportService:
         for section in self.build_sections():
             title = self._sanitize_sheet_name(section.name)
             ws = wb.create_sheet(title=title)
-            ws.append(section.columns)
+            ws.append([_spreadsheet_safe_cell(c) for c in section.columns])
             for row in section.rows:
-                ws.append([self._format_cell(v) for v in row])
+                ws.append([self._format_xlsx_cell(v) for v in row])
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -362,6 +371,9 @@ class EcoImpactExportService:
         if isinstance(value, (dict, list, tuple)):
             return self._safe_json(value)
         return value
+
+    def _format_xlsx_cell(self, value: Any) -> Any:
+        return _spreadsheet_safe_cell(self._format_cell(value))
 
     def _sanitize_sheet_name(self, name: str) -> str:
         invalid = set('[]:*?/\\')

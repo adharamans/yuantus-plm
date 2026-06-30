@@ -168,7 +168,7 @@ jobs:
                 run_contracts="true"
                 reason_contracts="${reason_contracts:-matched date-obsolete impacts surface: ${f}}"
                 ;;
-              src/yuantus/meta_engine/web/csv_export_safety.py|src/yuantus/meta_engine/tests/test_csv_export_safety.py|src/yuantus/meta_engine/tests/test_csv_export_injection_regression.py)
+              src/yuantus/meta_engine/web/csv_export_safety.py|src/yuantus/meta_engine/services/eco_export_service.py|src/yuantus/meta_engine/tests/test_csv_export_safety.py|src/yuantus/meta_engine/tests/test_csv_export_injection_regression.py|src/yuantus/meta_engine/tests/test_eco_export_service.py)
                 run_contracts="true"
                 reason_contracts="${reason_contracts:-matched csv export-safety surface: ${f}}"
                 ;;
@@ -459,6 +459,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_eco_approval_workflow_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_change_analysis_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_core_router_contracts.py \
+            src/yuantus/meta_engine/tests/test_eco_export_service.py \
             src/yuantus/meta_engine/tests/test_eco_impact_apply_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_lifecycle_router_contracts.py \
             src/yuantus/meta_engine/tests/test_eco_router_decomposition_closeout_contracts.py \
