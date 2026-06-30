@@ -1,8 +1,11 @@
 """CAD-PDM C3 Slice 2 — worker gating + drain, and admin ops routes."""
 from __future__ import annotations
 
+import csv
+import json
 import uuid
 from datetime import datetime, timedelta
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
@@ -228,10 +231,10 @@ def client_nonadmin(Session):
     app.dependency_overrides.clear()
 
 
-def _impact_co(db, iid, *, state="open", child_obsoleted=False):
+def _impact_co(db, iid, *, state="open", child_obsoleted=False, properties=None):
     db.add(DateObsoleteImpact(id=iid, effectivity_id=f"e-{iid}", child_item_id="C", parent_item_id="P",
                               child_obsoleted=child_obsoleted, reason="child_effectivity_expired",
-                              state=state, detected_at=_NOW))
+                              state=state, detected_at=_NOW, properties=properties or {}))
     db.commit()
 
 
@@ -313,3 +316,56 @@ def test_summary_child_obsoleted_filter(client, db):
 
 def test_summary_requires_admin(client_nonadmin, db):
     assert client_nonadmin.get("/api/v1/cadpdm/date-obsolete-impacts/summary").status_code == 403
+
+
+# -- L3 next-slice: export/ad-hoc query surface -------------------------------
+def test_ops_list_filters_child_obsoleted(client, db):
+    _impact_co(db, "l1", child_obsoleted=True)
+    _impact_co(db, "l2", child_obsoleted=False)
+    body = client.get("/api/v1/cadpdm/date-obsolete-impacts?child_obsoleted=true").json()
+    assert body["count"] == 1
+    assert body["rows"][0]["id"] == "l1"
+
+
+def test_export_json_uses_filters_and_route_not_captured(client, db):
+    _impact_co(db, "x1", state="open", child_obsoleted=True, properties={"source": "worker"})
+    _impact_co(db, "x2", state="open", child_obsoleted=False)
+    r = client.get(
+        "/api/v1/cadpdm/date-obsolete-impacts/export"
+        "?format=json&state=open&child_obsoleted=true"
+    )
+    assert r.status_code == 200  # /export is a literal route, not /{impact_id}
+    assert r.headers["content-type"].startswith("application/json")
+    assert 'filename="date-obsolete-impacts.json"' in r.headers["content-disposition"]
+    body = r.json()
+    assert body["count"] == 1
+    assert body["rows"][0]["id"] == "x1"
+    assert body["rows"][0]["properties"] == {"source": "worker"}
+
+
+def test_export_csv_has_stable_header_and_json_properties(client, db):
+    _impact_co(db, "csv1", state="open", properties={"note": "需要复核"})
+    _impact_co(db, "csv2", state="acknowledged")
+    r = client.get("/api/v1/cadpdm/date-obsolete-impacts/export?format=csv&state=open")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert 'filename="date-obsolete-impacts.csv"' in r.headers["content-disposition"]
+    rows = list(csv.DictReader(StringIO(r.text)))
+    assert list(rows[0]) == [
+        "id", "effectivity_id", "child_item_id", "parent_item_id", "child_obsoleted",
+        "reason", "state", "detected_at", "acknowledged_at", "acknowledged_by_id",
+        "properties",
+    ]
+    assert len(rows) == 1
+    assert rows[0]["id"] == "csv1"
+    assert json.loads(rows[0]["properties"]) == {"note": "需要复核"}
+
+
+def test_export_invalid_format_422(client, db):
+    r = client.get("/api/v1/cadpdm/date-obsolete-impacts/export?format=xlsx")
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "cadpdm_date_obsolete_invalid_export_format"
+
+
+def test_export_requires_admin(client_nonadmin, db):
+    assert client_nonadmin.get("/api/v1/cadpdm/date-obsolete-impacts/export").status_code == 403
