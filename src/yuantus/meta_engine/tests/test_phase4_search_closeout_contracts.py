@@ -203,7 +203,9 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     # - 730 -> 732: + 2 lifecycle forensic drill-down/export routes
     #   (GET /api/v1/transition-history/forensic;
     #    GET /api/v1/transition-history/forensic/export).
-    assert len(app.routes) == 732
+    # - 732 -> 733: + 1 Phase-7 BOM write-back audit readout
+    #   (GET /api/v1/bom/multitable/writeback-audit).
+    assert len(app.routes) == 733
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

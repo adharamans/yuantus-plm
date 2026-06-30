@@ -17,19 +17,22 @@ its own SKU ``plm.bom_multitable``.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from yuantus.api.dependencies.auth import CurrentUser, get_current_user
+from yuantus.api.dependencies.admin_auth import require_superuser
+from yuantus.api.dependencies.auth import CurrentUser, Identity, get_current_user
 from yuantus.config import get_settings
 from yuantus.database import get_db
 from yuantus.meta_engine.app_framework.entitlement_service import EntitlementService
 from yuantus.meta_engine.app_framework.license_scope import resolve_license_scope
 from yuantus.meta_engine.lifecycle.guard import is_item_locked
 from yuantus.meta_engine.models.item import Item
+from yuantus.meta_engine.models.meta_bom_writeback_audit import MetaBomWritebackAudit
 from yuantus.meta_engine.models.meta_schema import ItemType
 from yuantus.meta_engine.schemas.aml import AMLAction
 from yuantus.meta_engine.services.bom_multitable_embed_token_service import (
@@ -85,6 +88,97 @@ def _affordance(entitled: bool) -> Dict[str, Any]:
         "feature_key": FEATURE_KEY,
         "entitled": entitled,
         "upgrade": {"available": not entitled},
+    }
+
+
+def _parse_dt(value: Optional[str], field: str, *, end_of_day: bool = False) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid {field}: {value!r} is not an ISO-8601 date/datetime",
+        )
+    if end_of_day and "T" not in value and ":" not in value:
+        dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return dt
+
+
+def _writeback_audit(row: MetaBomWritebackAudit) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "idempotency_key": row.idempotency_key,
+        "tenant_id": row.tenant_id,
+        "org_id": row.org_id,
+        "user_id": row.user_id,
+        "part_id": row.part_id,
+        "bom_line_id": row.bom_line_id,
+        "before": row.before,
+        "after": row.after,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@bom_multitable_router.get("/multitable/writeback-audit")
+def list_bom_multitable_writeback_audit(
+    response: Response,
+    part_id: Optional[str] = Query(None, description="Optional parent Part id filter."),
+    bom_line_id: Optional[str] = Query(None, description="Optional Part BOM line id filter."),
+    user_id: Optional[int] = Query(None, description="Optional actor user id filter."),
+    created_after: Optional[str] = Query(None, description="Inclusive created_at lower bound."),
+    created_before: Optional[str] = Query(None, description="Inclusive created_at upper bound."),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    admin: Identity = Depends(require_superuser),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Superuser readout of governed BOM multi-table write-back audit rows.
+
+    Read-only and tenant-scoped: this surfaces the domain audit rows already written atomically
+    by the Phase-7 write path, but never mutates a BOM line and never queries another tenant's
+    rows. It is intentionally an ops/admin readout, not a user-facing item read.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    tenant_id = getattr(admin, "tenant_id", None)
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant context required")
+
+    after_dt = _parse_dt(created_after, "created_after")
+    before_dt = _parse_dt(created_before, "created_before", end_of_day=True)
+    query = db.query(MetaBomWritebackAudit).filter(
+        MetaBomWritebackAudit.tenant_id == str(tenant_id)
+    )
+    if part_id:
+        query = query.filter(MetaBomWritebackAudit.part_id == part_id)
+    if bom_line_id:
+        query = query.filter(MetaBomWritebackAudit.bom_line_id == bom_line_id)
+    if user_id is not None:
+        query = query.filter(MetaBomWritebackAudit.user_id == user_id)
+    if after_dt is not None:
+        query = query.filter(MetaBomWritebackAudit.created_at >= after_dt)
+    if before_dt is not None:
+        query = query.filter(MetaBomWritebackAudit.created_at <= before_dt)
+
+    total = query.count()
+    rows = (
+        query.order_by(
+            MetaBomWritebackAudit.created_at.desc(),
+            MetaBomWritebackAudit.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "tenant_id": str(tenant_id),
+        "items": [_writeback_audit(row) for row in rows],
+        "count": len(rows),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 

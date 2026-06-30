@@ -348,8 +348,8 @@ def test_prometheus_surface_exposes_three_gauges_no_new_route():
     from yuantus.api.app import create_app
 
     app = create_app()
-    # 732 after lifecycle forensic drill-down/export routes.
-    assert len(app.routes) == 732
+    # 733 after the Phase-7 BOM write-back audit readout.
+    assert len(app.routes) == 733
 
 
 # ==========================================================================

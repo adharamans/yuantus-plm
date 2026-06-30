@@ -325,8 +325,9 @@ def test_allowlist_drops_wildcard_structurally():
 # --- route surface ------------------------------------------------------------
 
 def test_router_exposes_exactly_three_routes():
-    # GET context (P3-A) + POST embed-token (P3-D1) + PATCH write-back (Phase-7 Day-2).
-    assert len(bom_multitable_router.routes) == 3
+    # GET context (P3-A) + POST embed-token (P3-D1) + PATCH write-back (Phase-7 Day-2)
+    # + GET write-back audit readout (Phase-7 admin ops).
+    assert len(bom_multitable_router.routes) == 4
 
 
 def test_live_app_owns_the_embed_token_post_route():

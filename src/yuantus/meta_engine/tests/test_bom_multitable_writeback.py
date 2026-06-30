@@ -17,6 +17,8 @@ registration + ``create_all``). Entitlement runs the REAL ``is_entitled`` query 
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -27,6 +29,7 @@ from sqlalchemy.pool import StaticPool
 # Importing the app registers ALL ORM models on Base.metadata (Item's FK web), so
 # create_all below builds the full schema -- including meta_bom_writeback_audit.
 from yuantus.api.app import create_app  # noqa: F401  (import side-effect: model registration)
+from yuantus.api.dependencies.admin_auth import require_superuser
 from yuantus.api.dependencies.auth import get_current_user
 from yuantus.config import get_settings
 from yuantus.database import get_db
@@ -53,6 +56,11 @@ CHILD_ID = "WBC1"
 OTHER_PART_ID = "WBP2"
 
 _USER = type("_User", (), {"id": 7, "roles": ["engineer"], "is_superuser": False})()
+_ADMIN = type(
+    "_Admin",
+    (),
+    {"user_id": 1, "tenant_id": TENANT, "org_id": None, "is_superuser": True},
+)()
 
 
 @pytest.fixture
@@ -79,7 +87,7 @@ def _single_mode(monkeypatch):
     get_settings.cache_clear()
 
 
-def _client(db_session, *, user="auth"):
+def _client(db_session, *, user="auth", superuser=True):
     app = FastAPI()
     app.include_router(bom_multitable_router, prefix="/api/v1")
     app.dependency_overrides[get_db] = lambda: db_session
@@ -90,6 +98,13 @@ def _client(db_session, *, user="auth"):
             raise HTTPException(status_code=401, detail="Unauthorized")
 
         app.dependency_overrides[get_current_user] = _unauth
+    if superuser:
+        app.dependency_overrides[require_superuser] = lambda: _ADMIN
+    else:
+        def _not_superuser():
+            raise HTTPException(status_code=403, detail="Superuser required")
+
+        app.dependency_overrides[require_superuser] = _not_superuser
     return TestClient(app)
 
 
@@ -547,11 +562,155 @@ def test_service_same_key_different_payload_raises_conflict(db_session):
 
 # --- route surface ------------------------------------------------------------
 
-def test_router_exposes_three_routes_incl_patch_writeback():
+def test_router_exposes_writeback_and_audit_readout_routes():
     paths = {(r.path, tuple(sorted(r.methods))) for r in bom_multitable_router.routes}
     assert (
         "/bom/multitable/{part_id}/lines/{bom_line_id}", ("PATCH",)
     ) in paths
+    assert ("/bom/multitable/writeback-audit", ("GET",)) in paths
+
+
+# --- admin write-back audit readout ------------------------------------------
+
+def _add_audit_row(
+    db_session,
+    *,
+    row_id: str,
+    idempotency_key: str,
+    tenant_id: str = TENANT,
+    user_id: int = 7,
+    part_id: str = PART_ID,
+    bom_line_id: str = LINE_ID,
+    created_at: datetime | None = None,
+):
+    db_session.add(
+        MetaBomWritebackAudit(
+            id=row_id,
+            idempotency_key=idempotency_key,
+            tenant_id=tenant_id,
+            org_id=None,
+            user_id=user_id,
+            part_id=part_id,
+            bom_line_id=bom_line_id,
+            before={"quantity": 1},
+            after={"quantity": 2},
+            status="applied",
+            created_at=created_at or datetime(2026, 6, 30, 12, 0, 0),
+        )
+    )
+    db_session.commit()
+
+
+def test_writeback_audit_readout_requires_superuser(db_session):
+    _add_audit_row(db_session, row_id="audit-1", idempotency_key="audit-key")
+
+    r = _client(db_session, superuser=False).get("/api/v1/bom/multitable/writeback-audit")
+
+    assert r.status_code == 403
+
+
+def test_writeback_audit_readout_lists_current_tenant_only_newest_first(db_session):
+    _add_audit_row(
+        db_session,
+        row_id="old",
+        idempotency_key="old-key",
+        created_at=datetime(2026, 6, 30, 10, 0, 0),
+    )
+    _add_audit_row(
+        db_session,
+        row_id="new",
+        idempotency_key="new-key",
+        created_at=datetime(2026, 6, 30, 11, 0, 0),
+    )
+    _add_audit_row(
+        db_session,
+        row_id="other-tenant",
+        idempotency_key="other-key",
+        tenant_id="other",
+        created_at=datetime(2026, 6, 30, 12, 0, 0),
+    )
+
+    r = _client(db_session).get("/api/v1/bom/multitable/writeback-audit")
+
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    body = r.json()
+    assert body["tenant_id"] == TENANT
+    assert body["count"] == 2
+    assert body["total"] == 2
+    assert [row["id"] for row in body["items"]] == ["new", "old"]
+    assert body["items"][0]["idempotency_key"] == "new-key"
+    assert body["items"][0]["before"] == {"quantity": 1}
+    assert body["items"][0]["after"] == {"quantity": 2}
+
+
+def test_writeback_audit_readout_filters(db_session):
+    _add_audit_row(
+        db_session,
+        row_id="match",
+        idempotency_key="match-key",
+        user_id=7,
+        part_id=PART_ID,
+        bom_line_id=LINE_ID,
+        created_at=datetime(2026, 6, 30, 11, 0, 0),
+    )
+    _add_audit_row(
+        db_session,
+        row_id="wrong-line",
+        idempotency_key="wrong-line-key",
+        user_id=7,
+        part_id=PART_ID,
+        bom_line_id="OTHER-LINE",
+        created_at=datetime(2026, 6, 30, 11, 30, 0),
+    )
+    _add_audit_row(
+        db_session,
+        row_id="wrong-user",
+        idempotency_key="wrong-user-key",
+        user_id=8,
+        part_id=PART_ID,
+        bom_line_id=LINE_ID,
+        created_at=datetime(2026, 6, 30, 11, 45, 0),
+    )
+
+    r = _client(db_session).get(
+        "/api/v1/bom/multitable/writeback-audit",
+        params={
+            "part_id": PART_ID,
+            "bom_line_id": LINE_ID,
+            "user_id": "7",
+            "created_after": "2026-06-30T10:59:00",
+            "created_before": "2026-06-30",
+        },
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 1
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == "match"
+
+
+def test_writeback_audit_readout_no_match_returns_empty_200(db_session):
+    _add_audit_row(db_session, row_id="audit-1", idempotency_key="audit-key")
+
+    r = _client(db_session).get(
+        "/api/v1/bom/multitable/writeback-audit",
+        params={"part_id": "NOPE"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+
+
+def test_writeback_audit_readout_invalid_datetime_is_400(db_session):
+    r = _client(db_session).get(
+        "/api/v1/bom/multitable/writeback-audit",
+        params={"created_after": "not-a-date"},
+    )
+
+    assert r.status_code == 400
+    assert "created_after" in r.json()["detail"]
 
 
 # --- P1 follow-up: per-tenant idempotency scope (cross-tenant isolation) -------

@@ -69,7 +69,9 @@ from yuantus.api.app import create_app
 # 732 = 730 + 2 lifecycle forensic drill-down/export routes
 #   (GET /api/v1/transition-history/forensic;
 #    GET /api/v1/transition-history/forensic/export) -- superuser-gated ops surfaces.
-EXPECTED_TOTAL_ROUTES = 732
+# 733 = 732 + 1 Phase-7 BOM write-back audit readout
+#   (GET /api/v1/bom/multitable/writeback-audit) -- superuser-gated ops readout.
+EXPECTED_TOTAL_ROUTES = 733
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
