@@ -45,6 +45,7 @@ from yuantus.models.base import Base
 from yuantus.meta_engine.app_framework import entitlement_service as es
 from yuantus.meta_engine.app_framework.store_models import AppLicense
 from yuantus.meta_engine.models.item import Item
+from yuantus.meta_engine.services.bom_multitable_writeback_service import bom_line_write_etag
 from yuantus.meta_engine.services.meta_permission_service import MetaPermissionService
 from yuantus.meta_engine.web.bom_multitable_router import bom_multitable_router
 
@@ -62,6 +63,7 @@ _LINE_KEYS = {
     "part_id",  # read-only technical key (the child PART id)
     "item_number", "name", "state", "generation",
     "quantity", "uom", "find_num", "refdes",
+    "write_etag",
     "level", "path", "path_labels",
     "source_version", "source_updated_at", "sync_status",
 }
@@ -254,11 +256,13 @@ def test_get_entitled_returns_curated_flattened_tree_snapshot(db_session, monkey
     assert c1["path"] == ["P1"] and c1["path_labels"] == ["P-001"]
     assert c1["quantity"] == 2 and c1["uom"] == "EA" and c1["find_num"] == "10" and c1["refdes"] == "R1,R2"
     assert c1["source_version"] == 1  # C1.generation (the displayed one)
+    assert c1["write_etag"] == bom_line_write_etag(db_session.get(Item, "R1"))
 
     assert d1["bom_line_id"] == "R2" and d1["part_id"] == "D1"
     assert d1["item_number"] == "D-001" and d1["level"] == 2
     assert d1["path"] == ["P1", "C1"] and d1["path_labels"] == ["P-001", "C-001"]
     assert d1["quantity"] == 4 and d1["source_version"] == 2  # D1.generation
+    assert d1["write_etag"] == bom_line_write_etag(db_session.get(Item, "R2"))
     # the stable-key invariant the owner asked for: a line's path[-1] is its parent's part_id
     assert d1["path"][-1] == c1["part_id"]
 

@@ -231,9 +231,18 @@ def client_nonadmin(Session):
     app.dependency_overrides.clear()
 
 
-def _impact_co(db, iid, *, state="open", child_obsoleted=False, properties=None):
-    db.add(DateObsoleteImpact(id=iid, effectivity_id=f"e-{iid}", child_item_id="C", parent_item_id="P",
-                              child_obsoleted=child_obsoleted, reason="child_effectivity_expired",
+def _impact_co(
+    db,
+    iid,
+    *,
+    state="open",
+    child_obsoleted=False,
+    child_item_id="C",
+    reason="child_effectivity_expired",
+    properties=None,
+):
+    db.add(DateObsoleteImpact(id=iid, effectivity_id=f"e-{iid}", child_item_id=child_item_id, parent_item_id="P",
+                              child_obsoleted=child_obsoleted, reason=reason,
                               state=state, detected_at=_NOW, properties=properties or {}))
     db.commit()
 
@@ -359,6 +368,23 @@ def test_export_csv_has_stable_header_and_json_properties(client, db):
     assert len(rows) == 1
     assert rows[0]["id"] == "csv1"
     assert json.loads(rows[0]["properties"]) == {"note": "需要复核"}
+
+
+def test_export_csv_neutralizes_formula_cells(client, db):
+    _impact_co(
+        db,
+        "csv-formula",
+        state="open",
+        child_item_id="=cmd|' /C calc'!A0",
+        reason="+SUM(1,2)",
+        properties={"note": "@HYPERLINK(\"http://example.test\")"},
+    )
+    r = client.get("/api/v1/cadpdm/date-obsolete-impacts/export?format=csv&state=open")
+    assert r.status_code == 200
+    rows = list(csv.DictReader(StringIO(r.text)))
+    assert rows[0]["child_item_id"].startswith("'=")
+    assert rows[0]["reason"].startswith("'+")
+    assert json.loads(rows[0]["properties"]) == {"note": "@HYPERLINK(\"http://example.test\")"}
 
 
 def test_export_invalid_format_422(client, db):

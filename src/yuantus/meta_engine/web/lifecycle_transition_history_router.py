@@ -32,6 +32,7 @@ from yuantus.meta_engine.lifecycle.service import LifecycleService
 from yuantus.meta_engine.models.item import Item
 from yuantus.meta_engine.schemas.aml import AMLAction
 from yuantus.meta_engine.services.meta_permission_service import MetaPermissionService
+from yuantus.meta_engine.web.csv_export_safety import neutralize_csv_formula
 
 lifecycle_transition_history_router = APIRouter(tags=["Lifecycle"])
 
@@ -152,9 +153,9 @@ def _export_csv(rows: List[Dict[str, Any]]) -> str:
     for row in rows:
         writer.writerow(
             [
-                json.dumps(row.get(column) or {}, ensure_ascii=False)
+                neutralize_csv_formula(json.dumps(row.get(column) or {}, ensure_ascii=False))
                 if column == "properties"
-                else row.get(column)
+                else neutralize_csv_formula(row.get(column))
                 for column in _EXPORT_COLUMNS
             ]
         )

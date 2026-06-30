@@ -23,6 +23,7 @@ from yuantus.api.dependencies.auth import (
 )
 from yuantus.database import get_db
 from yuantus.meta_engine.models.date_obsolete import DateObsoleteImpact
+from yuantus.meta_engine.web.csv_export_safety import neutralize_csv_formula
 
 date_obsolete_ops_router = APIRouter(tags=["CADPDM"])
 
@@ -90,9 +91,9 @@ def _export_csv(rows: List[Dict[str, Any]]) -> str:
     for row in rows:
         writer.writerow(
             [
-                json.dumps(row.get("properties") or {}, ensure_ascii=False)
+                neutralize_csv_formula(json.dumps(row.get("properties") or {}, ensure_ascii=False))
                 if column == "properties"
-                else row.get(column)
+                else neutralize_csv_formula(row.get(column))
                 for column in _EXPORT_COLUMNS
             ]
         )

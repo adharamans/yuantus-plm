@@ -66,7 +66,14 @@ class BomLineWritebackPreconditionFailedError(Exception):
     """The optional ``If-Match`` precondition did not match the current BOM line ETag."""
 
 
-def bom_line_write_etag(line: Item) -> str:
+def bom_line_write_etag_from_values(
+    *,
+    bom_line_id: Any,
+    source_id: Any,
+    related_id: Any,
+    generation: Any,
+    properties: Dict[str, Any],
+) -> str:
     """Return the strong ETag for the editable representation of a BOM line.
 
     The tag covers the stable line identity + parent/child relation + current editable cell
@@ -75,18 +82,27 @@ def bom_line_write_etag(line: Item) -> str:
     editable-cell snapshot.
     """
 
-    props = dict(line.properties or {})
     payload = {
-        "bom_line_id": line.id,
-        "source_id": line.source_id,
-        "related_id": line.related_id,
-        "generation": line.generation,
-        "editable": {key: props.get(key) for key in WRITE_WHITELIST},
+        "bom_line_id": bom_line_id,
+        "source_id": source_id,
+        "related_id": related_id,
+        "generation": generation,
+        "editable": {key: properties.get(key) for key in WRITE_WHITELIST},
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     ).hexdigest()
     return f'"bom-line:{digest}"'
+
+
+def bom_line_write_etag(line: Item) -> str:
+    return bom_line_write_etag_from_values(
+        bom_line_id=line.id,
+        source_id=line.source_id,
+        related_id=line.related_id,
+        generation=line.generation,
+        properties=dict(line.properties or {}),
+    )
 
 
 def if_match_allows(if_match: Optional[str], current_etag: str) -> bool:
@@ -130,7 +146,12 @@ class BOMMultitableWritebackService:
         payload -> cached ``{ok, bom_line_id}`` (no re-apply); different payload ->
         :class:`BomLineWritebackConflictError` (-> 409).
         """
-        line = self.session.get(Item, bom_line_id)
+        line = (
+            self.session.query(Item)
+            .filter(Item.id == bom_line_id)
+            .with_for_update()
+            .one_or_none()
+        )
         if (
             line is None
             or line.item_type_id != BOM_LINE_TYPE

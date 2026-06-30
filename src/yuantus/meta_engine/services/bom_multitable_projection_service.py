@@ -49,6 +49,9 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from yuantus.meta_engine.services.bom_service import BOMService
+from yuantus.meta_engine.services.bom_multitable_writeback_service import (
+    bom_line_write_etag_from_values,
+)
 
 FEATURE_KEY = "bom_multitable"
 TEMPLATE_KEY = "bom_review"
@@ -161,6 +164,13 @@ class BOMMultitableProjectionService:
                 **_curate_item(child, _LINE_ITEM_FIELDS),
             }
             line.update({key: rel_props.get(key) for key in _LINE_REL_FIELDS})
+            line["write_etag"] = bom_line_write_etag_from_values(
+                bom_line_id=rel.get("id"),
+                source_id=rel.get("source_id"),
+                related_id=rel.get("related_id"),
+                generation=rel.get("generation"),
+                properties=rel_props,
+            )
             line["level"] = level
             line["path"] = list(path)  # ancestor part-ids (stable hierarchy key)
             line["path_labels"] = list(path_labels)  # ancestor item_numbers (display only)

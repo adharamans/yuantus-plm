@@ -568,6 +568,26 @@ def test_forensic_export_csv_has_stable_header_and_json_properties(client, db):
     assert json.loads(rows[0]["properties"]) == {"reason_code": "permission_denied"}
 
 
+def test_forensic_export_csv_neutralizes_formula_cells(client, db):
+    _hist(
+        db,
+        item_id="=cmd|' /C calc'!A0",
+        created_at=datetime(2026, 6, 1),
+        outcome="denied",
+        actor_user_id=7,
+        comment="+SUM(1,2)",
+        properties={"reason_code": "@HYPERLINK(\"http://example.test\")"},
+    )
+    r = client.get("/api/v1/transition-history/forensic/export?format=csv")
+    assert r.status_code == 200
+    rows = list(csv.DictReader(StringIO(r.text)))
+    assert rows[0]["item_id"].startswith("'=")
+    assert rows[0]["comment"].startswith("'+")
+    assert json.loads(rows[0]["properties"]) == {
+        "reason_code": "@HYPERLINK(\"http://example.test\")"
+    }
+
+
 def test_forensic_export_invalid_format_422(client, db):
     r = client.get("/api/v1/transition-history/forensic/export?format=xlsx")
     assert r.status_code == 422
