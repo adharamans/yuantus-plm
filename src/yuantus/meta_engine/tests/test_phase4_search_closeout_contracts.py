@@ -196,7 +196,9 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     # - 724 -> 725: + 1 L4 Fork C license revoke (POST /api/v1/admin/licenses/{key}/revoke).
     # - 727 -> 728: + 1 Phase-7 Day-2 governed BOM multi-table write-back
     #   (PATCH /api/v1/bom/multitable/{part_id}/lines/{bom_line_id}).
-    assert len(app.routes) == 728
+    # - 728 -> 729: + 1 CAD-PDM C3 date-obsolete impact export
+    #   (GET /api/v1/cadpdm/date-obsolete-impacts/export).
+    assert len(app.routes) == 729
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

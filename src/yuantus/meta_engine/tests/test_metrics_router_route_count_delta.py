@@ -62,7 +62,9 @@ from yuantus.api.app import create_app
 # 728 = 727 + 1 Phase-7 Day-2 governed BOM multi-table write-back
 #   (PATCH /api/v1/bom/multitable/{part_id}/lines/{bom_line_id}) -- distinct write SKU,
 #   lifecycle-guarded + single-use replay + atomic write-back audit.
-EXPECTED_TOTAL_ROUTES = 728
+# 729 = 728 + 1 CAD-PDM C3 date-obsolete impact export route
+#   (GET /api/v1/cadpdm/date-obsolete-impacts/export) -- admin-gated ops export.
+EXPECTED_TOTAL_ROUTES = 729
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

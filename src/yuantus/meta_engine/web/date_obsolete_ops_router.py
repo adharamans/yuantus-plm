@@ -5,10 +5,13 @@ flags raised when a date effectivity expires. Read + ack only — never re-trigg
 """
 from __future__ import annotations
 
+import csv
+import json
+from io import StringIO
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -24,6 +27,20 @@ from yuantus.meta_engine.models.date_obsolete import DateObsoleteImpact
 date_obsolete_ops_router = APIRouter(tags=["CADPDM"])
 
 _IMPACT_STATES = {"open", "acknowledged"}
+_EXPORT_FORMATS = {"csv", "json"}
+_EXPORT_COLUMNS = [
+    "id",
+    "effectivity_id",
+    "child_item_id",
+    "parent_item_id",
+    "child_obsoleted",
+    "reason",
+    "state",
+    "detected_at",
+    "acknowledged_at",
+    "acknowledged_by_id",
+    "properties",
+]
 
 
 def _impact(row: DateObsoleteImpact) -> Dict[str, Any]:
@@ -42,24 +59,59 @@ def _impact(row: DateObsoleteImpact) -> Dict[str, Any]:
     }
 
 
-@date_obsolete_ops_router.get("/cadpdm/date-obsolete-impacts")
-async def list_date_obsolete_impacts(
-    state: Optional[str] = Query(None),
-    limit: int = Query(200, ge=1, le=1000),
-    db: Session = Depends(get_db),
-    user: CurrentUser = Depends(get_current_user),
-):
-    require_admin_permission(user)
+def _validate_state(state: Optional[str]) -> None:
     if state is not None and state not in _IMPACT_STATES:
         raise HTTPException(
             status_code=422,
             detail={"code": "cadpdm_date_obsolete_invalid_state",
                     "message": f"state must be one of {sorted(_IMPACT_STATES)}"},
         )
+
+
+def _impact_query(
+    db: Session,
+    *,
+    state: Optional[str] = None,
+    child_obsoleted: Optional[bool] = None,
+):
+    _validate_state(state)
     q = db.query(DateObsoleteImpact)
     if state is not None:
         q = q.filter(DateObsoleteImpact.state == state)
-    rows = q.order_by(DateObsoleteImpact.detected_at.desc()).limit(limit).all()
+    if child_obsoleted is not None:
+        q = q.filter(DateObsoleteImpact.child_obsoleted == child_obsoleted)
+    return q.order_by(DateObsoleteImpact.detected_at.desc())
+
+
+def _export_csv(rows: List[Dict[str, Any]]) -> str:
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(_EXPORT_COLUMNS)
+    for row in rows:
+        writer.writerow(
+            [
+                json.dumps(row.get("properties") or {}, ensure_ascii=False)
+                if column == "properties"
+                else row.get(column)
+                for column in _EXPORT_COLUMNS
+            ]
+        )
+    return buffer.getvalue()
+
+
+@date_obsolete_ops_router.get("/cadpdm/date-obsolete-impacts")
+async def list_date_obsolete_impacts(
+    state: Optional[str] = Query(None),
+    child_obsoleted: Optional[bool] = Query(
+        None,
+        description="Optional filter: only impacts whose child was/was not obsoleted.",
+    ),
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    require_admin_permission(user)
+    rows = _impact_query(db, state=state, child_obsoleted=child_obsoleted).limit(limit).all()
     return {"count": len(rows), "rows": [_impact(r) for r in rows]}
 
 
@@ -86,6 +138,50 @@ async def date_obsolete_impacts_summary(
     counts = dict(q.group_by(DateObsoleteImpact.state).all())
     by_state = {s: int(counts.get(s, 0)) for s in sorted(_IMPACT_STATES)}
     return {"by_state": by_state, "total": sum(by_state.values())}
+
+
+@date_obsolete_ops_router.get("/cadpdm/date-obsolete-impacts/export")
+async def export_date_obsolete_impacts(
+    export_format: str = Query("csv", alias="format", description="csv or json"),
+    state: Optional[str] = Query(None),
+    child_obsoleted: Optional[bool] = Query(
+        None,
+        description="Optional filter: only impacts whose child was/was not obsoleted.",
+    ),
+    limit: int = Query(1000, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Export date-obsolete impacts for admin ops triage.
+
+    Read-only: this uses the same list filters and never acknowledges, reverts, or re-runs
+    the obsolete worker. Declared before ``/{impact_id}`` so the literal "export" is not
+    captured as a dynamic impact id.
+    """
+    require_admin_permission(user)
+    fmt = (export_format or "csv").lower().strip()
+    if fmt not in _EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "cadpdm_date_obsolete_invalid_export_format",
+                    "message": "format must be csv or json"},
+        )
+    rows = [
+        _impact(r)
+        for r in _impact_query(db, state=state, child_obsoleted=child_obsoleted)
+        .limit(limit)
+        .all()
+    ]
+    headers = {
+        "Content-Disposition": f'attachment; filename="date-obsolete-impacts.{fmt}"',
+    }
+    if fmt == "json":
+        return Response(
+            json.dumps({"count": len(rows), "rows": rows}, ensure_ascii=False),
+            media_type="application/json",
+            headers=headers,
+        )
+    return Response(_export_csv(rows), media_type="text/csv", headers=headers)
 
 
 class _BatchAcknowledgeRequest(BaseModel):
