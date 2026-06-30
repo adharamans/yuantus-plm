@@ -607,3 +607,48 @@ def test_service_same_tenant_same_key_different_payload_conflicts(db_session):
     with pytest.raises(BomLineWritebackConflictError):
         svc.write_line(PART_ID, LINE_ID, "ck", {"quantity": 9},
                        user_id=7, tenant_id="tenantA", org_id=None)
+
+
+def test_projection_write_etag_round_trips_as_if_match(db_session, monkeypatch):
+    """End-to-end loop: the ``write_etag`` a client RECEIVES from the read projection
+    (GET .../context), after JSON + If-Match HEADER transport, is accepted by the write
+    endpoint for an UNCHANGED line -> 200 (never a spurious 412), and the same value goes
+    stale after a write -> 412.
+
+    This locks the cross-surface invariant read_etag == write_etag through the real client
+    path: the existing If-Match tests feed a write-side ``bom_line_write_etag(Item)`` and the
+    projection test pins the value only at the unit level -- neither exercises GET-context ->
+    extract -> PATCH over HTTP, so an etag drift (or a serialization/quoting regression in the
+    header round-trip) between the two surfaces would ship green today.
+    """
+    _entitle(db_session, app_name=WRITE_APP)
+    _entitle(db_session, app_name=READ_APP)  # GET /context requires the read SKU
+    _allow_permission(monkeypatch)
+    _seed_line(db_session, quantity=1)
+    client = _client(db_session)
+
+    # READ: the exact write_etag a client receives over HTTP/JSON
+    ctx = client.get(f"/api/v1/bom/multitable/{PART_ID}/context")
+    assert ctx.status_code == 200, ctx.text
+    line = next(l for l in ctx.json()["context"]["lines"] if l["bom_line_id"] == LINE_ID)
+    read_etag = line["write_etag"]
+    assert read_etag.startswith('"bom-line:')
+
+    # WRITE: that same etag, transported back as an If-Match HEADER, satisfies the guard -> 200
+    r = client.patch(
+        _PATH.format(p=PART_ID, l=LINE_ID),
+        json={"quantity": 9},
+        headers={"Idempotency-Key": "im-rt", "If-Match": read_etag},
+    )
+    assert r.status_code == 200, r.text  # read-etag accepted -> NO spurious 412
+    assert r.headers["etag"] != read_etag  # post-write representation changed
+
+    # the now-stale read_etag is rejected on a second write -> 412 (staleness detection works)
+    r2 = client.patch(
+        _PATH.format(p=PART_ID, l=LINE_ID),
+        json={"quantity": 11},
+        headers={"Idempotency-Key": "im-rt-2", "If-Match": read_etag},
+    )
+    assert r2.status_code == 412
+    db_session.expire_all()
+    assert db_session.get(Item, LINE_ID).properties["quantity"] == 9  # second write blocked
