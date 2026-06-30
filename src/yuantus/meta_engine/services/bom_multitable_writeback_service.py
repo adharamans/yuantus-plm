@@ -22,6 +22,8 @@ re-enforces ``line ∈ part`` as defense-in-depth and performs the atomic apply.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Dict, Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -60,6 +62,45 @@ class BomLineWritebackConflictError(Exception):
     """
 
 
+class BomLineWritebackPreconditionFailedError(Exception):
+    """The optional ``If-Match`` precondition did not match the current BOM line ETag."""
+
+
+def bom_line_write_etag(line: Item) -> str:
+    """Return the strong ETag for the editable representation of a BOM line.
+
+    The tag covers the stable line identity + parent/child relation + current editable cell
+    values. It intentionally avoids DB timestamps: ``updated_at`` is nullable on fresh rows and
+    backend-specific precision can drift, while the write-back race we need to catch is a stale
+    editable-cell snapshot.
+    """
+
+    props = dict(line.properties or {})
+    payload = {
+        "bom_line_id": line.id,
+        "source_id": line.source_id,
+        "related_id": line.related_id,
+        "generation": line.generation,
+        "editable": {key: props.get(key) for key in WRITE_WHITELIST},
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    return f'"bom-line:{digest}"'
+
+
+def if_match_allows(if_match: Optional[str], current_etag: str) -> bool:
+    """Minimal RFC-style If-Match matcher for a single current representation."""
+
+    if if_match is None or not if_match.strip():
+        return True
+    candidates = {part.strip() for part in if_match.split(",") if part.strip()}
+    if "*" in candidates:
+        return True
+    unquoted = current_etag.strip('"')
+    return current_etag in candidates or unquoted in candidates
+
+
 class BOMMultitableWritebackService:
     """Governed single-line BOM write-back (replay guard + atomic audit + property mutation).
 
@@ -80,6 +121,7 @@ class BOMMultitableWritebackService:
         user_id: Optional[int],
         tenant_id: Optional[str],
         org_id: Optional[str],
+        if_match: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Apply the whitelisted cells of ONE governed BOM line, governed + atomically audited.
 
@@ -104,6 +146,29 @@ class BOMMultitableWritebackService:
         props = dict(line.properties or {})
         before = {key: props.get(key) for key in updates}
         after = dict(updates)
+        current_etag = bom_line_write_etag(line)
+
+        # If-Match is a T6 fast-follow optimistic-concurrency guard. A legitimate retry of an
+        # already-applied write must still be cacheable even though the current ETag changed, so
+        # check an existing same-tenant idempotency row before returning 412 for a stale new key.
+        if not if_match_allows(if_match, current_etag):
+            existing = (
+                self.session.query(MetaBomWritebackAudit)
+                .filter(
+                    MetaBomWritebackAudit.tenant_id == tenant_id,
+                    MetaBomWritebackAudit.idempotency_key == idempotency_key,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                if (
+                    existing.part_id == part_id
+                    and existing.bom_line_id == bom_line_id
+                    and (existing.after or {}) == after
+                ):
+                    return {"ok": True, "bom_line_id": bom_line_id}
+                raise BomLineWritebackConflictError(idempotency_key)
+            raise BomLineWritebackPreconditionFailedError(if_match)
 
         # P2/P3 single insert: the replay guard's unique key AND the audit diff are one row.
         audit = MetaBomWritebackAudit(

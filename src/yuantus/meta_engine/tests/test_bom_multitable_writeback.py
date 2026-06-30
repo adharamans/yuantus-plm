@@ -38,6 +38,7 @@ from yuantus.meta_engine.app_framework.store_models import AppLicense
 from yuantus.meta_engine.services.bom_multitable_writeback_service import (
     BomLineWritebackConflictError,
     BOMMultitableWritebackService,
+    bom_line_write_etag,
 )
 from yuantus.meta_engine.services.meta_permission_service import MetaPermissionService
 from yuantus.meta_engine.web.bom_multitable_router import bom_multitable_router
@@ -326,6 +327,76 @@ def test_draft_parent_applies_200(db_session, monkeypatch):
     assert props["quantity"] == 5 and props["uom"] == "box"
     # untouched cells preserved (partial PATCH)
     assert props["find_num"] == "10" and props["refdes"] == "WB1"
+
+
+# --- T6 optimistic concurrency: optional If-Match / 412 -----------------------
+
+def test_if_match_matching_etag_applies_and_returns_new_etag(db_session, monkeypatch):
+    _entitle(db_session)
+    _allow_permission(monkeypatch)
+    _seed_line(db_session, quantity=1)
+    current_etag = bom_line_write_etag(db_session.get(Item, LINE_ID))
+
+    r = _client(db_session).patch(
+        _PATH.format(p=PART_ID, l=LINE_ID),
+        json={"quantity": 10},
+        headers={"Idempotency-Key": "im-ok", "If-Match": current_etag},
+    )
+
+    assert r.status_code == 200
+    assert r.headers["etag"].startswith('"bom-line:')
+    assert r.headers["etag"] != current_etag
+    db_session.expire_all()
+    assert db_session.get(Item, LINE_ID).properties["quantity"] == 10
+    assert db_session.query(MetaBomWritebackAudit).filter_by(idempotency_key="im-ok").count() == 1
+
+
+def test_if_match_stale_etag_is_412_no_audit_no_change(db_session, monkeypatch):
+    _entitle(db_session)
+    _allow_permission(monkeypatch)
+    _seed_line(db_session, quantity=1)
+
+    r = _client(db_session).patch(
+        _PATH.format(p=PART_ID, l=LINE_ID),
+        json={"quantity": 10},
+        headers={"Idempotency-Key": "im-stale", "If-Match": '"bom-line:stale"'},
+    )
+
+    assert r.status_code == 412
+    db_session.expire_all()
+    assert db_session.get(Item, LINE_ID).properties["quantity"] == 1
+    assert db_session.query(MetaBomWritebackAudit).filter_by(idempotency_key="im-stale").count() == 0
+
+
+def test_idempotent_retry_with_old_if_match_is_cached_not_412(db_session, monkeypatch):
+    _entitle(db_session)
+    _allow_permission(monkeypatch)
+    _seed_line(db_session, quantity=1)
+    client = _client(db_session)
+    original_etag = bom_line_write_etag(db_session.get(Item, LINE_ID))
+
+    first = client.patch(
+        _PATH.format(p=PART_ID, l=LINE_ID),
+        json={"quantity": 10},
+        headers={"Idempotency-Key": "im-retry", "If-Match": original_etag},
+    )
+    assert first.status_code == 200
+
+    # Make the original ETag stale and prove the duplicate key returns the cached result rather
+    # than re-applying or failing 412. This preserves retry safety for the write-back surface.
+    line = db_session.get(Item, LINE_ID)
+    line.properties = {**line.properties, "quantity": 999}
+    db_session.commit()
+
+    retry = client.patch(
+        _PATH.format(p=PART_ID, l=LINE_ID),
+        json={"quantity": 10},
+        headers={"Idempotency-Key": "im-retry", "If-Match": original_etag},
+    )
+    assert retry.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Item, LINE_ID).properties["quantity"] == 999
+    assert db_session.query(MetaBomWritebackAudit).filter_by(idempotency_key="im-retry").count() == 1
 
 
 # --- single-use replay (design §2): cached 200 with NO re-apply; different payload -> 409 -----

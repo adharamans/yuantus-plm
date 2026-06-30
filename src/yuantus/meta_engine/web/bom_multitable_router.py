@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -47,7 +47,9 @@ from yuantus.meta_engine.services.bom_multitable_writeback_service import (
     WRITE_WHITELIST,
     BomLineNotInPartError,
     BomLineWritebackConflictError,
+    BomLineWritebackPreconditionFailedError,
     BOMMultitableWritebackService,
+    bom_line_write_etag,
 )
 from yuantus.meta_engine.services.meta_permission_service import MetaPermissionService
 from yuantus.models.audit import AuditLog
@@ -216,9 +218,11 @@ def bom_multitable_write_line(
     part_id: str,
     bom_line_id: str,
     body: BomLineWriteRequest,
+    response: Response,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    if_match: Optional[str] = Header(default=None, alias="If-Match"),
 ) -> Dict[str, Any]:
     """PLM-COLLAB Phase-7 write-back: PATCH the editable cells of one governed BOM line.
 
@@ -236,7 +240,9 @@ def bom_multitable_write_line(
        ``source_id == part_id``) -- the three cases are indistinguishable.
     6. ``409`` parent lifecycle-locked (``is_item_locked`` on the PARENT part; the
        ``add_bom_child`` precedent) -- a Released/locked BOM is the deferred ECO route.
-    7. apply: single-use replay cache (P2) + audit (P3) + property mutation, atomic.
+    7. optional ``If-Match`` optimistic-concurrency guard (T6): stale new writes -> 412,
+       identical idempotency replays still return cached 200.
+    8. apply: single-use replay cache (P2) + audit (P3) + property mutation, atomic.
     """
     # (2) write entitlement FIRST -- no existence-leak on a write surface, no affordance body.
     if not EntitlementService(db).is_entitled(WRITE_FEATURE_KEY):
@@ -310,6 +316,7 @@ def bom_multitable_write_line(
             user_id=user.id,
             tenant_id=tenant_id,
             org_id=org_id,
+            if_match=if_match,
         )
     except BomLineNotInPartError as exc:
         # defense-in-depth (the §5 gate already enforced line∈part) -> same 404.
@@ -319,5 +326,10 @@ def bom_multitable_write_line(
         raise HTTPException(
             status_code=409, detail="Idempotency-Key reused for a different write"
         ) from exc
+    except BomLineWritebackPreconditionFailedError as exc:
+        raise HTTPException(status_code=412, detail="If-Match precondition failed") from exc
 
+    updated_line = db.get(Item, result["bom_line_id"])
+    if updated_line is not None:
+        response.headers["ETag"] = bom_line_write_etag(updated_line)
     return {"ok": True, "bom_line_id": result["bom_line_id"]}
