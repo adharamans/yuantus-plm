@@ -8,8 +8,11 @@ auth gate, and route ownership.
 """
 from __future__ import annotations
 
+import csv
+import json
 import uuid
 from datetime import datetime
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
@@ -507,3 +510,70 @@ def test_forensic_summary_invalid_outcome_is_400(client, db):
 def test_forensic_summary_requires_superuser(client, db):
     client.app.dependency_overrides[get_current_identity] = lambda: SimpleNamespace(is_superuser=False)
     assert client.get("/api/v1/transition-history/forensic/summary").status_code == 403
+
+
+# -- forensic cross-item list/export (L2 next-slice) --------------------------
+def test_forensic_collection_lists_across_items_with_filters(client, db):
+    _hist(db, item_id="I-1", created_at=datetime(2026, 6, 1), outcome="denied",
+          actor_user_id=7, properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="I-2", created_at=datetime(2026, 6, 2), outcome="blocked",
+          actor_user_id=42, properties={"reason_code": "condition_failed"})
+    _hist(db, item_id="I-3", created_at=datetime(2026, 6, 3), outcome="success",
+          actor_user_id=7)
+    body = client.get(
+        "/api/v1/transition-history/forensic?outcome=denied&actor=7"
+    ).json()
+    assert body["count"] == 1
+    assert body["items"][0]["item_id"] == "I-1"
+    assert body["items"][0]["properties"]["reason_code"] == "permission_denied"
+
+
+def test_forensic_collection_requires_superuser(client, db):
+    client.app.dependency_overrides[get_current_identity] = lambda: SimpleNamespace(is_superuser=False)
+    assert client.get("/api/v1/transition-history/forensic").status_code == 403
+
+
+def test_forensic_export_json_reuses_filters_and_route_not_captured(client, db):
+    _hist(db, item_id="I-1", created_at=datetime(2026, 6, 1), outcome="denied",
+          actor_user_id=7, properties={"reason_code": "permission_denied"})
+    _hist(db, item_id="I-2", created_at=datetime(2026, 6, 2), outcome="blocked",
+          actor_user_id=42, properties={"reason_code": "condition_failed"})
+    r = client.get(
+        "/api/v1/transition-history/forensic/export"
+        "?format=json&reason_code=permission_denied"
+    )
+    assert r.status_code == 200  # /export is literal, not forensic/{item_id}
+    assert r.headers["content-type"].startswith("application/json")
+    assert 'filename="lifecycle-forensic-history.json"' in r.headers["content-disposition"]
+    body = r.json()
+    assert body["count"] == 1
+    assert body["items"][0]["item_id"] == "I-1"
+
+
+def test_forensic_export_csv_has_stable_header_and_json_properties(client, db):
+    _hist(db, item_id="I-1", created_at=datetime(2026, 6, 1), outcome="denied",
+          actor_user_id=7, comment="需要复核", properties={"reason_code": "permission_denied"})
+    r = client.get("/api/v1/transition-history/forensic/export?format=csv")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    rows = list(csv.DictReader(StringIO(r.text)))
+    assert list(rows[0]) == [
+        "id", "item_id", "from_state_id", "from_state_name", "to_state_id",
+        "to_state_name", "from_permission_id", "to_permission_id", "transition_id",
+        "lifecycle_map_id", "actor_user_id", "comment", "outcome", "properties",
+        "created_at",
+    ]
+    assert rows[0]["item_id"] == "I-1"
+    assert rows[0]["comment"] == "需要复核"
+    assert json.loads(rows[0]["properties"]) == {"reason_code": "permission_denied"}
+
+
+def test_forensic_export_invalid_format_422(client, db):
+    r = client.get("/api/v1/transition-history/forensic/export?format=xlsx")
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "lifecycle_forensic_invalid_export_format"
+
+
+def test_forensic_export_requires_superuser(client, db):
+    client.app.dependency_overrides[get_current_identity] = lambda: SimpleNamespace(is_superuser=False)
+    assert client.get("/api/v1/transition-history/forensic/export").status_code == 403

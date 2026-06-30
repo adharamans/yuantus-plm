@@ -14,11 +14,14 @@ Read-only: does not write history and does not touch all-attempts.
 """
 from __future__ import annotations
 
+import csv
+import json
 from collections import Counter
 from datetime import datetime
+from io import StringIO
 from typing import Any, Dict, List, Optional, Sequence
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from yuantus.api.dependencies.admin_auth import require_superuser
@@ -35,6 +38,24 @@ lifecycle_transition_history_router = APIRouter(tags=["Lifecycle"])
 # The full LifecycleTransitionHistory.outcome vocabulary (see lifecycle/models.py): one success
 # value + the four failed-attempt discriminators. Used to validate the forensic ?outcome filter.
 _VALID_OUTCOMES = ("success", "denied", "blocked", "aborted", "failed")
+_EXPORT_FORMATS = {"csv", "json"}
+_EXPORT_COLUMNS = [
+    "id",
+    "item_id",
+    "from_state_id",
+    "from_state_name",
+    "to_state_id",
+    "to_state_name",
+    "from_permission_id",
+    "to_permission_id",
+    "transition_id",
+    "lifecycle_map_id",
+    "actor_user_id",
+    "comment",
+    "outcome",
+    "properties",
+    "created_at",
+]
 
 
 def _serialize(row: LifecycleTransitionHistory) -> Dict[str, Any]:
@@ -94,6 +115,52 @@ def _counter_rows(counter: Counter[Any], key_name: str, limit: int) -> List[Dict
     return [{key_name: key, "count": count} for key, count in rows[:limit]]
 
 
+def _forensic_query(
+    db: Session,
+    *,
+    outcomes: Optional[List[str]] = None,
+    reason_codes: Optional[List[str]] = None,
+    actors: Optional[List[int]] = None,
+    created_after: Optional[datetime] = None,
+    created_before: Optional[datetime] = None,
+):
+    query = db.query(LifecycleTransitionHistory)
+    if outcomes:
+        query = query.filter(LifecycleTransitionHistory.outcome.in_(tuple(outcomes)))
+    if reason_codes:
+        query = query.filter(
+            LifecycleTransitionHistory.properties["reason_code"].as_string().in_(
+                tuple(reason_codes)
+            )
+        )
+    if actors:
+        query = query.filter(LifecycleTransitionHistory.actor_user_id.in_(tuple(actors)))
+    if created_after is not None:
+        query = query.filter(LifecycleTransitionHistory.created_at >= created_after)
+    if created_before is not None:
+        query = query.filter(LifecycleTransitionHistory.created_at <= created_before)
+    return query.order_by(
+        LifecycleTransitionHistory.created_at.desc(),
+        LifecycleTransitionHistory.id.desc(),
+    )
+
+
+def _export_csv(rows: List[Dict[str, Any]]) -> str:
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(_EXPORT_COLUMNS)
+    for row in rows:
+        writer.writerow(
+            [
+                json.dumps(row.get(column) or {}, ensure_ascii=False)
+                if column == "properties"
+                else row.get(column)
+                for column in _EXPORT_COLUMNS
+            ]
+        )
+    return buffer.getvalue()
+
+
 @lifecycle_transition_history_router.get("/items/{item_id}/transition-history")
 def get_item_transition_history(
     item_id: str,
@@ -122,6 +189,97 @@ def get_item_transition_history(
     # returns every outcome.
     rows = LifecycleService(db).get_transition_history(item_id, limit=limit, success_only=True)
     return {"items": [_serialize(r) for r in rows], "count": len(rows)}
+
+
+@lifecycle_transition_history_router.get("/transition-history/forensic")
+def list_forensic_transition_history(
+    limit: int = Query(500, ge=1, le=5000),
+    outcome: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Optional repeatable outcome filter. Allowed: success|denied|blocked|aborted|failed."
+        ),
+    ),
+    reason_code: Optional[List[str]] = Query(
+        None,
+        description="Optional repeatable properties.reason_code filter.",
+    ),
+    actor: Optional[List[int]] = Query(None, description="Optional repeatable actor_user_id filter."),
+    created_after: Optional[str] = Query(None),
+    created_before: Optional[str] = Query(None),
+    _admin: Identity = Depends(require_superuser),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Cross-item forensic drill-down over lifecycle transition attempts.
+
+    Superuser-only and read-only. This is the collection counterpart to
+    ``/transition-history/forensic/{item_id}``; it intentionally does not check item existence
+    and it remains separate from the item-scoped success-only read.
+    """
+    outcomes = _validate_outcomes(outcome)
+    after_dt = _parse_dt(created_after, "created_after")
+    before_dt = _parse_dt(created_before, "created_before", end_of_day=True)
+    rows = (
+        _forensic_query(
+            db,
+            outcomes=outcomes,
+            reason_codes=reason_code or None,
+            actors=actor or None,
+            created_after=after_dt,
+            created_before=before_dt,
+        )
+        .limit(limit)
+        .all()
+    )
+    return {"items": [_serialize(r) for r in rows], "count": len(rows)}
+
+
+@lifecycle_transition_history_router.get("/transition-history/forensic/export")
+def export_forensic_transition_history(
+    export_format: str = Query("csv", alias="format", description="csv or json"),
+    limit: int = Query(5000, ge=1, le=5000),
+    outcome: Optional[List[str]] = Query(None),
+    reason_code: Optional[List[str]] = Query(None),
+    actor: Optional[List[int]] = Query(None),
+    created_after: Optional[str] = Query(None),
+    created_before: Optional[str] = Query(None),
+    _admin: Identity = Depends(require_superuser),
+    db: Session = Depends(get_db),
+):
+    """Export the cross-item forensic drill-down for ops handoff."""
+    fmt = (export_format or "csv").lower().strip()
+    if fmt not in _EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "lifecycle_forensic_invalid_export_format",
+                    "message": "format must be csv or json"},
+        )
+    outcomes = _validate_outcomes(outcome)
+    after_dt = _parse_dt(created_after, "created_after")
+    before_dt = _parse_dt(created_before, "created_before", end_of_day=True)
+    rows = [
+        _serialize(r)
+        for r in _forensic_query(
+            db,
+            outcomes=outcomes,
+            reason_codes=reason_code or None,
+            actors=actor or None,
+            created_after=after_dt,
+            created_before=before_dt,
+        )
+        .limit(limit)
+        .all()
+    ]
+    headers = {
+        "Content-Disposition": f'attachment; filename="lifecycle-forensic-history.{fmt}"',
+    }
+    if fmt == "json":
+        return Response(
+            json.dumps({"count": len(rows), "items": rows}, ensure_ascii=False),
+            media_type="application/json",
+            headers=headers,
+        )
+    return Response(_export_csv(rows), media_type="text/csv", headers=headers)
 
 
 @lifecycle_transition_history_router.get("/transition-history/forensic/summary")
@@ -162,25 +320,14 @@ def summarize_forensic_transition_history(
     outcomes = _validate_outcomes(outcome)
     after_dt = _parse_dt(created_after, "created_after")
     before_dt = _parse_dt(created_before, "created_before", end_of_day=True)
-    query = db.query(LifecycleTransitionHistory)
-    if outcomes:
-        query = query.filter(LifecycleTransitionHistory.outcome.in_(tuple(outcomes)))
-    if reason_code:
-        query = query.filter(
-            LifecycleTransitionHistory.properties["reason_code"].as_string().in_(
-                tuple(reason_code)
-            )
-        )
-    if actor:
-        query = query.filter(LifecycleTransitionHistory.actor_user_id.in_(tuple(actor)))
-    if after_dt is not None:
-        query = query.filter(LifecycleTransitionHistory.created_at >= after_dt)
-    if before_dt is not None:
-        query = query.filter(LifecycleTransitionHistory.created_at <= before_dt)
     rows: Sequence[LifecycleTransitionHistory] = (
-        query.order_by(
-            LifecycleTransitionHistory.created_at.desc(),
-            LifecycleTransitionHistory.id.desc(),
+        _forensic_query(
+            db,
+            outcomes=outcomes,
+            reason_codes=reason_code or None,
+            actors=actor or None,
+            created_after=after_dt,
+            created_before=before_dt,
         )
         .limit(limit)
         .all()

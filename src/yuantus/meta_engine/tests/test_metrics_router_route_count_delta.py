@@ -66,7 +66,10 @@ from yuantus.api.app import create_app
 #   (GET /api/v1/cadpdm/date-obsolete-impacts/export) -- admin-gated ops export.
 # 730 = 729 + 1 lifecycle forensic summary route
 #   (GET /api/v1/transition-history/forensic/summary) -- superuser-gated ops aggregate.
-EXPECTED_TOTAL_ROUTES = 730
+# 732 = 730 + 2 lifecycle forensic drill-down/export routes
+#   (GET /api/v1/transition-history/forensic;
+#    GET /api/v1/transition-history/forensic/export) -- superuser-gated ops surfaces.
+EXPECTED_TOTAL_ROUTES = 732
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:

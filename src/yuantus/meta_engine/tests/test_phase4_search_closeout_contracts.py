@@ -200,7 +200,10 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #   (GET /api/v1/cadpdm/date-obsolete-impacts/export).
     # - 729 -> 730: + 1 lifecycle forensic summary
     #   (GET /api/v1/transition-history/forensic/summary).
-    assert len(app.routes) == 730
+    # - 730 -> 732: + 2 lifecycle forensic drill-down/export routes
+    #   (GET /api/v1/transition-history/forensic;
+    #    GET /api/v1/transition-history/forensic/export).
+    assert len(app.routes) == 732
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:
