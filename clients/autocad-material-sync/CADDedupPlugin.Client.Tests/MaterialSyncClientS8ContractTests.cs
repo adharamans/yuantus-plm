@@ -193,17 +193,20 @@ namespace CADDedupPlugin.Client.Tests
         }
 
         [Fact]
-        public void test_caddedup_plugin_references_shared_net46_without_changing_autocad_targets()
+        public void test_caddedup_plugin_links_shared_sources_without_changing_autocad_targets()
         {
             var projectPath = RepoPath("clients/autocad-material-sync/CADDedupPlugin/CADDedupPlugin.csproj");
             var project = File.ReadAllText(projectPath);
             XDocument.Load(projectPath);
 
-            Assert.Contains(@"..\..\cad-desktop-helper\Shared\Yuantus.Cad.Shared.csproj", project);
+            Assert.DoesNotContain(@"..\..\cad-desktop-helper\Shared\Yuantus.Cad.Shared.csproj", project);
+            Assert.Contains(@"..\..\cad-desktop-helper\Shared\**\*.cs", project);
+            Assert.Contains(@"..\..\cad-desktop-helper\Shared\Properties\AssemblyInfo.cs", project);
+            Assert.Contains(@"..\..\cad-desktop-helper\Shared\obj\**\*.cs", project);
             Assert.Contains("<TargetFrameworkVersion Condition=\"'$(TargetFrameworkVersion)' == '' and '$(AutoCADVersion)' == '2018'\">v4.6</TargetFrameworkVersion>", project);
             Assert.Contains("<TargetFrameworkVersion Condition=\"'$(TargetFrameworkVersion)' == ''\">v4.8</TargetFrameworkVersion>", project);
             Assert.Contains("<PlatformTarget>x64</PlatformTarget>", project);
-            Assert.Contains("Yuantus.Cad.Shared.dll", project);
+            Assert.DoesNotContain("Yuantus.Cad.Shared.dll", project);
         }
 
         [Fact]

@@ -209,10 +209,13 @@ def check_s8_helper_bridge_contract() -> None:
     workflow = read(ROOT.parent.parent / ".github" / "workflows" / "cad-helper-shared-dotnet.yml")
 
     require(
-        r"..\..\cad-desktop-helper\Shared\Yuantus.Cad.Shared.csproj" in project,
-        "CADDedupPlugin should reference Yuantus.Cad.Shared",
+        r"..\..\cad-desktop-helper\Shared\Yuantus.Cad.Shared.csproj" not in project,
+        "CADDedupPlugin should source-link Shared instead of ProjectReference",
     )
-    require("Yuantus.Cad.Shared.dll" in project, "post-build should copy Yuantus.Cad.Shared.dll")
+    require(r"..\..\cad-desktop-helper\Shared\**\*.cs" in project, "CADDedupPlugin should source-link Shared .cs files")
+    require(r"..\..\cad-desktop-helper\Shared\Properties\AssemblyInfo.cs" in project, "source-link should exclude Shared AssemblyInfo")
+    require(r"..\..\cad-desktop-helper\Shared\obj\**\*.cs" in project, "source-link should exclude Shared obj outputs")
+    require("Yuantus.Cad.Shared.dll" not in project, "post-build should not copy source-linked Yuantus.Cad.Shared.dll")
     require("IMaterialSyncHelperTransport" in material, "MaterialSyncApiClient should expose a helper transport seam")
     require("PostJsonAsync<MaterialSyncResponse>" in material and '"/sync/inbound"' in material, "SyncInboundAsync should call helper /sync/inbound")
     require("PostJsonAsync<MaterialSyncResponse>" in material and '"/sync/outbound"' in material, "SyncOutboundAsync should call helper /sync/outbound")
