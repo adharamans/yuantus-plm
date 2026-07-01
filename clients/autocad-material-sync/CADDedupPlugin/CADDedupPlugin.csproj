@@ -69,6 +69,7 @@
     <Reference Include="System.DirectoryServices.AccountManagement" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Net.Http" />
+    <Reference Include="System.Security" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xaml" />
     <Reference Include="System.Xml" />
@@ -79,13 +80,18 @@
   </ItemGroup>
   <!-- NuGet 包 -->
   <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
-  <!-- CAD Helper Shared library -->
+  <!-- CAD Helper Shared library
+       The AutoCAD plugin is a legacy non-SDK WPF project. Link the net46-compatible
+       Shared sources directly so VS Build Tools MSBuild can build this project
+       without resolving the SDK-style Yuantus.Cad.Shared.csproj. -->
   <ItemGroup>
-    <ProjectReference Include="..\..\cad-desktop-helper\Shared\Yuantus.Cad.Shared.csproj">
-      <Name>Yuantus.Cad.Shared</Name>
-    </ProjectReference>
+    <Compile Include="..\..\cad-desktop-helper\Shared\**\*.cs"
+             Exclude="..\..\cad-desktop-helper\Shared\Properties\AssemblyInfo.cs;..\..\cad-desktop-helper\Shared\obj\**\*.cs">
+      <Link>Yuantus.Cad.Shared\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
   </ItemGroup>
   <!-- 源文件 -->
   <ItemGroup>
@@ -148,7 +154,6 @@
     <MakeDir Directories="$(PluginDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginDir)" />
     <Copy SourceFiles="$(TargetDir)Newtonsoft.Json.dll" DestinationFolder="$(PluginDir)" Condition="Exists('$(TargetDir)Newtonsoft.Json.dll')" />
-    <Copy SourceFiles="$(TargetDir)Yuantus.Cad.Shared.dll" DestinationFolder="$(PluginDir)" Condition="Exists('$(TargetDir)Yuantus.Cad.Shared.dll')" />
     <Copy SourceFiles="$(PackageContentsSource)" DestinationFiles="$(PluginBundleDir)\PackageContents.xml" Condition="Exists('$(PackageContentsSource)')" />
     <Message Text="插件已复制到: $(PluginDir) (AutoCAD $(AutoCADVersion), $(TargetFrameworkVersion))" Importance="high" />
   </Target>
