@@ -101,7 +101,7 @@ Copy-Item $lspFile $bridgeStage -Force
 # 3. assemble CADDedup.bundle -> staging\CADDedup.bundle\ (replicate PostBuild)
 $bundleStage = New-Dir (Join-Path $staging 'CADDedup.bundle')
 $bundleContents = New-Dir (Join-Path $bundleStage 'Contents')
-foreach ($dll in @('CADDedupPlugin.dll', 'Yuantus.Cad.Shared.dll', 'Newtonsoft.Json.dll')) {
+foreach ($dll in @('CADDedupPlugin.dll', 'Newtonsoft.Json.dll')) {
     $f = Join-Path $bundleBin $dll
     Require-File $f "CADDedup bundle input ($dll)"
     Copy-Item $f $bundleContents -Force
@@ -125,8 +125,7 @@ if ($SignToolCmd) {
         (Join-Path $helperStage 'yuantus-cad-detector.exe'),
         (Join-Path $helperStage 'Yuantus.Cad.Shared.dll'),
         (Join-Path $bridgeStage 'YuantusCadHelperBridge.dll'),
-        (Join-Path $bundleContents 'CADDedupPlugin.dll'),
-        (Join-Path $bundleContents 'Yuantus.Cad.Shared.dll')
+        (Join-Path $bundleContents 'CADDedupPlugin.dll')
     )
     foreach ($file in $firstParty) {
         # FAIL-FAST: a signed release must not skip a required first-party binary.

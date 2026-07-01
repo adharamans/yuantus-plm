@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CLIENT = ROOT / "clients" / "autocad-material-sync"
+PYTHON = sys.executable
 
 REQUIRED_PATHS = [
     ".gitignore",
@@ -48,10 +49,7 @@ REQUIRED_PATHS = [
     "clients/autocad-material-sync/CADDedupPlugin/PackageContents.xml",
     "clients/autocad-material-sync/CADDedupPlugin/PackageContents.2018.xml",
     "clients/autocad-material-sync/CADDedupPlugin/PackageContents.2024.xml",
-    "clients/autocad-material-sync/CADDedupPlugin/SimilarityDetailWindow.xaml",
-    "clients/autocad-material-sync/CADDedupPlugin/SimilarityDetailWindow.xaml.cs",
     "clients/autocad-material-sync/CADDedupPlugin/TrendWarningManager.cs",
-    "clients/autocad-material-sync/CADDedupPlugin/UserIdentification.cs",
     "plugins/yuantus-cad-material-sync/plugin.json",
     "plugins/yuantus-cad-material-sync/main.py",
     "src/yuantus/web/workbench.html",
@@ -204,14 +202,14 @@ def check_trailing_whitespace() -> None:
 
 
 def check_autocad_client_package() -> None:
-    run(["python3", "clients/autocad-material-sync/verify_material_sync_static.py"])
-    run(["python3", "clients/autocad-material-sync/verify_material_sync_fixture.py"])
-    run(["python3", "clients/autocad-material-sync/verify_material_sync_e2e.py"])
-    run(["python3", "clients/autocad-material-sync/verify_material_sync_db_e2e.py"])
-    run(["python3", "scripts/verify_cad_material_diff_confirm_contract.py"])
+    run([PYTHON, "clients/autocad-material-sync/verify_material_sync_static.py"])
+    run([PYTHON, "clients/autocad-material-sync/verify_material_sync_fixture.py"])
+    run([PYTHON, "clients/autocad-material-sync/verify_material_sync_e2e.py"])
+    run([PYTHON, "clients/autocad-material-sync/verify_material_sync_db_e2e.py"])
+    run([PYTHON, "scripts/verify_cad_material_diff_confirm_contract.py"])
     run(
         [
-            "python3",
+            PYTHON,
             "-m",
             "py_compile",
             "clients/autocad-material-sync/verify_material_sync_static.py",

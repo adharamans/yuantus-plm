@@ -107,7 +107,7 @@ R3 在 R2 基础上修复以下问题（详见 §11 变更记录）：
 | 层 | 名称 | 目标框架 | 职责 |
 |---|---|---|---|
 | Transport 共享层 | `Yuantus.Cad.Shared` | **多目标：`net46;net6.0-windows`** | helper 进程发现（读 `helper-session-{sessionId}.json`）、helper 自动启动、DPAPI token 读写、HTTP 同步调用、错误信封解码、注册表抽象、`install-id.json` 原子读写 |
-| AutoCAD 路线 | `CADDedupPlugin` | v4.6（2018）/ v4.8（2024）多 config | 引用 Shared 的 **net46** target 取代原 `MaterialSyncApiClient` 的直连 HTTP；继续承担 DWG 读写、diff 窗口、PLMMAT* 命令、`/audit/apply-result` 上报 |
+| AutoCAD 路线 | `CADDedupPlugin` | v4.6（2018）/ v4.8（2024）多 config | 当前 legacy 工程通过 source-link 编入 Shared 的 net46-compatible 源码，取代原 `MaterialSyncApiClient` 的直连 HTTP；继续承担 DWG 读写、diff 窗口、PLMMAT* 命令、`/audit/apply-result` 上报 |
 | 国产 CAD 路线 | `YuantusCadHelperBridge.dll` | **.NET Framework v4.6**（NETLOAD 必须完整 .NET Framework） | 引用 Shared 的 **net46** target；仅对外暴露 `(yuantus-helper-call endpoint json) → json` LISP 函数；不写 DWG、不解析业务 JSON |
 | 桌面服务 | `yuantus-cad-helper.exe` | **.NET 6 self-contained** | Kestrel loopback；端点实现；SQLite 审计 |
 | 桌面探测器 | `yuantus-cad-detector.exe` | **.NET 6 self-contained** | 注册表 + 文件系统扫描；JSON 输出 |
@@ -993,7 +993,7 @@ Yuantus.Cad.Shared (multi-target: net46;net6.0-windows)
    │
    ├─◀─ CADDedupPlugin (.NET Framework v4.6/v4.8 multi-config)
    │        │
-   │        └─ ProjectReference Shared → 自动选 net46 target
+   │        └─ source-link Shared 源码 → 编进 CADDedupPlugin.dll
    │
    ├─◀─ YuantusCadHelperBridge (.NET Framework v4.6)
    │        │

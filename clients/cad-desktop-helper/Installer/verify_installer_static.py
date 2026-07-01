@@ -176,9 +176,13 @@ def check_signing_present_and_guarded(code: str) -> None:
                    "YuantusCadHelperBridge.dll", "CADDedupPlugin.dll"):
         require(binary in pack,
                 f"guard 4: pack.ps1 first-party signing list must include {binary}")
+    require("(Join-Path $bundleContents 'Yuantus.Cad.Shared.dll')" not in pack,
+            "guard 4: CADDedup bundle must not sign source-linked Yuantus.Cad.Shared.dll")
     # signing must be gated on SignToolCmd (CI, no cert -> unsigned payload + installer)
     require(re.search(r"if\s*\(\s*\$SignToolCmd\s*\)", pack) is not None,
             "guard 4: pack.ps1 payload signing must be gated by `if ($SignToolCmd)`")
+    require("@('CADDedupPlugin.dll', 'Newtonsoft.Json.dll')" in pack,
+            "pack.ps1 must stage only CADDedupPlugin.dll + Newtonsoft.Json.dll into source-linked CADDedup bundle")
 
 
 def check_no_service_or_autostart(code: str, code_nc: str) -> None:
