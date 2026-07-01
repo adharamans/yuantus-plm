@@ -1,11 +1,11 @@
 # Phase 7 — Locked-BOM ECO Revision Route — Design & Governance Decision Doc
 
-**Status:** DESIGN-FIRST / DECISION DOC — authorizes no build.
-**Ratification required before any code.** Per `plm-collab-remaining-gated-development-order-and-verification-20260630.md:40` ("Phase 7 locked-BOM ECO revision route … Changes write semantics for released/locked BOMs. Must be design-first and owner-ratified before code.") and the repo-wide per-phase opt-in convention (`DEVELOPMENT_NEXT_CYCLE_TODO_PLAN_20260426.md:532` "No phase auto-starts").
+**Status:** §3 DECISIONS RATIFIED 2026-07-01 (owner). Direction locked: **(a) A3** — explicit ECO-path opt-in (locked edit still 409s by default; explicit opt-in opens a PENDING ECO revision intent, never auto-apply); **(b) B1** — reuse the existing ECO approval workflow (apply stays the separate APPROVED-gated `/eco/{id}/apply`); **(c) C2** — pre-emptive `line.state` gating + discriminated-409 fallback. Ratified per owner instruction, chosen because A3/B1/C2 is closest to the already-landed Phase-7 write-back flow and reuses the existing consumer/provider tracks.
+**RATIFICATION IS DIRECTION ONLY — STILL AUTHORIZES NO BUILD.** The §6 implementation phases remain per-phase opt-ins (none auto-starts). In particular these pre-conditions are **each separately gated** and are **not** authorized by this ratification: B1's `EcoPermissionAdapter` wiring is a **repo-wide authz change** affecting every `ECOService` caller (§3.2 blast-radius caveat) and must be scoped/tested/ratified as such; C2's discriminated-409 starts at the **provider/contract boundary** (the pact is success-only) and is a contract change the owner must authorize; and the ECO-scoped `feature_key`/SKU question (§7) stays open. Per `plm-collab-remaining-gated-development-order-and-verification-20260630.md:40` (design-first + owner-ratified before code) and the per-phase opt-in convention (`DEVELOPMENT_NEXT_CYCLE_TODO_PLAN_20260426.md:532` "No phase auto-starts").
 **Date:** 2026-06-30
 **Baseline:** Yuantus `origin/main` at `c5053bfb` (`#930`); MetaSheet2 consumer stack at `#3383`/`#3384`/`#3392` (on its `origin/main`).
 
-> **Provenance.** Produced autonomously as the executable prong of the "Group B design-first" recommendation the operator ratified with "按你建议执行". It is a **decision doc for owner ratification**, not an authorization to build; it is a clean, single-revert, docs-only unit. Every code reference below was verified against `origin/main` (`git show origin/main:<path>`), not a stale local checkout. The three recommended defaults (§3) are the author's engineering recommendation and **remain pending owner ratification** — none decides product/governance semantics on the owner's behalf.
+> **Provenance.** Produced autonomously as the executable prong of the "Group B design-first" recommendation the operator ratified with "按你建议执行". It is a **decision doc for owner ratification**, not an authorization to build; it is a clean, single-revert, docs-only unit. Every code reference below was verified against `origin/main` (`git show origin/main:<path>`), not a stale local checkout. The three recommended defaults (§3) were the author's engineering recommendation; the owner **ratified all three (A3/B1/C2) on 2026-07-01** (see Status). Ratification locks the *direction* only — the §6 build and B1/C2's pre-conditions remain separately gated.
 
 ---
 
@@ -163,11 +163,14 @@ Mirrors the repo's grounded → build → verify → CI cadence. Nothing below i
 
 ---
 
-## 7. NOT Decided Here / Awaiting Owner Ratification
+## 7. Ratified (2026-07-01) / Still Awaiting Owner Ratification
 
-- **(a)** Whether locked-BOM edits create ECO intents at all, and if so implicit (A2) vs explicit opt-in (A3). *Recommended A3, pending ratification.*
-- **(b)** Whether apply reuses the existing ECO approval workflow (B1) — and the pre-condition of wiring `EcoPermissionAdapter`. *Recommended B1, pending ratification.*
-- **(c)** Whether the UI gates pre-emptively on `line.state` + discriminated-409 (C2) vs reactive-only (C1). *Recommended C2, pending ratification.*
+Ratified direction (owner, 2026-07-01) — see Status:
+- **(a) RATIFIED: A3** — explicit ECO-path opt-in (not implicit A2, not status-quo A1).
+- **(b) RATIFIED: B1** — reuse the existing ECO approval workflow. **Its pre-condition — wiring `EcoPermissionAdapter` into `ECOService` — is a repo-wide authz change and is NOT authorized by this ratification; it stays separately gated (§3.2 blast-radius).**
+- **(c) RATIFIED: C2** — pre-emptive `line.state` gating + discriminated-409 fallback. **Its prerequisite — a discriminated-409 at the provider/contract boundary — is a contract change and is NOT authorized by this ratification; it stays separately gated.**
+
+Still awaiting ratification / open:
 - Whether the locked-BOM route reuses the `bom_multitable_writeback` feature_key/permission or requires a distinct ECO-scoped feature_key/SKU (the ECO variant re-opens Fork 2).
 - Whether the provider (Yuantus) will emit a discriminated 409 at all — a hard prerequisite for C1/C2; the pact defines no error interaction.
 - Whether write-back should be the next thing built at all (an owner open question at `governed-seam:147-152`).
