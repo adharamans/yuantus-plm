@@ -19,7 +19,10 @@ from yuantus.api.dependencies.auth import get_current_user
 from yuantus.context import tenant_id_var
 from yuantus.database import get_db
 from yuantus.meta_engine.app_framework.store_models import AppLicense
-from yuantus.meta_engine.models.date_obsolete import DateObsoleteImpact
+from yuantus.meta_engine.models.date_obsolete import (
+    DateObsoleteImpact,
+    DateObsoleteImpactCorrection,
+)
 from yuantus.meta_engine.models.effectivity import Effectivity
 from yuantus.meta_engine.models.item import Item
 from yuantus.meta_engine.services import date_obsolete_worker as worker_mod
@@ -286,6 +289,116 @@ def test_batch_acknowledge_empty_list(client, db):
     r = client.post("/api/v1/cadpdm/date-obsolete-impacts/acknowledge-batch",
                     json={"impact_ids": []})
     assert r.status_code == 200 and r.json()["acknowledged_count"] == 0
+
+
+# -- #932 DP1 (i)/(ii): review-flag revert (reopen + un-acknowledge) ----------
+
+def test_revert_single_reopens_clears_ack_and_appends_correction(client, db):
+    _impact(db, "r1", "acknowledged")
+    row = db.get(DateObsoleteImpact, "r1")
+    row.acknowledged_at = _NOW; row.acknowledged_by_id = 7; db.commit()
+    r = client.post("/api/v1/cadpdm/date-obsolete-impacts/r1/revert", json={"reason": "mis-ack"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "open"
+    assert body["acknowledged_at"] is None and body["acknowledged_by_id"] is None
+    corr = db.query(DateObsoleteImpactCorrection).filter_by(impact_id="r1").all()
+    assert len(corr) == 1
+    c = corr[0]
+    assert c.action == "revert_reopen" and c.prior_state == "acknowledged"
+    assert c.prior_acknowledged_by_id == 7 and c.reverted_by_id == 1 and c.reason == "mis-ack"
+
+
+def test_revert_single_already_open_is_noop(client, db):
+    _impact(db, "r2", "open")
+    r = client.post("/api/v1/cadpdm/date-obsolete-impacts/r2/revert")
+    assert r.status_code == 200 and r.json()["state"] == "open"
+    assert db.query(DateObsoleteImpactCorrection).filter_by(impact_id="r2").count() == 0
+
+
+def test_revert_single_404(client, db):
+    assert client.post("/api/v1/cadpdm/date-obsolete-impacts/ghost/revert").status_code == 404
+
+
+def test_revert_batch_transitions_acknowledged_only(client, db):
+    _impact(db, "rb1", "acknowledged"); _impact(db, "rb2", "acknowledged"); _impact(db, "rb3", "open")
+    r = client.post("/api/v1/cadpdm/date-obsolete-impacts/revert-batch",
+                    json={"impact_ids": ["rb1", "rb2", "rb3"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reverted_count"] == 2  # rb3 already open -> not counted
+    assert {row["id"] for row in body["rows"]} == {"rb1", "rb2"}
+    for row in body["rows"]:
+        assert row["state"] == "open" and row["acknowledged_at"] is None and row["acknowledged_by_id"] is None
+    assert db.query(DateObsoleteImpactCorrection).count() == 2  # one append per transition
+
+
+def test_revert_batch_unknown_ids_skipped_no_leak(client, db):
+    _impact(db, "rb1", "acknowledged")
+    r = client.post("/api/v1/cadpdm/date-obsolete-impacts/revert-batch",
+                    json={"impact_ids": ["ghost", "rb1", "alsoghost"]})
+    assert r.status_code == 200 and r.json()["reverted_count"] == 1  # no 404, no existence leak
+
+
+def test_revert_batch_dedups_and_idempotent(client, db):
+    _impact(db, "rb1", "acknowledged")
+    r1 = client.post("/api/v1/cadpdm/date-obsolete-impacts/revert-batch", json={"impact_ids": ["rb1", "rb1"]})
+    assert r1.json()["reverted_count"] == 1 and r1.json()["requested"] == 1
+    r2 = client.post("/api/v1/cadpdm/date-obsolete-impacts/revert-batch", json={"impact_ids": ["rb1"]})
+    assert r2.json()["reverted_count"] == 0  # already open -> no-op
+
+
+def test_revert_batch_empty_list(client, db):
+    r = client.post("/api/v1/cadpdm/date-obsolete-impacts/revert-batch", json={"impact_ids": []})
+    assert r.status_code == 200 and r.json()["reverted_count"] == 0
+
+
+def test_revert_does_not_touch_child_obsoleted_or_item_lifecycle(client, db):
+    # (iii)-ISOLATION GOLDEN: an acknowledged impact whose child WAS obsoleted, with the child
+    # Item in the Obsolete lifecycle state. Reverting the review flag must leave BOTH the
+    # child_obsoleted flag AND the Item's lifecycle state completely untouched — proving the
+    # revert never crosses into the deferred DP1 (iii) undo-promotion.
+    db.add(Item(id="OBS", config_id="OBS", item_type_id="t", state="Obsolete", is_current=True, properties={}))
+    db.commit()
+    _impact_co(db, "iso1", state="acknowledged", child_obsoleted=True,
+               child_item_id="OBS", reason="child_obsoleted")
+    r = client.post("/api/v1/cadpdm/date-obsolete-impacts/iso1/revert")
+    assert r.status_code == 200 and r.json()["state"] == "open"
+    row = db.get(DateObsoleteImpact, "iso1")
+    assert row.child_obsoleted is True            # (iii) axis untouched
+    assert row.reason == "child_obsoleted"          # worker-derived reason untouched
+    assert db.get(Item, "OBS").state == "Obsolete"  # Item lifecycle NOT un-obsoleted
+    assert db.query(DateObsoleteImpactCorrection).filter_by(impact_id="iso1").count() == 1
+
+
+def test_revert_authz_nonadmin_denied(client_nonadmin, db):
+    _impact(db, "r1", "acknowledged")
+    assert client_nonadmin.post("/api/v1/cadpdm/date-obsolete-impacts/r1/revert").status_code == 403
+    assert client_nonadmin.post("/api/v1/cadpdm/date-obsolete-impacts/revert-batch",
+                                json={"impact_ids": ["r1"]}).status_code == 403
+
+
+def test_revert_correction_survives_worker_properties_overwrite(client, db):
+    # The append-only trail lives in its OWN table, so a worker re-scan that overwrites
+    # DateObsoleteImpact.properties (service._upsert_impact) does NOT wipe the correction,
+    # and the review axis (state) is worker-stable.
+    _impact(db, "r1", "acknowledged")
+    client.post("/api/v1/cadpdm/date-obsolete-impacts/r1/revert")
+    assert db.query(DateObsoleteImpactCorrection).filter_by(impact_id="r1").count() == 1
+    row = db.get(DateObsoleteImpact, "r1")
+    db.refresh(row)
+    row.properties = {"obsolete_error": None}; row.child_obsoleted = True; db.commit()  # mimic worker refresh
+    assert db.get(DateObsoleteImpact, "r1").state == "open"  # review axis untouched by "worker"
+    assert db.query(DateObsoleteImpactCorrection).filter_by(impact_id="r1").count() == 1
+
+
+def test_revert_history_is_append_only(client, db):
+    # ack -> revert -> ack -> revert appends TWO correction events (history never destroyed).
+    _impact(db, "r1", "open")
+    for _ in range(2):
+        client.post("/api/v1/cadpdm/date-obsolete-impacts/r1/acknowledge")
+        client.post("/api/v1/cadpdm/date-obsolete-impacts/r1/revert")
+    assert db.query(DateObsoleteImpactCorrection).filter_by(impact_id="r1").count() == 2
 
 
 def test_batch_acknowledge_requires_admin(client_nonadmin, db):

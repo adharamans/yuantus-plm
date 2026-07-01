@@ -22,7 +22,10 @@ from yuantus.api.dependencies.auth import (
     require_admin_permission,
 )
 from yuantus.database import get_db
-from yuantus.meta_engine.models.date_obsolete import DateObsoleteImpact
+from yuantus.meta_engine.models.date_obsolete import (
+    DateObsoleteImpact,
+    DateObsoleteImpactCorrection,
+)
 from yuantus.meta_engine.web.csv_export_safety import neutralize_csv_formula
 
 date_obsolete_ops_router = APIRouter(tags=["CADPDM"])
@@ -224,6 +227,85 @@ async def acknowledge_date_obsolete_impacts_batch(
     }
 
 
+# -- DP1 (i)/(ii) review-flag revert (reopen + un-acknowledge) ----------------
+# Ratified scope (#932): revert ONLY the review axis (state acknowledged -> open, clear the
+# ack fields) and record it as an append-only correction event. It NEVER touches
+# child_obsoleted / reason / the child Item's lifecycle state — DP1 (iii) undo-promotion is
+# deferred to a separate ratification. The append-only trail lives in its own table
+# (meta_date_obsolete_impact_corrections) because the worker overwrites .properties each
+# re-scan; the review axis itself is worker-stable (_upsert_impact never touches state/ack).
+
+
+class _RevertRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class _BatchRevertRequest(BaseModel):
+    impact_ids: List[str]
+    reason: Optional[str] = None
+
+
+def _revert_impact(
+    db: Session, row: DateObsoleteImpact, uid: int, reason: Optional[str], now: datetime
+) -> bool:
+    """Revert one impact's review flag acknowledged -> open. Returns True iff it transitioned
+    (was 'acknowledged'); already-'open' rows are a no-op (False). Appends an append-only
+    correction event snapshotting the prior review-axis state BEFORE clearing it, so ack
+    history is never destroyed. Touches ONLY state + acknowledged_* — never child_obsoleted /
+    reason / Item lifecycle (DP1 iii). The caller commits."""
+    if row.state != "acknowledged":
+        return False
+    db.add(
+        DateObsoleteImpactCorrection(
+            impact_id=row.id,
+            action="revert_reopen",
+            prior_state=row.state,
+            prior_acknowledged_at=row.acknowledged_at,
+            prior_acknowledged_by_id=row.acknowledged_by_id,
+            reason=reason,
+            reverted_by_id=uid,
+            created_at=now,
+        )
+    )
+    row.state = "open"
+    row.acknowledged_at = None
+    row.acknowledged_by_id = None
+    return True
+
+
+@date_obsolete_ops_router.post("/cadpdm/date-obsolete-impacts/revert-batch")
+async def revert_date_obsolete_impacts_batch(
+    payload: _BatchRevertRequest = Body(...),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Revert many acknowledged impacts back to open (DP1 i/ii) in one atomic transaction.
+
+    Idempotent + no existence leak (mirrors acknowledge-batch): unknown ids and
+    already-open rows are simply skipped (not an error), so re-running is safe. Each revert
+    APPENDS a correction event (prior ack snapshot preserved) — it never destroys history and
+    never touches child_obsoleted / Item lifecycle. Returns only the rows actually
+    transitioned acknowledged -> open this call.
+    """
+    require_admin_permission(user)
+    ids = list(dict.fromkeys(payload.impact_ids))
+    reverted: List[DateObsoleteImpact] = []
+    if ids:
+        rows = db.query(DateObsoleteImpact).filter(DateObsoleteImpact.id.in_(ids)).all()
+        now = datetime.utcnow()
+        uid = int(user.id)
+        for row in rows:
+            if _revert_impact(db, row, uid, payload.reason, now):
+                reverted.append(row)
+        if reverted:
+            db.commit()
+    return {
+        "requested": len(ids),
+        "reverted_count": len(reverted),
+        "rows": [_impact(r) for r in reverted],
+    }
+
+
 @date_obsolete_ops_router.get("/cadpdm/date-obsolete-impacts/{impact_id}")
 async def get_date_obsolete_impact(
     impact_id: str,
@@ -257,5 +339,31 @@ async def acknowledge_date_obsolete_impact(
         row.state = "acknowledged"
         row.acknowledged_at = datetime.utcnow()
         row.acknowledged_by_id = int(user.id)
+        db.commit()
+    return _impact(row)
+
+
+@date_obsolete_ops_router.post("/cadpdm/date-obsolete-impacts/{impact_id}/revert")
+async def revert_date_obsolete_impact(
+    impact_id: str,
+    payload: Optional[_RevertRequest] = Body(None),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Revert one impact's review flag acknowledged -> open (DP1 i/ii).
+
+    404 if the id is unknown. An already-open row is a no-op (returned unchanged). Appends an
+    append-only correction event (prior ack snapshot preserved); never touches
+    child_obsoleted / Item lifecycle.
+    """
+    require_admin_permission(user)
+    row = db.get(DateObsoleteImpact, impact_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "cadpdm_date_obsolete_not_found", "message": "impact not found"},
+        )
+    reason = payload.reason if payload else None
+    if _revert_impact(db, row, int(user.id), reason, datetime.utcnow()):
         db.commit()
     return _impact(row)
