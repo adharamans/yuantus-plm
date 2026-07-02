@@ -4,7 +4,7 @@
 > Do not spawn a new dated snapshot doc per slice (that proliferation — #930/#935/#3442… — is what
 > made "how much is left?" a recurring survey). **Claim a surface in §2 before building it** — one
 > owner/branch per file — so two parallel agents never rebuild the same thing (that is what cost us
-> the #3434 duplicate). Last reconciled against Yuantus `origin/main` `a8cbf61f` and
+> the #3434 duplicate). Last reconciled against Yuantus `origin/main` `423a59a5` and
 > MetaSheet2 `main` after `#3469` (`f372cd1f`).
 
 ## 1. Status at a glance
@@ -13,9 +13,9 @@ The core feature — governed BOM multi-table **read projection + write-back + e
 and live end-to-end**. The provider (Yuantus) side is **assessed complete by the #935 deep-audit —
 still OPEN, pending owner口径-alignment review comments; treat as pending until #935 merges**. The
 consumer `If-Match` same-cell lost-update fix is **shipped on MetaSheet2 main** (`#3469`,
-`f372cd1f`), so the integration line's last correctness gap is closed. Remaining motion is either
-the separately-owned `#934` reason-length P2, a **decision** (owner/product/governance), or an
-**ops/env** task.
+`f372cd1f`), and the date-obsolete DP1 light path is **shipped on Yuantus main** (`#934`,
+`423a59a5`). There is no unowned, buildable-now correctness gap left; remaining motion is a
+**decision** (owner/product/governance) or an **ops/env** task.
 
 ## 2. Surfaces (the claim board)
 
@@ -27,7 +27,7 @@ the separately-owned `#934` reason-length P2, a **decision** (owner/product/gove
 | Consumer review UI + workbench write-back relay | MetaSheet2 | ✅ SHIPPED | — | — |
 | Multi-`kid` embed verify | MetaSheet2 | ✅ SHIPPED (#3395) | — | — |
 | **Consumer `If-Match` (same-cell lost-update fix)** | MetaSheet2 | ✅ SHIPPED (#3469, `f372cd1f`) | — | — |
-| Date-obsolete DP1 light-path revert | Yuantus | 🟡 IN-FLIGHT | **#934** (owner-authorized) | fix/accept reason-length P2 (persisted `String(400)`, request model unbounded) + green, then merge |
+| Date-obsolete DP1 light-path revert | Yuantus | ✅ SHIPPED (#934, `423a59a5`) | — | — |
 | Locked-BOM ECO revision route | Yuantus + ms2 | ⛔ GATED (direction ratified #933: A3/B1/C2) | — | per-phase opt-in: `EcoPermissionAdapter` authz, discriminated-409 contract, ECO SKU (§7) |
 | Date-obsolete DP1-iii (child-lifecycle undo) + broader revert | Yuantus | ⛔ GATED | — | governance semantics |
 | Phase-6 SSO → session → bridge | Yuantus + ms2 | ⛔ DEFERRED | — | owner: is continuous in-iframe UX the next product line? |
@@ -56,5 +56,5 @@ The bottleneck is **coordination + merge mechanics + decision latency**, not bui
 
 ## 5. Immediate action
 
-**#934** → clear the reason-length P2 (persisted `String(400)`, request model unbounded), re-confirm
-green, then merge. Ops can proceed independently on the §2 env row.
+No unowned, buildable-now correctness item remains on this line. Ops can proceed independently on
+the §2 env row; product/governance decisions in §3 remain opt-in gates.
