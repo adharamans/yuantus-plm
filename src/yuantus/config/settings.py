@@ -487,6 +487,31 @@ class Settings(BaseSettings):
         ),
     )
 
+    # P0-8b — process-local inbound API rate limiting. Default-off so existing
+    # deployments opt in deliberately; enable per deployment with explicit
+    # budgets.
+    INBOUND_RATE_LIMIT_ENABLED: bool = Field(
+        default=False,
+        description="Enable process-local inbound API token-bucket rate limiting. env: YUANTUS_INBOUND_RATE_LIMIT_ENABLED.",
+    )
+    INBOUND_RATE_LIMIT_PER_MINUTE: int = Field(
+        default=120,
+        ge=0,
+        description="Token refill rate per minute for inbound API rate limiting. 0 disables enforcement.",
+    )
+    INBOUND_RATE_LIMIT_BURST: int = Field(
+        default=60,
+        ge=0,
+        description="Maximum burst tokens per inbound rate-limit key. 0 disables enforcement.",
+    )
+    INBOUND_RATE_LIMIT_EXEMPT_PATHS: str = Field(
+        default="/favicon.ico,/docs,/redoc,/openapi.json,/api/v1/health,/api/v1/health/deps,/api/v1/metrics",
+        description=(
+            "Comma-separated exact path/prefix list exempt from inbound rate limiting. "
+            "Entries ending in * are prefix matches; other entries match the path and subpaths."
+        ),
+    )
+
     AUDIT_ENABLED: bool = Field(default=False, description="Audit log middleware")
     AUDIT_RETENTION_DAYS: int = Field(
         default=0, description="Prune audit logs older than N days (0=disabled)"

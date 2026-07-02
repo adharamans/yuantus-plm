@@ -8,8 +8,8 @@
 
 ## 1. Owner decisions (2026-07-02)
 
-- **OPEN**: P0-① notification delivery + subscriptions; P0-⑧a Method sandbox (**priority**),
-  P0-⑧b inbound rate limiting (after 8a; **two separate PRs**, never bundled).
+- **OPEN**: P0-① notification delivery + subscriptions. P0-⑧a Method sandbox and P0-⑧b inbound
+  rate limiting are complete as two separate security-debt slices.
 - **OPEN on the integration line** (claimed THERE, not here): locked-BOM ECO revision route
   **Phase 0 (contract-first)** — see `plm-collab-integration-line-living-tracker.md` §2.
 - **GATED** (each needs its own explicit opt-in before any taskbook/code): P0-② unified task
@@ -23,8 +23,8 @@
 | Surface | State | Owner / branch (claim) | Hard technical premises (owner findings 2026-07-02) & gate |
 |---|---|---|---|
 | P0-⑧a Method script sandbox | ✅ DONE — taskbook + implementation + design/verification record. Scripts route through RestrictedPython; module hooks are fail-closed behind `METHOD_MODULE_ALLOWLIST`; Method RPC is fail-closed behind `METHOD_RPC_ENABLED` + admin/superuser. | claude / `feat/p0-8a-method-sandbox` | Four execution surfaces were cut over together: two script paths (`business_logic/executor.py`, `services/method_service.py`) and two module paths. Tests pin import/open/dunder/context-guard escapes, module allowlist, RPC gate, resource caps, and audit emission. The separate RPC identity-default defect remains gated; with `METHOD_RPC_ENABLED=false` by default, Method execution is closed until that adjacent slice is explicitly opened. |
+| P0-⑧b Inbound rate limiting | ✅ DONE — default-off process-local token-bucket middleware with explicit env enablement. | codex / `codex/p0-8b-rate-limit` | Middleware order is pinned as RequestLogging → Auth → InboundRateLimit → TenantOrgContext → Audit. Protected traffic keys on verified `request.state.tenant_id`; public/unauthenticated traffic keys on client IP and ignores untrusted tenant headers. Exempt health/docs/openapi paths stay open; zero budgets disable enforcement. This is not a distributed/global quota. |
 | P0-① Notification delivery + subscriptions | 🔨 OPEN — taskbook after 8a starts | claude / `docs/p0-1-notification-outbox-taskbook` | The generic event layer is an **after-commit in-memory EventBus** (`events/transactional.py:48` → `events/event_bus.py`): no persistence, retry, dead-letter, or delivery state — trigger source ONLY. First slice MUST add persistent **NotificationOutbox/Delivery tables + a dedicated worker** (pattern: `erp_publication`/`ecm_publication` outbox: state machine, retry, dead-letter, idempotency fingerprint). Delivery adapters: SMTP first, IM/webhook later. Subscription model + digest coalescing. |
-| P0-⑧b Inbound rate limiting | 🔨 OPEN — after 8a | — (claim when 8a taskbook lands) | Per-tenant token-bucket middleware; new envs declared in `Settings` (extra=ignore swallows undeclared); separate PR from 8a. |
 | P0-②③④⑤⑥⑦⑨⑩ | ⛔ GATED | — | Per-item opt-in. Sequencing guidance in the report §"三批次" plan: ②③ after ① (催办/分发 depend on delivery); ⑦ after the ECO-route Phases 1–2 (same change domain — claim-before-build). |
 | P1 / P2 report items | ⛔ GATED | — | See report §五. |
 
