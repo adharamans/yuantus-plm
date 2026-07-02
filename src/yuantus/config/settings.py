@@ -457,10 +457,12 @@ class Settings(BaseSettings):
     METHOD_SCRIPT_TIMEOUT_SECONDS: float = Field(
         default=5.0,
         description=(
-            "Wall-clock budget for a sandboxed Method script (opcode-level "
-            "watchdog). Pure-Python loops are interrupted; a C-level tight "
-            "loop inside an allowed builtin is the documented v1 limitation. "
-            "0 disables the watchdog."
+            "Best-effort wall-clock budget for a sandboxed Method script "
+            "(supervising thread re-injects a BaseException deadline signal). "
+            "Interrupts ordinary infinite loops and `except Exception` loops; "
+            "does NOT interrupt a single long C-level op or a loop catching "
+            "BaseException every iteration (documented residual DoS limits; "
+            "a hard bound needs process isolation). 0 disables the watchdog."
         ),
     )
     METHOD_SCRIPT_MAX_BYTES: int = Field(

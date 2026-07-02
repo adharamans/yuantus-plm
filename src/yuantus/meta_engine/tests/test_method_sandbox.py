@@ -276,6 +276,36 @@ def test_13_infinite_loop_hits_timeout(settings_env):
         _run_via_service("while True:\n    pass\nresult = 1")
 
 
+def test_13b_watchdog_reinjects_and_survives_swallowed_exception(settings_env):
+    # Escape-hunt regression: an outer try/except BaseException that swallows the
+    # first deadline signal, followed by a bare infinite loop, previously ran to
+    # OS-kill (the one-shot settrace tracer was disarmed). The re-injecting
+    # supervising watchdog must still interrupt the second loop.
+    settings_env(METHOD_SCRIPT_TIMEOUT_SECONDS="0.4")
+    exploit = (
+        "result = 0\n"
+        "try:\n"
+        "    while True:\n"
+        "        result += 1\n"
+        "except BaseException:\n"
+        "    pass\n"
+        "while True:\n"
+        "    result += 1\n"
+    )
+    with pytest.raises(MethodSandboxViolation):
+        _run_via_service(exploit)
+
+
+def test_13c_watchdog_interrupts_except_exception_loop(settings_env):
+    # The deadline signal is a BaseException, so `except Exception` cannot
+    # swallow it — this loop must be interrupted.
+    settings_env(METHOD_SCRIPT_TIMEOUT_SECONDS="0.4")
+    with pytest.raises(MethodSandboxViolation):
+        _run_via_service(
+            "while True:\n    try:\n        x = 1\n    except Exception:\n        pass"
+        )
+
+
 def test_14_oversized_script_refused(settings_env):
     settings_env(METHOD_SCRIPT_MAX_BYTES="50")
     with pytest.raises(MethodSandboxViolation):

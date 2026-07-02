@@ -13,7 +13,18 @@ Two execution kinds, two containment models:
   RestrictedPython (compile-time rejection of ``import``, dunder attribute
   access, ``exec``/``eval``; runtime safe-builtins with no ``open``/``getattr``/
   ``__import__``), executed with guard hooks, a code-size cap, and a
-  wall-clock watchdog (opcode-level ``settrace`` deadline).
+  best-effort wall-clock watchdog (a supervising thread re-injecting a
+  ``BaseException`` deadline signal into the exec thread).
+
+Watchdog limits (honest, best-effort — a hard CPU/memory bound needs process
+isolation, deferred because the live ``session``/``item`` contract can't cross
+a process boundary): the watchdog reliably interrupts ordinary infinite loops
+and loops using ``except Exception``, but it CANNOT interrupt (a) a single long
+C-level op (``[0]*(10**9)``, ``sum(range(10**12))``) — async injection only
+fires at bytecode boundaries — or (b) a loop that catches ``BaseException`` /
+bare ``except:`` on every iteration. There is also no memory/allocation cap in
+v1. These are documented residual DoS limitations, not containment breaches of
+OS/filesystem/network/import/interpreter-escape (which hold unconditionally).
 * **Module** (``run_module``): a ``module:function`` reference from the DB.
   This is **NOT** RestrictedPython-sandboxed — imported code runs with full
   privileges. It is contained by a **fail-closed allowlist** of trusted
@@ -29,7 +40,8 @@ determined attacker who can already author a Method row and get it triggered.
 
 from __future__ import annotations
 
-import sys
+import ctypes
+import threading
 import time
 import warnings
 from dataclasses import dataclass
@@ -63,6 +75,65 @@ _RESERVED_SCOPE_KEYS = {
 
 class MethodSandboxViolation(Exception):
     """Raised when Method content violates a sandbox policy (blocks the txn)."""
+
+
+class _MethodTimeout(BaseException):
+    """Internal wall-clock signal injected into the exec thread.
+
+    Subclasses ``BaseException`` (not ``Exception``) on purpose so a script's
+    ``except Exception`` cannot swallow it — only a catch-all ``except:`` /
+    ``except BaseException:`` on every loop iteration can, which is the
+    documented residual limitation.
+    """
+
+
+def _exec_with_deadline(
+    byte_code: Any,
+    glb: Dict[str, Any],
+    local_scope: Dict[str, Any],
+    timeout_s: Optional[float],
+) -> None:
+    """Exec restricted bytecode under a re-injecting wall-clock watchdog.
+
+    A supervising daemon thread injects ``_MethodTimeout`` into the executing
+    thread once the deadline passes and KEEPS re-injecting until exec returns,
+    so a single swallowed raise cannot disarm the watchdog (the failure mode of
+    a one-shot ``sys.settrace`` tracer). Async injection only fires at Python
+    bytecode boundaries, so a single long C-level op (e.g. ``[0]*(10**9)``) or a
+    loop that catches ``BaseException`` every iteration is NOT interruptible —
+    the documented residual limitation. Raises ``_MethodTimeout`` on timeout.
+    """
+    if not timeout_s or timeout_s <= 0:
+        exec(byte_code, glb, local_scope)  # noqa: S102 - restricted bytecode only
+        return
+
+    target_tid = threading.get_ident()
+    stop = threading.Event()
+    deadline = time.monotonic() + timeout_s
+
+    def _watch() -> None:
+        remaining = deadline - time.monotonic()
+        if remaining > 0 and stop.wait(remaining):
+            return  # exec finished before the deadline
+        while not stop.is_set():
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_long(target_tid), ctypes.py_object(_MethodTimeout)
+            )
+            if stop.wait(0.005):
+                break
+
+    watcher = threading.Thread(target=_watch, daemon=True)
+    watcher.start()
+    try:
+        exec(byte_code, glb, local_scope)  # noqa: S102 - restricted bytecode only
+    finally:
+        # Stop the watcher, then clear any async exception it may have queued
+        # but that has not yet been raised, so it cannot leak into caller code.
+        stop.set()
+        watcher.join(timeout=1.0)
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_long(target_tid), ctypes.c_long(0)
+        )
 
 
 @dataclass
@@ -224,25 +295,21 @@ def run_script(
 
     glb = _safe_globals(scope)
     local_scope: Dict[str, Any] = {}
-    deadline = time.monotonic() + timeout_s if timeout_s and timeout_s > 0 else None
 
-    def _tracer(frame, event, arg):  # pragma: no cover - exercised via timeout test
-        if deadline is not None and time.monotonic() > deadline:
-            raise MethodSandboxViolation(
-                f"Method script exceeded time budget ({timeout_s}s)"
-            )
-        frame.f_trace_opcodes = True
-        return _tracer
-
-    prev_trace = sys.gettrace()
-    if deadline is not None:
-        sys.settrace(_tracer)
     try:
-        exec(byte_code, glb, local_scope)  # noqa: S102 - restricted bytecode only
-    except MethodSandboxViolation:
+        _exec_with_deadline(byte_code, glb, local_scope, timeout_s)
+    except _MethodTimeout:
         _emit_audit(
             session, audit, "violation",
             (time.monotonic() - started) * 1000.0, {"reason": "timeout"},
+        )
+        raise MethodSandboxViolation(
+            f"Method script exceeded time budget ({timeout_s}s)"
+        ) from None
+    except MethodSandboxViolation:
+        _emit_audit(
+            session, audit, "violation",
+            (time.monotonic() - started) * 1000.0, {"reason": "policy"},
         )
         raise
     except Exception as exc:
@@ -254,9 +321,6 @@ def run_script(
         raise MethodSandboxViolation(
             f"Method script raised {type(exc).__name__}: {exc}"
         ) from exc
-    finally:
-        if deadline is not None:
-            sys.settrace(prev_trace)
 
     _emit_audit(
         session, audit, "success", (time.monotonic() - started) * 1000.0,
