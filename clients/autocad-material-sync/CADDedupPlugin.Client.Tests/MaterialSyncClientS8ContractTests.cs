@@ -199,8 +199,13 @@ namespace CADDedupPlugin.Client.Tests
             var project = File.ReadAllText(projectPath);
             var doc = XDocument.Load(projectPath);
             XNamespace ns = "http://schemas.microsoft.com/developer/msbuild/2003";
+            var references = doc.Descendants(ns + "Reference")
+                .Select(e => (string)e.Attribute("Include"))
+                .ToList();
 
             Assert.DoesNotContain(@"..\..\cad-desktop-helper\Shared\Yuantus.Cad.Shared.csproj", project);
+            Assert.Contains("System.Net.Http", references);
+            Assert.Contains("System.Security", references);
             var sharedCompile = doc.Descendants(ns + "Compile")
                 .Single(e => (string)e.Attribute("Include") == @"..\..\cad-desktop-helper\Shared\**\*.cs");
             var excludes = ((string)sharedCompile.Attribute("Exclude") ?? string.Empty).Split(';');

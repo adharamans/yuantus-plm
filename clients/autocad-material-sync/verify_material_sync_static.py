@@ -213,6 +213,13 @@ def check_s8_helper_bridge_contract() -> None:
         r"..\..\cad-desktop-helper\Shared\Yuantus.Cad.Shared.csproj" not in project,
         "CADDedupPlugin should source-link Shared instead of ProjectReference",
     )
+    references = {
+        elem.attrib.get("Include")
+        for elem in project_xml.iter()
+        if elem.tag.split("}")[-1] == "Reference"
+    }
+    for reference in ("System.Net.Http", "System.Security"):
+        require(reference in references, f"CADDedupPlugin should keep source-linked Shared dependency {reference}")
     compile_items = [elem for elem in project_xml.iter() if elem.tag.split("}")[-1] == "Compile"]
     shared_links = [
         elem for elem in compile_items
