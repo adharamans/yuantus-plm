@@ -1236,6 +1236,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/PHASE4_SEARCH_REPORTS_ECO_STATE_TREND_TODO_20260507.md: `docs/PHASE4_SEARCH_REPORTS_ECO_STATE_TREND_TODO_20260507.md`
 - docs/PHASE4_SEARCH_REPORTS_SUMMARY_TODO_20260507.md: `docs/PHASE4_SEARCH_REPORTS_SUMMARY_TODO_20260507.md`
 - docs/PLAN_ODOO18_PLM_PARALLEL_EXECUTION.md: `docs/PLAN_ODOO18_PLM_PARALLEL_EXECUTION.md`
+- docs/PLM_CAPABILITY_GAP_ANALYSIS_20260702.md: `docs/PLM_CAPABILITY_GAP_ANALYSIS_20260702.md`
 - docs/TODO_CAD_MATERIAL_SYNC_PLUGIN_20260506.md: `docs/TODO_CAD_MATERIAL_SYNC_PLUGIN_20260506.md`
 - docs/VERIFICATION_ODOO18_PLM_PARALLEL_EXECUTION.md: `docs/VERIFICATION_ODOO18_PLM_PARALLEL_EXECUTION.md`
 - docs/development/aml-metadata-doc-index-20260411.md: `docs/development/aml-metadata-doc-index-20260411.md`
@@ -1245,6 +1246,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/backlog-lines-2-3-4-scoping-taskbook-20260627.md: `docs/development/backlog-lines-2-3-4-scoping-taskbook-20260627.md`
 - docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md: `docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md`
 - docs/development/lifecycle-transition-history-taskbook-20260619.md: `docs/development/lifecycle-transition-history-taskbook-20260619.md`
+- docs/development/p0-8a-method-sandbox-taskbook-20260702.md: `docs/development/p0-8a-method-sandbox-taskbook-20260702.md`
 - docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md: `docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md`
 - docs/development/plm-collab-date-obsolete-revert-design-20260701.md: `docs/development/plm-collab-date-obsolete-revert-design-20260701.md`
 - docs/development/plm-collab-followplan-deep-audit-and-verification-20260701.md: `docs/development/plm-collab-followplan-deep-audit-and-verification-20260701.md`
@@ -1273,6 +1275,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/plm-collaboration-phase7-writeback-contract-draft-20260627.md: `docs/development/plm-collaboration-phase7-writeback-contract-draft-20260627.md`
 - docs/development/plm-collaboration-phase7-writeback-governed-seam-design-20260627.md: `docs/development/plm-collaboration-phase7-writeback-governed-seam-design-20260627.md`
 - docs/development/plm-collaboration-upgrade-development-todo-20260618.md: `docs/development/plm-collaboration-upgrade-development-todo-20260618.md`
+- docs/development/plm-p0-capability-line-living-tracker.md: `docs/development/plm-p0-capability-line-living-tracker.md`
 ## Optional
 
 - Release Announcement: `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260203.md` (latest), `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260202.md`, `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260201.md`, `docs/RELEASE_ANNOUNCEMENT_v0.1.3.md`
