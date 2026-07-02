@@ -205,7 +205,10 @@ def test_phase4_route_count_is_pinned_after_search_reports_closeout() -> None:
     #    GET /api/v1/transition-history/forensic/export).
     # - 732 -> 733: + 1 Phase-7 BOM write-back audit readout
     #   (GET /api/v1/bom/multitable/writeback-audit).
-    assert len(app.routes) == 733
+    # - 733 -> 735: + 2 CAD-PDM date-obsolete DP1 revert routes
+    #   (POST /api/v1/cadpdm/date-obsolete-impacts/revert-batch;
+    #    POST /api/v1/cadpdm/date-obsolete-impacts/{impact_id}/revert).
+    assert len(app.routes) == 735
 
 
 def test_search_indexer_status_schema_is_phase4_final_contract() -> None:

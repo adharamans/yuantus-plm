@@ -30,7 +30,7 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
     if _TABLE not in set(inspector.get_table_names()):
         op.create_table(
-            _TABLE,
+            "meta_date_obsolete_impact_corrections",
             sa.Column("id", sa.String(), nullable=False),
             sa.Column("impact_id", sa.String(), nullable=False),
             sa.Column("action", sa.String(length=30), nullable=False),

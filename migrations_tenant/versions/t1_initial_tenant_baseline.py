@@ -664,6 +664,19 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['category_id'], ['meta_approval_categories.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('meta_date_obsolete_impact_corrections',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('impact_id', sa.String(), nullable=False),
+    sa.Column('action', sa.String(length=30), nullable=False),
+    sa.Column('prior_state', sa.String(length=30), nullable=False),
+    sa.Column('prior_acknowledged_at', sa.DateTime(), nullable=True),
+    sa.Column('prior_acknowledged_by_id', sa.Integer(), nullable=True),
+    sa.Column('reason', sa.String(length=400), nullable=True),
+    sa.Column('reverted_by_id', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['impact_id'], ['meta_date_obsolete_impacts.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('meta_extensions',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('app_id', sa.String(), nullable=False),
@@ -1989,6 +2002,8 @@ def upgrade() -> None:
     op.create_index(op.f('ix_meta_approval_requests_category_id'), 'meta_approval_requests', ['category_id'], unique=False)
     op.create_index(op.f('ix_meta_approval_requests_entity_id'), 'meta_approval_requests', ['entity_id'], unique=False)
     op.create_index(op.f('ix_meta_approval_requests_entity_type'), 'meta_approval_requests', ['entity_type'], unique=False)
+    op.create_index(op.f('ix_meta_date_obsolete_impact_corrections_created_at'), 'meta_date_obsolete_impact_corrections', ['created_at'], unique=False)
+    op.create_index(op.f('ix_meta_date_obsolete_impact_corrections_impact_id'), 'meta_date_obsolete_impact_corrections', ['impact_id'], unique=False)
     op.create_index(op.f('ix_meta_files_checksum'), 'meta_files', ['checksum'], unique=False)
     op.create_index(op.f('ix_meta_files_file_type'), 'meta_files', ['file_type'], unique=False)
     op.create_index(op.f('ix_meta_maintenance_equipment_category_id'), 'meta_maintenance_equipment', ['category_id'], unique=False)
@@ -2194,6 +2209,8 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_meta_maintenance_equipment_category_id'), table_name='meta_maintenance_equipment')
     op.drop_index(op.f('ix_meta_files_file_type'), table_name='meta_files')
     op.drop_index(op.f('ix_meta_files_checksum'), table_name='meta_files')
+    op.drop_index(op.f('ix_meta_date_obsolete_impact_corrections_impact_id'), table_name='meta_date_obsolete_impact_corrections')
+    op.drop_index(op.f('ix_meta_date_obsolete_impact_corrections_created_at'), table_name='meta_date_obsolete_impact_corrections')
     op.drop_index(op.f('ix_meta_approval_requests_entity_type'), table_name='meta_approval_requests')
     op.drop_index(op.f('ix_meta_approval_requests_entity_id'), table_name='meta_approval_requests')
     op.drop_index(op.f('ix_meta_approval_requests_category_id'), table_name='meta_approval_requests')
@@ -2342,6 +2359,7 @@ def downgrade() -> None:
     op.drop_table('meta_form_fields')
     op.drop_table('meta_files')
     op.drop_table('meta_extensions')
+    op.drop_table('meta_date_obsolete_impact_corrections')
     op.drop_table('meta_approval_requests')
     op.drop_table('meta_app_licenses')
     op.drop_table('meta_access')

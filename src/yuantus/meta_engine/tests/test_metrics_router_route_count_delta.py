@@ -71,7 +71,10 @@ from yuantus.api.app import create_app
 #    GET /api/v1/transition-history/forensic/export) -- superuser-gated ops surfaces.
 # 733 = 732 + 1 Phase-7 BOM write-back audit readout
 #   (GET /api/v1/bom/multitable/writeback-audit) -- superuser-gated ops readout.
-EXPECTED_TOTAL_ROUTES = 733
+# 735 = 733 + 2 CAD-PDM date-obsolete DP1 revert routes
+#   (POST /api/v1/cadpdm/date-obsolete-impacts/revert-batch;
+#    POST /api/v1/cadpdm/date-obsolete-impacts/{impact_id}/revert) -- admin-gated table-local correction.
+EXPECTED_TOTAL_ROUTES = 735
 
 
 def test_metrics_router_keeps_post_p4_route_count_at_expected_count() -> None:
