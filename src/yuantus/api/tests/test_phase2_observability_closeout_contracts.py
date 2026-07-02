@@ -167,6 +167,8 @@ def test_middleware_chain_order_is_pinned() -> None:
     surfaces in PR review. The order is correctness-load-bearing:
     AuthEnforcementMiddleware must run before TenantOrgContextMiddleware
     (so authenticated tenant/org claims preempt header-based fallbacks),
+    InboundRateLimitMiddleware runs after auth so protected requests can use
+    the verified tenant identity instead of trusting the header alone,
     and AuditLogMiddleware must be innermost (so it sees the final status
     code AND has identity context populated by upstream middleware)."""
     app = create_app()
@@ -174,6 +176,7 @@ def test_middleware_chain_order_is_pinned() -> None:
     assert classes == [
         "RequestLoggingMiddleware",
         "AuthEnforcementMiddleware",
+        "InboundRateLimitMiddleware",
         "TenantOrgContextMiddleware",
         "AuditLogMiddleware",
     ], f"middleware chain must be pinned; got {classes}"

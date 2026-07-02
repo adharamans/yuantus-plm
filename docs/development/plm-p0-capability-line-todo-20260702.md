@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-02 · **Basis:** `docs/PLM_CAPABILITY_GAP_ANALYSIS_20260702.md` + claim board
 `plm-p0-capability-line-living-tracker.md`. **Owner opened (2026-07-02):** ① notification, ⑧a Method
-sandbox (**priority**), ⑧b rate limiting; ECO-route Phase 0 on the integration line. Everything else
+sandbox (**priority**), ⑧b rate limiting; ECO-route Phase 0 on the integration line. ⑧a/⑧b are now
+closed as separate security-debt slices. Everything else
 stays gated (per-item opt-in). This TODO plans the **order** and the **parallel lanes**; it does not
 widen scope.
 
@@ -46,15 +47,17 @@ LANE A (security debt)      LANE B (notification)        LANE C (change-route)
 - [x] TODO.md (this file)
 - [x] ⑧a Method sandbox — **implemented** (`sandbox.py` + 4-surface cutover + RPC gate + 4 settings
       + audit/metric); tests + CI wiring; design & verification MD.
-- [ ] ⑧b rate limiting — next lane-A PR (taskbook-light: owner already scoped per-tenant token bucket).
+- [x] ⑧b rate limiting — implemented as a default-off process-local token bucket with verified-tenant/IP keying, exempt paths, settings, tests, CI wiring, and design & verification MD.
 - [ ] ① notification — **taskbook first** (persistent NotificationOutbox/Delivery + worker; the
       after-commit in-memory EventBus is trigger-only).
 - [ ] ECO Phase 0 — **taskbook first** (discriminated-409 shape + line.state/eco_id + feature_key/SKU
       in one pass; does NOT wire EcoPermissionAdapter).
 
-## Deliverables for ⑧a (this PR)
+## Deliverables for ⑧a / ⑧b
 
 1. `docs/development/p0-8a-method-sandbox-taskbook-20260702.md` — scope-lock (already in PR #943).
-2. Implementation (this branch `feat/p0-8a-method-sandbox`).
+2. ⑧a implementation (`feat/p0-8a-method-sandbox`).
 3. `docs/development/p0-8a-method-sandbox-design-and-verification-20260702.md` — design + real
    pytest evidence + adversarial escape-hunt results.
+4. ⑧b implementation (`codex/p0-8b-rate-limit`).
+5. `docs/development/p0-8b-inbound-rate-limit-design-and-verification-20260702.md` — default-off rate-limit design + local verification evidence.

@@ -152,6 +152,10 @@ jobs:
                 run_contracts="true"
                 reason_contracts="${reason_contracts:-matched method sandbox (P0-8a): ${f}}"
                 ;;
+              src/yuantus/api/app.py|src/yuantus/api/middleware/rate_limit.py|src/yuantus/api/tests/test_phase2_observability_closeout_contracts.py|src/yuantus/api/tests/test_rate_limit_middleware.py|src/yuantus/config/settings.py)
+                run_contracts="true"
+                reason_contracts="${reason_contracts:-matched inbound rate limiting (P0-8b): ${f}}"
+                ;;
               src/yuantus/meta_engine/tests/test_plugin_pack_and_go.py|src/yuantus/meta_engine/tests/test_plugin_pack_and_go_stale_dryrun.py|src/yuantus/meta_engine/tests/test_plugin_pack_and_go_version_lock_wiring.py|src/yuantus/meta_engine/tests/test_pack_and_go_db_resolver_contract.py|src/yuantus/meta_engine/tests/test_pack_and_go_version_lock_contract.py|src/yuantus/meta_engine/tests/test_plugin_bom_compare.py|src/yuantus/meta_engine/tests/test_plugin_cad_material_sync.py|src/yuantus/meta_engine/tests/test_plugin_cad_material_assistant.py|src/yuantus/meta_engine/tests/test_cad_material_similarity_service.py)
                 run_plugin_tests="true"
                 reason_plugin_tests="${reason_plugin_tests:-matched plugin-tests suite file: ${f}}"
@@ -271,6 +275,7 @@ jobs:
         run: |
           pytest -q \
             src/yuantus/api/tests/test_plm_workspace_router.py \
+            src/yuantus/api/tests/test_rate_limit_middleware.py \
             src/yuantus/meta_engine/tests/test_a3_workstation_checkout_context.py \
             src/yuantus/meta_engine/tests/test_access_guard_taxonomy_closeout_contracts.py \
             src/yuantus/meta_engine/tests/test_admin_auth_guard_contracts.py \

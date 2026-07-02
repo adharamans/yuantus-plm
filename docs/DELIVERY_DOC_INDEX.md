@@ -1248,6 +1248,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/lifecycle-transition-history-taskbook-20260619.md: `docs/development/lifecycle-transition-history-taskbook-20260619.md`
 - docs/development/p0-8a-method-sandbox-design-and-verification-20260702.md: `docs/development/p0-8a-method-sandbox-design-and-verification-20260702.md`
 - docs/development/p0-8a-method-sandbox-taskbook-20260702.md: `docs/development/p0-8a-method-sandbox-taskbook-20260702.md`
+- docs/development/p0-8b-inbound-rate-limit-design-and-verification-20260702.md: `docs/development/p0-8b-inbound-rate-limit-design-and-verification-20260702.md`
 - docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md: `docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md`
 - docs/development/plm-collab-date-obsolete-revert-design-20260701.md: `docs/development/plm-collab-date-obsolete-revert-design-20260701.md`
 - docs/development/plm-collab-followplan-deep-audit-and-verification-20260701.md: `docs/development/plm-collab-followplan-deep-audit-and-verification-20260701.md`
