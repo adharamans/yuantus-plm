@@ -69,6 +69,16 @@ These are DoS-shaped and consistent with the threat model: a script already hold
 (DB-wide power), so the sandbox contains OS/filesystem/network/import access and interpreter escapes
 — which hold unconditionally — not a determined attacker's resource use.
 
+The watchdog targets **sync / threadpool** call paths (the Method hook fires inside `add_op`/
+`update_op` and the RPC dispatch, both run synchronously under Starlette's threadpool); it is not
+intended to run on the asyncio event-loop thread, where injecting an async exception into the loop
+would be inappropriate.
+
+One deliberate semantic change: `run_script` wraps **every** script-raised error as a
+`MethodSandboxViolation` (the original exception is preserved via `__cause__`), whereas the old RPC
+path re-raised the original type. This makes "any Method failure blocks the transaction as a sandbox
+violation" uniform across both seams; callers that need the original type read `__cause__`.
+
 ## 4. Adversarial escape hunt (6-lens red-team against the real adapter)
 
 A multi-agent hunt attacked the finished adapter through six independent lenses, running real inputs
