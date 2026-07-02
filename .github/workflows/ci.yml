@@ -148,6 +148,10 @@ jobs:
                 run_contracts="true"
                 reason_contracts="${reason_contracts:-matched entitlement core (PLM-COLLAB-P1-A/B/C/D, P2-A/B/C/D, P2.5, P3-A, P3-D1, V1.2 parent host): ${f}}"
                 ;;
+              src/yuantus/meta_engine/business_logic/sandbox.py|src/yuantus/meta_engine/business_logic/executor.py|src/yuantus/meta_engine/services/method_service.py|src/yuantus/meta_engine/tests/test_method_sandbox.py)
+                run_contracts="true"
+                reason_contracts="${reason_contracts:-matched method sandbox (P0-8a): ${f}}"
+                ;;
               src/yuantus/meta_engine/tests/test_plugin_pack_and_go.py|src/yuantus/meta_engine/tests/test_plugin_pack_and_go_stale_dryrun.py|src/yuantus/meta_engine/tests/test_plugin_pack_and_go_version_lock_wiring.py|src/yuantus/meta_engine/tests/test_pack_and_go_db_resolver_contract.py|src/yuantus/meta_engine/tests/test_pack_and_go_version_lock_contract.py|src/yuantus/meta_engine/tests/test_plugin_bom_compare.py|src/yuantus/meta_engine/tests/test_plugin_cad_material_sync.py|src/yuantus/meta_engine/tests/test_plugin_cad_material_assistant.py|src/yuantus/meta_engine/tests/test_cad_material_similarity_service.py)
                 run_plugin_tests="true"
                 reason_plugin_tests="${reason_plugin_tests:-matched plugin-tests suite file: ${f}}"
@@ -507,6 +511,7 @@ jobs:
             src/yuantus/meta_engine/tests/test_maintenance_router_exception_chaining.py \
             src/yuantus/meta_engine/tests/test_maintenance_schedule_router_contracts.py \
             src/yuantus/meta_engine/tests/test_manufacturing_admin_guard_contracts.py \
+            src/yuantus/meta_engine/tests/test_method_sandbox.py \
             src/yuantus/meta_engine/tests/test_migration_table_coverage_contracts.py \
             src/yuantus/meta_engine/tests/test_next_cycle_post_exception_chaining_status_contracts.py \
             src/yuantus/meta_engine/tests/test_next_cycle_post_p6_plan_gate_contracts.py \

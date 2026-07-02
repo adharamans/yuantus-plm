@@ -452,6 +452,39 @@ class Settings(BaseSettings):
         ),
     )
 
+    # P0-8a — server-side Method sandbox. Scripts run under RestrictedPython
+    # with these bounds; module hooks are gated by a fail-closed allowlist.
+    METHOD_SCRIPT_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        description=(
+            "Wall-clock budget for a sandboxed Method script (opcode-level "
+            "watchdog). Pure-Python loops are interrupted; a C-level tight "
+            "loop inside an allowed builtin is the documented v1 limitation. "
+            "0 disables the watchdog."
+        ),
+    )
+    METHOD_SCRIPT_MAX_BYTES: int = Field(
+        default=100_000,
+        description="Max UTF-8 size of a Method script; larger is refused before compile. 0 disables the cap.",
+    )
+    METHOD_MODULE_ALLOWLIST: str = Field(
+        default="",
+        description=(
+            "Comma-separated module-path prefixes allowed for PYTHON_MODULE "
+            "Methods (matched as exact or dotted-prefix). Empty (default) = "
+            "ALL module execution refused (fail-closed). Module hooks are NOT "
+            "RestrictedPython-sandboxed; this allowlist is their only containment."
+        ),
+    )
+    METHOD_RPC_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Allow the Method.run RPC to execute server-side Methods. Default "
+            "False (fail-closed); when true the caller still needs an "
+            "admin/superuser role. env: YUANTUS_METHOD_RPC_ENABLED."
+        ),
+    )
+
     AUDIT_ENABLED: bool = Field(default=False, description="Audit log middleware")
     AUDIT_RETENTION_DAYS: int = Field(
         default=0, description="Prune audit logs older than N days (0=disabled)"

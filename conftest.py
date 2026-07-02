@@ -75,6 +75,7 @@ _ALLOWLIST_NO_DB = {
     "src/yuantus/meta_engine/tests/test_search_released_only_filter.py",
     "src/yuantus/meta_engine/tests/test_seat_projection.py",
     "src/yuantus/meta_engine/tests/test_license_status.py",
+    "src/yuantus/meta_engine/tests/test_method_sandbox.py",
 }
 
 _DB_DEPENDENT_PATHS = (

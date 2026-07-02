@@ -258,10 +258,22 @@ class AMLEngine:
         if not method_name:
             raise ValueError("Missing 'name'")
 
-        # Security: Who can run methods via RPC?
-        # Ideally check permission on the Method item itself.
-        # For now, admin only or explicit allowed list?
-        # Assuming MethodExecutor handles basic safety or trust.
+        # P0-8a D4: RPC Method execution is fail-closed. It is refused unless
+        # explicitly enabled AND the caller holds an admin/superuser role.
+        # (This does NOT fix the RPC-wide forged-admin default in rpc_router;
+        # that is a separately-gated adjacent slice. With this flag off by
+        # default, Method execution stays closed even while that stands.)
+        from yuantus.config.settings import get_settings
+
+        if not get_settings().METHOD_RPC_ENABLED:
+            raise PermissionError(
+                "RPC Method execution is disabled (set YUANTUS_METHOD_RPC_ENABLED=true)"
+            )
+        caller_roles = {str(r).lower() for r in (self.roles or [])}
+        if not ({"admin", "superuser"} & caller_roles):
+            raise PermissionError(
+                "RPC Method execution requires an admin/superuser role"
+            )
 
         # Inject current session/user into context
         from yuantus.meta_engine.services.method_service import MethodService

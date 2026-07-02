@@ -13,6 +13,7 @@ dependencies = [
   "httpx>=0.27.0",
   "jsonschema>=4.20.0",
   "pydantic-settings>=2.6.0",
+  "RestrictedPython>=7.0",
   "python-multipart>=0.0.9",
   "requests>=2.31.0",
   "sqlalchemy>=2.0.0",

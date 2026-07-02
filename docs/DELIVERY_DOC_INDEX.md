@@ -1246,6 +1246,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/backlog-lines-2-3-4-scoping-taskbook-20260627.md: `docs/development/backlog-lines-2-3-4-scoping-taskbook-20260627.md`
 - docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md: `docs/development/lifecycle-transition-history-all-attempts-taskbook-20260622.md`
 - docs/development/lifecycle-transition-history-taskbook-20260619.md: `docs/development/lifecycle-transition-history-taskbook-20260619.md`
+- docs/development/p0-8a-method-sandbox-design-and-verification-20260702.md: `docs/development/p0-8a-method-sandbox-design-and-verification-20260702.md`
 - docs/development/p0-8a-method-sandbox-taskbook-20260702.md: `docs/development/p0-8a-method-sandbox-taskbook-20260702.md`
 - docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md: `docs/development/plm-collab-broker-unblock-slice0-closeout-20260628.md`
 - docs/development/plm-collab-date-obsolete-revert-design-20260701.md: `docs/development/plm-collab-date-obsolete-revert-design-20260701.md`
@@ -1276,6 +1277,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/plm-collaboration-phase7-writeback-governed-seam-design-20260627.md: `docs/development/plm-collaboration-phase7-writeback-governed-seam-design-20260627.md`
 - docs/development/plm-collaboration-upgrade-development-todo-20260618.md: `docs/development/plm-collaboration-upgrade-development-todo-20260618.md`
 - docs/development/plm-p0-capability-line-living-tracker.md: `docs/development/plm-p0-capability-line-living-tracker.md`
+- docs/development/plm-p0-capability-line-todo-20260702.md: `docs/development/plm-p0-capability-line-todo-20260702.md`
 ## Optional
 
 - Release Announcement: `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260203.md` (latest), `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260202.md`, `docs/RELEASE_ANNOUNCEMENT_v0.1.3_update_20260201.md`, `docs/RELEASE_ANNOUNCEMENT_v0.1.3.md`
