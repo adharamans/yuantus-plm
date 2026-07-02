@@ -181,9 +181,10 @@ introduce a dual-track install location.
   signable `.exe` / `.dll` the installer lays down**, **and** the
   installer `.exe` itself. This is broader than the four top-level ship
   artifacts: the CADDedup bundle's `Contents\` ships first-party
-  `CADDedupPlugin.dll` + `Yuantus.Cad.Shared.dll` (net46/net48 copies —
-  see `clients/autocad-material-sync/CADDedupPlugin/CADDedupPlugin.csproj:148-150`),
-  and a net6.0 self-contained helper/detector lays first-party managed
+  `CADDedupPlugin.dll`; the legacy AutoCAD project source-links the
+  net46-compatible `Yuantus.Cad.Shared` sources, so the bundle no longer
+  carries a standalone `Yuantus.Cad.Shared.dll`. A net6.0 self-contained
+  helper/detector still lays first-party managed
   DLLs (e.g. the `Yuantus.Cad.Shared.dll` net6.0 copy) next to the
   apphost `.exe`. All of these must be signed. The contract is
   expressed as *"sign every first-party signable binary the installer

@@ -559,16 +559,19 @@ rejected with exit code 1.
   Modules`).
 
 **Setup steps:**
-1. Open AutoCAD 2018; ensure `CADDedupPlugin.bundle` is loaded so
-   `Yuantus.Cad.Shared` (net46) is in `acad.exe`'s module list.
+1. Open AutoCAD 2018; ensure `CADDedupPlugin.bundle` is loaded. The
+   legacy plugin source-links the net46-compatible `Yuantus.Cad.Shared`
+   sources, so there is no standalone `Yuantus.Cad.Shared.dll` module in
+   `acad.exe`.
 2. From AutoCAD, run `PLMMATPULL` to spawn the helper so
    `Yuantus.Cad.Shared` (net6.0-windows) is also loaded inside
    `yuantus-cad-helper.exe`.
 
 **Execution steps:**
 1. With both processes running, enumerate modules of `acad.exe` —
-   confirm `Yuantus.Cad.Shared.dll` is present and is the **net46**
-   build.
+   confirm `CADDedupPlugin.dll` is present, and no separate
+   `Yuantus.Cad.Shared.dll` is required for the AutoCAD bundle because
+   Shared is compiled into the plugin DLL.
 2. Enumerate modules of `yuantus-cad-helper.exe` — confirm
    `Yuantus.Cad.Shared.dll` is present and is the **net6.0-windows**
    build (different assembly load path).
@@ -577,12 +580,12 @@ rejected with exit code 1.
    surfaces.
 
 **Expected observable outcome (verbatim from §2.3 row 12):**
-AutoCAD 2018 real host: `Yuantus.Cad.Shared` loaded simultaneously as
-net46 (inside `acad.exe`) and as net6.0 (inside `helper.exe`) without
-runtime conflict.
+AutoCAD 2018 real host: source-linked `Yuantus.Cad.Shared` code runs inside
+`CADDedupPlugin.dll`, while `Yuantus.Cad.Shared.dll` is loaded as net6.0
+inside `helper.exe`, without runtime conflict.
 
 **Evidence artifact:**
-- `12a_acad_modules_shared_net46.txt`.
+- `12a_acad_modules_caddedup_source_link.txt`.
 - `12b_helper_modules_shared_net60_windows.txt`.
 - `12c_no_exceptions_during_coexistence.txt`.
 
