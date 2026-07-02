@@ -4,16 +4,18 @@
 > Do not spawn a new dated snapshot doc per slice (that proliferation — #930/#935/#3442… — is what
 > made "how much is left?" a recurring survey). **Claim a surface in §2 before building it** — one
 > owner/branch per file — so two parallel agents never rebuild the same thing (that is what cost us
-> the #3434 duplicate). Last reconciled against Yuantus `origin/main` `4e00e6e0`.
+> the #3434 duplicate). Last reconciled against Yuantus `origin/main` `a8cbf61f` and
+> MetaSheet2 `main` after `#3469` (`f372cd1f`).
 
 ## 1. Status at a glance
 
 The core feature — governed BOM multi-table **read projection + write-back + embed** — is **shipped
 and live end-to-end**. The provider (Yuantus) side is **assessed complete by the #935 deep-audit —
-still OPEN, pending owner口径-alignment review comments; treat as pending until #935 merges**. The one
-remaining correctness gap is **built and checks-green, but `BEHIND` current metasheet2 main** (#3469 —
-rebase, re-confirm green, then owner-go merge); everything else is a **decision**
-(owner/product/governance) or an **ops/env** task, not engineering.
+still OPEN, pending owner口径-alignment review comments; treat as pending until #935 merges**. The
+consumer `If-Match` same-cell lost-update fix is **shipped on MetaSheet2 main** (`#3469`,
+`f372cd1f`), so the integration line's last correctness gap is closed. Remaining motion is either
+the separately-owned `#934` reason-length P2, a **decision** (owner/product/governance), or an
+**ops/env** task.
 
 ## 2. Surfaces (the claim board)
 
@@ -24,7 +26,7 @@ rebase, re-confirm green, then owner-go merge); everything else is a **decision*
 | Embed-token mint (P3-D1, Ed25519, TTL≤600, jti-audit) | Yuantus | ✅ SHIPPED | — | — |
 | Consumer review UI + workbench write-back relay | MetaSheet2 | ✅ SHIPPED | — | — |
 | Multi-`kid` embed verify | MetaSheet2 | ✅ SHIPPED (#3395) | — | — |
-| **Consumer `If-Match` (same-cell lost-update fix)** | MetaSheet2 | 🟢 **IN-FLIGHT — built, checks green, `BEHIND` main** | `codex/plm-writeback-if-match` (**#3469**) | rebase, re-confirm green, then **merge** (owner go) |
+| **Consumer `If-Match` (same-cell lost-update fix)** | MetaSheet2 | ✅ SHIPPED (#3469, `f372cd1f`) | — | — |
 | Date-obsolete DP1 light-path revert | Yuantus | 🟡 IN-FLIGHT | **#934** (owner-authorized) | fix/accept reason-length P2 (persisted `String(400)`, request model unbounded) + green, then merge |
 | Locked-BOM ECO revision route | Yuantus + ms2 | ⛔ GATED (direction ratified #933: A3/B1/C2) | — | per-phase opt-in: `EcoPermissionAdapter` authz, discriminated-409 contract, ECO SKU (§7) |
 | Date-obsolete DP1-iii (child-lifecycle undo) + broader revert | Yuantus | ⛔ GATED | — | governance semantics |
@@ -54,6 +56,5 @@ The bottleneck is **coordination + merge mechanics + decision latency**, not bui
 
 ## 5. Immediate action
 
-**#3469** → feature correctness-complete. Checks are green **but it is `BEHIND` current main**, so the
-accurate next step is **rebase to current main, re-confirm green, then owner-go merge** (held per the
-metasheet2 owner-merge rule). Then #934 clears its reason-length P2 and lands, and ops takes the §2 env row.
+**#934** → clear the reason-length P2 (persisted `String(400)`, request model unbounded), re-confirm
+green, then merge. Ops can proceed independently on the §2 env row.
