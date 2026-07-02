@@ -1249,6 +1249,7 @@ This index aggregates all delivery‑related documents for private deployments.
 - docs/development/plm-collab-date-obsolete-revert-design-20260701.md: `docs/development/plm-collab-date-obsolete-revert-design-20260701.md`
 - docs/development/plm-collab-integration-dev-verification-closeout-20260629.md: `docs/development/plm-collab-integration-dev-verification-closeout-20260629.md`
 - docs/development/plm-collab-integration-development-plan-and-todo-20260629.md: `docs/development/plm-collab-integration-development-plan-and-todo-20260629.md`
+- docs/development/plm-collab-integration-line-living-tracker.md: `docs/development/plm-collab-integration-line-living-tracker.md`
 - docs/development/plm-collab-line-dev-and-verification-20260630.md: `docs/development/plm-collab-line-dev-and-verification-20260630.md`
 - docs/development/plm-collab-line-dev-verification-20260625.md: `docs/development/plm-collab-line-dev-verification-20260625.md`
 - docs/development/plm-collab-line-remaining-development-plan-20260625.md: `docs/development/plm-collab-line-remaining-development-plan-20260625.md`
