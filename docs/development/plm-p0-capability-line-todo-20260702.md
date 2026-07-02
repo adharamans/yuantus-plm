@@ -48,8 +48,9 @@ LANE A (security debt)      LANE B (notification)        LANE C (change-route)
 - [x] ⑧a Method sandbox — **implemented** (`sandbox.py` + 4-surface cutover + RPC gate + 4 settings
       + audit/metric); tests + CI wiring; design & verification MD.
 - [x] ⑧b rate limiting — implemented as a default-off process-local token bucket with verified-tenant/IP keying, exempt paths, settings, tests, CI wiring, and design & verification MD.
-- [ ] ① notification — **taskbook first** (persistent NotificationOutbox/Delivery + worker; the
-      after-commit in-memory EventBus is trigger-only).
+- [x] ① notification taskbook — scope-lock for persistent NotificationOutbox/Delivery + worker; the
+      after-commit in-memory EventBus is trigger-only.
+- [ ] ① notification implementation — build the durable outbox/delivery/worker reliability cut.
 - [ ] ECO Phase 0 — **taskbook first** (discriminated-409 shape + line.state/eco_id + feature_key/SKU
       in one pass; does NOT wire EcoPermissionAdapter).
 
@@ -61,3 +62,4 @@ LANE A (security debt)      LANE B (notification)        LANE C (change-route)
    pytest evidence + adversarial escape-hunt results.
 4. ⑧b implementation (`codex/p0-8b-rate-limit`).
 5. `docs/development/p0-8b-inbound-rate-limit-design-and-verification-20260702.md` — default-off rate-limit design + local verification evidence.
+6. `docs/development/p0-1-notification-outbox-taskbook-20260702.md` — scope-lock for the next P0 implementation slice.
