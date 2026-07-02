@@ -10,10 +10,9 @@
 ## 1. Status at a glance
 
 The core feature — governed BOM multi-table **read projection + write-back + embed** — is **shipped
-and live end-to-end**. The provider (Yuantus) side is **assessed complete by the #935 deep-audit —
-still OPEN, pending owner口径-alignment review comments; treat as pending until #935 merges**. The
-consumer `If-Match` same-cell lost-update fix is **shipped on MetaSheet2 main** (`#3469`,
-`f372cd1f`), and the date-obsolete DP1 light path is **shipped on Yuantus main** (`#934`,
+and live end-to-end**. The provider (Yuantus) side is **assessed complete by the #935 deep-audit**,
+final-reconciled after the consumer `If-Match` same-cell lost-update fix shipped on MetaSheet2 main
+(`#3469`, `f372cd1f`) and the date-obsolete DP1 light path shipped on Yuantus main (`#934`,
 `423a59a5`). There is no unowned, buildable-now correctness gap left; remaining motion is a
 **decision** (owner/product/governance) or an **ops/env** task.
 
