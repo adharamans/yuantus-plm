@@ -4,7 +4,7 @@
 > Do not spawn a new dated snapshot doc per slice (that proliferation — #930/#935/#3442… — is what
 > made "how much is left?" a recurring survey). **Claim a surface in §2 before building it** — one
 > owner/branch per file — so two parallel agents never rebuild the same thing (that is what cost us
-> the #3434 duplicate). Last reconciled against Yuantus `origin/main` `423a59a5` and
+> the #3434 duplicate). Last reconciled against Yuantus `origin/main` `8959d844` (2026-07-02) and
 > MetaSheet2 `main` after `#3469` (`f372cd1f`).
 
 ## 1. Status at a glance
@@ -27,7 +27,7 @@ final-reconciled after the consumer `If-Match` same-cell lost-update fix shipped
 | Multi-`kid` embed verify | MetaSheet2 | ✅ SHIPPED (#3395) | — | — |
 | **Consumer `If-Match` (same-cell lost-update fix)** | MetaSheet2 | ✅ SHIPPED (#3469, `f372cd1f`) | — | — |
 | Date-obsolete DP1 light-path revert | Yuantus | ✅ SHIPPED (#934, `423a59a5`) | — | — |
-| Locked-BOM ECO revision route | Yuantus + ms2 | ⛔ GATED (direction ratified #933: A3/B1/C2) | — | per-phase opt-in: `EcoPermissionAdapter` authz, discriminated-409 contract, ECO SKU (§7) |
+| Locked-BOM ECO revision route — **Phase 0 (contract-first)** | Yuantus + ms2 | 🔨 OPEN (Phase 0 opted in by owner 2026-07-02; direction #933: A3/B1/C2) | claude / `docs/eco-phase0-contract-taskbook` (+ ms2-side pact claim when the interaction is authored) | Phase 0 must lock **in one pass**: the discriminated-409 shape (`lifecycle_locked`/`eco_required` vs `idempotency_conflict`); whether `line.state`/`eco_id` enter the contract; feature_key/SKU (reuse `bom_multitable_writeback` vs a new ECO-scoped key) — the §7 open points. Phase 0 does **NOT** wire `EcoPermissionAdapter` (that is Phase 2, separately gated, repo-wide authz). Phases 1–4 remain per-phase opt-ins. |
 | Date-obsolete DP1-iii (child-lifecycle undo) + broader revert | Yuantus | ⛔ GATED | — | governance semantics |
 | Phase-6 SSO → session → bridge | Yuantus + ms2 | ⛔ DEFERRED | — | owner: is continuous in-iframe UX the next product line? |
 | Commercial ops (issuance CLI / key custody / seats / admin UX) | Yuantus | ⛔ GATED | — | commercial/owner |
@@ -38,10 +38,10 @@ final-reconciled after the consumer `If-Match` same-cell lost-update fix shipped
 
 Each **defer** keeps scope tiny; each **open** unblocks its §2 track for build.
 
-1. **Locked-BOM ECO route** — open now (ratified, so it's the most-ready gated track) or Draft-only for v1?
-2. **Phase-6 SSO/bridge** — is continuous in-iframe the next product line? (default: no → stays deferred)
-3. **Commercial** — which subset for v1? (multi-`kid` rotation already done; rest owner-timed)
-4. **Date-obsolete** — is #934's DP1 light path enough, or open DP1-iii?
+1. **Locked-BOM ECO route** — **ANSWERED 2026-07-02: open now, Phase 0 (contract-first) only**; Phases 1–4 stay per-phase opt-ins (see §2 claim).
+2. **Phase-6 SSO/bridge** — **ANSWERED 2026-07-02: stays deferred** (re-affirmed; revisit when the gap report's P1 enterprise-SSO item opens — reuse `plm-collaboration-phase6-sso-identity-session-spine-design-20260627.md`).
+3. **Commercial** — **ANSWERED 2026-07-02: stays owner-timed** (no subset opened).
+4. **Date-obsolete** — **ANSWERED 2026-07-02: DP1 light path is enough for now; DP1-iii stays gated.**
 
 ## 4. Faster-delivery operating rules
 
@@ -56,4 +56,6 @@ The bottleneck is **coordination + merge mechanics + decision latency**, not bui
 ## 5. Immediate action
 
 No unowned, buildable-now correctness item remains on this line. Ops can proceed independently on
-the §2 env row; product/governance decisions in §3 remain opt-in gates.
+the §2 env row. **Next buildable item (opened 2026-07-02): locked-BOM ECO route Phase 0
+contract-first taskbook** (claimed in §2). The new P0 capability line (notification outbox,
+sandbox 8a/8b, …) is tracked separately in `plm-p0-capability-line-living-tracker.md`.
